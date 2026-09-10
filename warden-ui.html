@@ -1,0 +1,104 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>warden</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#0e1116;--card:#161b22;--line:#232a34;--fg:#e6edf3;--dim:#8b949e;
+      --red:#f85149;--amb:#d29922;--grn:#3fb950;--acc:#58a6ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+     font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;padding:20px}
+h1{font-size:18px;margin:0 0 2px} h2{font-size:13px;color:var(--dim);
+   text-transform:uppercase;letter-spacing:.08em;margin:22px 0 8px;font-weight:600}
+.sub{color:var(--dim);margin-bottom:18px;font-size:12px}
+.mode{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;
+      background:#1f2b1f;color:var(--grn);border:1px solid #2b3f2b}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.v{font-size:22px;margin-top:3px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:var(--dim);font-weight:600;padding:6px 8px;
+   border-bottom:1px solid var(--line);font-size:11px;text-transform:uppercase}
+td{padding:6px 8px;border-bottom:1px solid #1b2029;vertical-align:top}
+tr:last-child td{border-bottom:0}
+.wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px}
+.ip{color:var(--acc)} .num{text-align:right;font-variant-numeric:tabular-nums}
+.det{color:var(--dim);max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{padding:1px 7px;border-radius:99px;font-size:11px;border:1px solid}
+.p-proposed{color:var(--amb);border-color:#4a3a12;background:#241d0c}
+.p-active{color:var(--red);border-color:#4a1f1f;background:#241010}
+.p-failed{color:var(--dim);border-color:var(--line)}
+.ok{color:var(--grn)} .warn{color:var(--amb)} .bad{color:var(--red)}
+.empty{color:var(--dim);padding:14px}
+.note{color:var(--dim);font-size:11.5px;margin-top:6px;line-height:1.6}
+</style>
+<h1>warden</h1>
+<div class="sub">in-house detection · second opinion to CrowdSec ·
+  <span class="mode" id="mode">detect-only</span></div>
+
+<div class="grid" id="tiles"></div>
+
+<h2>Source health — is it actually reading anything?</h2>
+<div class="wrap"><table id="health"></table></div>
+<div class="note">The failure that started this project was a detector that looked
+healthy while reading nothing. If a source shows 0 lines, it is blind — treat that
+as an outage, not as quiet.</div>
+
+<h2>Ban decisions</h2>
+<div class="wrap"><table id="bans"></table></div>
+
+<h2>Top scoring addresses (24h)</h2>
+<div class="wrap"><table id="top"></table></div>
+
+<h2>Recent events</h2>
+<div class="wrap"><table id="recent"></table></div>
+
+<script>
+const el = id => document.getElementById(id);
+const esc = s => String(s??"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const tbl = (id, cols, rows, cell) => {
+  const t = el(id);
+  if (!rows.length) { t.outerHTML = `<table id="${id}"><tr><td class="empty">nothing yet</td></tr></table>`; return; }
+  t.innerHTML = "<tr>" + cols.map(c=>`<th>${c}</th>`).join("") + "</tr>" +
+    rows.map(r=>"<tr>"+cell(r).map(c=>`<td>${c}</td>`).join("")+"</tr>").join("");
+};
+
+fetch("/api").then(r=>r.json()).then(d=>{
+  const active = d.bans.filter(b=>b.state==="active").length;
+  const proposed = d.bans.filter(b=>b.state==="proposed").length;
+  const events24 = d.top.reduce((a,b)=>a+b.n,0);
+  el("tiles").innerHTML = [
+    ["scored events 24h", events24],
+    ["addresses seen", d.top.length],
+    ["bans proposed", proposed],
+    ["bans enforced", active],
+    ["unattributed", d.unattributed[0]?.n ?? 0],
+  ].map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+
+  tbl("health", ["source","last run","lines read","scored"], d.health, r=>[
+    esc(r.source),
+    esc((r.last_run||"").replace("T"," ").slice(0,16)),
+    `<span class="${r.lines>0?"ok":"bad"}">${r.lines||0}</span>`,
+    `<span class="num">${r.scored||0}</span>`]);
+
+  tbl("bans", ["when","ip","score","reasons","state","note"], d.bans, r=>[
+    esc((r.ts||"").replace("T"," ").slice(0,16)),
+    `<span class="ip">${esc(r.ip)}</span>`,
+    `<span class="num">${r.score}</span>`,
+    esc(r.reasons), `<span class="pill p-${esc(r.state)}">${esc(r.state)}</span>`,
+    `<span class="det">${esc(r.note)}</span>`]);
+
+  tbl("top", ["ip","score","events","kinds"], d.top, r=>[
+    `<span class="ip">${esc(r.ip)}</span>`,
+    `<span class="num">${r.score}</span>`, `<span class="num">${r.n}</span>`,
+    `<span class="det">${esc(r.kinds)}</span>`]);
+
+  tbl("recent", ["when","src","ip","kind","detail","pts"], d.recent, r=>[
+    esc((r.ts||"").replace("T"," ").slice(5,16)),
+    esc(r.source), `<span class="ip">${esc(r.ip||"—")}</span>`, esc(r.kind),
+    `<span class="det">${esc(r.detail)}</span>`,
+    `<span class="num">${r.score}</span>`]);
+}).catch(e=>{document.body.insertAdjacentHTML("beforeend",
+  `<p class="bad">failed to load /api: ${esc(e)}</p>`)});
+</script>
