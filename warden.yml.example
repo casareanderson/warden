@@ -1,0 +1,27 @@
+# warden configuration. Copy to warden.yml and edit.
+#
+# enforce: false == DETECT ONLY. warden records what it *would* ban and changes
+# nothing. Flip to true only once the proposed bans have looked correct for a
+# few days -- and read KNOWN-ISSUES.md first, because the enforcement path has
+# caveats. A tool that can lock you out of your own estate does not get to do
+# that unsupervised.
+enforce: false
+
+# Sum of scores, per IP, inside window_minutes, needed to propose a ban.
+# For reference: /etc/passwd probe = 8, vite @fs = 7, sqli = 8, a bare 404 = 1.
+ban_threshold: 12
+window_minutes: 60
+max_bans_per_run: 3
+
+# /24 roll-up: catches an attacker spread thin across a subnet, below the
+# per-IP threshold. Stricter than the per-IP rule on purpose -- a /24 block is
+# a blunt instrument, so it needs a higher total AND several distinct addresses.
+subnet_threshold: 20
+subnet_min_ips: 3
+ban_hours: 24
+
+# Never ban these, on top of the built-in RFC1918 + Cloudflare edge ranges.
+# Put YOUR OWN public IPs here so a bad day never edge-bans you. Examples:
+allow:
+  - 203.0.113.7
+  - 198.51.100.0/24
