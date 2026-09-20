@@ -69,3 +69,14 @@ enforcement path has real caveats spelled out there.
 
 It is a second opinion, not a replacement for CrowdSec or a WAF. It reads what
 they miss.
+
+---
+
+## The write-up
+
+Putting one identity provider in front of a whole self-hosted estate, and the
+zero-cost mistakes that undid most of it — a field report, free if you want it:
+
+**[Security First, Honestly →](https://asareanderson.gumroad.com/l/jlaeoh)** (pay what you want)
+
+More field notes from the same estate: **[dev.to/c1-anderson](https://dev.to/c1-anderson)**
