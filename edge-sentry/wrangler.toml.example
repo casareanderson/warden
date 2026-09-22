@@ -1,0 +1,21 @@
+name = "edge-sentry"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# Routes: only the PROXIED hostnames. A route on a DNS-only record does
+# nothing (the traffic never reaches the edge), and a route on the LAN-only
+# records would do nothing either.
+#
+# ⚠️ Set zone_name, not zone_id, or wrangler will not match the route.
+routes = [
+  { pattern = "auth.example.com/*",   zone_name = "example.com" },
+  { pattern = "photos.example.com/*", zone_name = "example.com" },
+  { pattern = "vpn.example.com/*",  zone_name = "example.com" },
+  { pattern = "app.example.com/*",    zone_name = "example.com" },
+  { pattern = "shop.example.com/*", zone_name = "example.com" },
+  { pattern = "demo.example.com/*",      zone_name = "example.com" },
+]
+
+# Secrets are NOT set here — never commit a webhook URL. Set them with:
+#   wrangler secret put ALERT_WEBHOOK
+#   wrangler secret put SELF_IPS

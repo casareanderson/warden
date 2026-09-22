@@ -1,0 +1,52 @@
+# netscan configuration.
+#
+# netscan NEVER blocks or changes a device — it only records and alerts.
+# There is no enforce flag here because there is no enforcement path.
+
+# Networks to sweep. CT100 has one LAN interface (eth0, 192.168.1.0/24), so
+# that is all it can ARP-scan today.
+#
+# ⚠️ VLAN 10 (the IoT network) is NOT covered, and as of
+# 2026-09-21 that is the RIGHT call — do not "fix" it without re-checking.
+#
+# Measured: 22 IoT-class devices (WiZ, Espressif, Broadlink, Sonos, Nest) are
+# all on 192.168.1.0/24 — the MAIN LAN. The bulk migration to the IoT SSID
+# never happened, so VLAN10 is effectively empty and netscan already covers
+# 100% of where the IoT devices actually live.
+#
+# Covering VLAN10 would need a trunk port on the TL-SG108E, VLAN filtering on
+# vmbr0 (currently 0 on both nodes) and a second NIC on CT100. That risks
+# dropping a Proxmox node off the network, and it would put a management
+# container on BOTH sides of the very boundary the segmentation exists to
+# enforce. Revisit only once devices are actually moved onto VLAN10.
+#
+# An ARP sweep is layer 2: adding a network here without an interface on it
+# returns zero hosts SILENTLY, which is worse than not scanning it.
+networks:
+  - 192.168.1.0/24
+
+# TCP connect scan of discovered hosts. Slower than discovery — this is why
+# the port sweep runs daily and the discovery sweep runs every 15 minutes.
+port_scan: true
+top_ports: 200
+
+# Hosts whose absence from a sweep is worth waking up for. Deliberately short:
+# phones, laptops and the printer come and go, and alerting on that teaches
+# you to ignore the channel. These are infrastructure that should always answer.
+critical:
+  - 192.168.1.120   # CT100 — Hermes, warden, Caddy
+  - 192.168.1.10    # c1-pn2 — Proxmox node
+  - 192.168.1.20    # C1-G4  — Proxmox node
+  - 192.168.1.204   # CT106 — CrowdSec LAPI
+
+alert: true
+
+# Hours from the very first sweep during which a newly-seen device is adopted
+# silently, with no NEW_DEVICE alert.
+#
+# ⚠️ Do not set this to 0. An ARP sweep only sees devices that are awake:
+# measured on this LAN, two sweeps twelve minutes apart returned 48 then 46
+# devices, and six of the "new" ones were WiZ bulbs, a Nest and the TV that had
+# simply been asleep. Without a learning window those become recurring false
+# alarms and the channel stops being worth reading.
+learn_hours: 48

@@ -108,7 +108,6 @@ def net_overlaps_allow(net_str, extra):
             continue
     return False
 
-
 def is_allowlisted(ip, extra):
     try:
         a = ip_address(ip)
@@ -288,7 +287,10 @@ def score_npm(line):
                 detail=f'{d["verb"]} {d["host"]}{d["path"]} -> {d["status"]} ua={d["ua"][:60]}')
 
 def score_authelia(line):
-    if "authentication failed" not in line.lower() and "invalid credentials" not in line.lower():
+    # Authelia v4 writes "Unsuccessful 1FA authentication attempt" (and 2FA variants);
+    # the old phrases never occur, so failures went unscored until 2026-09-16.
+    low = line.lower()
+    if not any(k in low for k in ("unsuccessful", "authentication failed", "invalid credentials")):
         return None
     m = AUTH_FAIL.search(line)
     if not m:
