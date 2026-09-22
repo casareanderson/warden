@@ -46,6 +46,29 @@ def payload():
                     "sum(parsed) scored from runs "
                     "where ts > datetime('now','-24 hours') group by source"),
         "unattributed": q("select count(*) n from events where ip=''"),
+
+        # --- network side (netscan) -------------------------------------
+        # The log side answers "who attacked a service". These answer
+        # "what is actually on the wire", which no log can tell you.
+        "net_alerts": q("select ts,kind,mac,ip,detail from net_alerts "
+                        "order by id desc limit 30"),
+        "net_hosts": q("select mac,ip,hostname,vendor,first_seen,last_seen,"
+                       "approved from net_hosts order by "
+                       "cast(replace(ip,'.','') as integer)"),
+        "net_runs": q("select max(ts) last_run, sum(hosts) hosts from net_runs "
+                      "where ts > datetime('now','-1 hours')"),
+        # Most-exposed hosts: how many ports each one is listening on, and
+        # which. Drift here is the signal — a host that gains a port has
+        # started serving something it was not serving before.
+        "net_ports": q("select h.ip, h.hostname, h.vendor, count(*) n, "
+                       "group_concat(np.port || '/' || coalesce(np.service,'')) ports "
+                       "from net_ports np join net_hosts h on h.mac = np.mac "
+                       "group by h.mac order by n desc limit 20"),
+        "port_count": q("select count(*) n from net_ports"),
+        # Suppressed findings are shown on purpose. A filter you cannot see
+        # is indistinguishable from a detector that is not working.
+        "suppressed": q("select ts,kind,detail,reason from alert_suppressed "
+                        "order by id desc limit 15"),
     }
 
 

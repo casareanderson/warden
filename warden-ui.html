@@ -54,6 +54,29 @@ as an outage, not as quiet.</div>
 <h2>Recent events</h2>
 <div class="wrap"><table id="recent"></table></div>
 
+<h2 id="netsec">Network — what is on the wire</h2>
+<div class="wrap"><table id="netalerts"></table></div>
+<div class="note">netscan is <strong>detect-only and has no enforcement path at
+all</strong>: acting automatically against a LAN device (a laptop, the printer,
+a door sensor) has a far worse blast radius than a late alert. New devices are
+adopted silently during the learning window, because an ARP sweep only sees
+what is awake — two sweeps twelve minutes apart found 48 then 46 devices here.</div>
+
+<h2>Device inventory</h2>
+<div class="wrap"><table id="nethosts"></table></div>
+
+<h2>Most-exposed hosts (listening ports)</h2>
+<div class="wrap"><table id="netports"></table></div>
+<div class="note">A TCP connect scan, not a SYN scan: this runs unprivileged in
+an LXC where raw sockets are not reliable, and a SYN scan that silently falls
+back produces results you cannot trust. Slower, but honest.</div>
+
+<h2>Suppressed findings</h2>
+<div class="wrap"><table id="suppressed"></table></div>
+<div class="note">Shown deliberately. A filter you cannot see is
+indistinguishable from a detector that has stopped working. The common entry
+here is a self-report: CrowdSec flagging our own WAN address.</div>
+
 <script>
 const el = id => document.getElementById(id);
 const esc = s => String(s??"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
@@ -74,6 +97,9 @@ fetch("/api").then(r=>r.json()).then(d=>{
     ["bans proposed", proposed],
     ["bans enforced", active],
     ["unattributed", d.unattributed[0]?.n ?? 0],
+    ["devices on LAN", d.net_hosts.length],
+    ["open ports known", d.port_count[0]?.n ?? 0],
+    ["network alerts", d.net_alerts.length],
   ].map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
 
   tbl("health", ["source","last run","lines read","scored"], d.health, r=>[
@@ -99,6 +125,35 @@ fetch("/api").then(r=>r.json()).then(d=>{
     esc(r.source), `<span class="ip">${esc(r.ip||"—")}</span>`, esc(r.kind),
     `<span class="det">${esc(r.detail)}</span>`,
     `<span class="num">${r.score}</span>`]);
+  const kindCls = k => ({IP_CONFLICT:"bad",CRITICAL_MISSING:"bad",
+    NEW_DEVICE:"warn",NEW_PORT:"warn",IP_CHANGE:"",MAC_MULTI_IP:""}[k] ?? "");
+
+  tbl("netalerts", ["when","kind","ip","mac","detail"], d.net_alerts, r=>[
+    esc((r.ts||"").replace("T"," ").slice(5,16)),
+    `<span class="${kindCls(r.kind)}">${esc(r.kind)}</span>`,
+    `<span class="ip">${esc(r.ip)}</span>`,
+    `<span class="det">${esc(r.mac)}</span>`,
+    `<span class="det">${esc(r.detail)}</span>`]);
+
+  tbl("nethosts", ["ip","hostname","vendor","mac","first seen","last seen"],
+    d.net_hosts, r=>[
+    `<span class="ip">${esc(r.ip)}</span>`,
+    esc(r.hostname||"—"),
+    `<span class="det">${esc(r.vendor||"unknown")}</span>`,
+    `<span class="det">${esc(r.mac)}</span>`,
+    esc((r.first_seen||"").replace("T"," ").slice(0,16)),
+    esc((r.last_seen||"").replace("T"," ").slice(0,16))]);
+
+  tbl("netports", ["ip","hostname","vendor","open","ports"], d.net_ports, r=>[
+    `<span class="ip">${esc(r.ip)}</span>`, esc(r.hostname||"—"),
+    `<span class="det">${esc(r.vendor||"unknown")}</span>`,
+    `<span class="num">${r.n}</span>`,
+    `<span class="det">${esc(r.ports)}</span>`]);
+
+  tbl("suppressed", ["when","kind","detail","why suppressed"], d.suppressed, r=>[
+    esc((r.ts||"").replace("T"," ").slice(5,16)),
+    esc(r.kind), `<span class="det">${esc(r.detail)}</span>`,
+    `<span class="det">${esc(r.reason)}</span>`]);
 }).catch(e=>{document.body.insertAdjacentHTML("beforeend",
   `<p class="bad">failed to load /api: ${esc(e)}</p>`)});
 </script>
