@@ -1,5 +1,7 @@
-# warden configuration. Copy to warden.yml and edit.
-#
+# warden configuration. `warden-setup init` writes this for you; or copy to warden.yml and edit.
+# Every section except the first is optional — a feature with no config simply doesn't run.
+
+# ── detection ───────────────────────────────────────────────────────────────
 # enforce: false == DETECT ONLY. warden records what it *would* ban and changes
 # nothing. Flip to true only once the proposed bans have looked correct for a
 # few days -- and read KNOWN-ISSUES.md first, because the enforcement path has
@@ -21,7 +23,89 @@ subnet_min_ips: 3
 ban_hours: 24
 
 # Never ban these, on top of the built-in RFC1918 + Cloudflare edge ranges.
-# Put YOUR OWN public IPs here so a bad day never edge-bans you. Examples:
+# Put YOUR OWN public IPs here so a bad day never edge-bans you.
 allow:
   - 203.0.113.7
   - 198.51.100.0/24
+
+# ── who you are ─────────────────────────────────────────────────────────────
+estate:
+  name: home
+  domain: example.com             # your public domain (Cloudflare features, edge hosts)
+  lan: [192.168.1.0/24]           # what counts as "inside"
+  timezone: Europe/London         # patch night window is in this zone
+  self_target: ""                 # target id of the box warden runs on, e.g. ct:100 — never patched blind
+
+# ── where the logs are ──────────────────────────────────────────────────────
+# ssh: user@host, or "local". container: read inside that Docker container.
+sources:
+  npm:         {ssh: admin@192.168.1.5, container: npmplus, log: /data/nginx/logs/access.log}
+  authelia:    {ssh: admin@192.168.1.5, container: authelia, log: /config/authelia.log}
+  cloudflared: {ssh: admin@192.168.1.5, container: cloudflared}
+  crowdsec:    {ssh: root@192.168.1.6}            # optional: alerts from a CrowdSec LAPI host
+
+# ── machines (vulnerability scans, patch proposals, integrity, hardening) ──
+# Reached over SSH with a key; nothing is installed on them. See wlib/hosts.py.
+hosts:
+  - {name: pve1, kind: proxmox, ssh: root@192.168.1.2, discover: true, docker_cts: [104], patch: true}
+  - {name: nas,  kind: docker,  ssh: admin@192.168.1.5, firmware: zimaos}
+  - {name: llm,  kind: linux,   ssh: me@192.168.1.7, sudo_secret: LLM_SUDO, patch: true}
+  - {name: this-box, kind: local}
+roles:                              # shown to whoever approves a patch
+  "ct:100": "reverse proxy + this dashboard — a restart drops every LAN page for a minute"
+core: ["ct:100"]                    # restarts of these wait for the night window
+
+patch:
+  night: "02:30"
+  expire_hours: 24                  # an unanswered plan expires; nothing changes
+  snapshot_keep_days: 7
+
+vuln:                               # trivy, checksum-verified; never the 0.69.4–0.69.6 builds
+  trivy: /usr/local/bin/trivy
+  server: http://127.0.0.1:4954     # trivy server mode for Docker image scans
+  token_file: /etc/trivy/token
+
+# ── alerts and approvals ────────────────────────────────────────────────────
+# discord can read ✅/❌ reactions back; webhook/ntfy/none approve in the dashboard (Settings).
+notify:
+  backend: discord                  # discord | webhook | ntfy | none
+  channel: "000000000000000000"
+  owner_id: "000000000000000000"    # the only user whose reactions count
+  token_secret: DISCORD_BOT_TOKEN
+  # webhook_secret: ALERT_WEBHOOK
+  # ntfy_url: https://ntfy.sh/your-topic
+
+# ── secrets: names only, never values ───────────────────────────────────────
+# Looked up in: environment → data/secrets.env (mode 600, `warden-setup secret NAME`) → backend.
+secrets:
+  backend: env                      # env | infisical | command
+  # map: {CF_API_TOKEN: "/Cloudflare:WAF token"}
+
+# ── Cloudflare (optional) ───────────────────────────────────────────────────
+cloudflare:
+  zone_id: ""
+  account_id: ""
+  token_secret: CF_API_TOKEN        # Zone WAF Edit, Zone Settings Read, Analytics Read, DNS Read
+  sso_portal: auth.example.com
+  edge_hosts: [auth, photos]        # hostnames the edge-sentry Worker sits in front of
+  sso_exempt:                       # public names deliberately NOT behind SSO, and why
+    auth.example.com: "is the SSO portal itself"
+
+# ── network IDS and router (optional) ───────────────────────────────────────
+ids:
+  suricata_host: ""                 # root@host, host, or local — reads Suricata's eve.json
+  eve_path: /var/log/suricata/eve.json
+router:
+  ssh: ""                           # read-only SSH to an OpenWrt-style router: DNS log + conntrack
+  key: ""
+
+# ── console, REST API and MCP ───────────────────────────────────────────────
+ui:
+  host: 127.0.0.1                   # put a reverse proxy with auth in front …
+  port: 8792
+  basic_user: ""                    # … or set this + the WARDEN_UI_PASSWORD secret
+api:
+  enabled: true
+  public_url: ""                    # how agents reach warden, e.g. https://warden.example.com
+dashboard:
+  widgets: null                     # null = default; the Customise button saves your own

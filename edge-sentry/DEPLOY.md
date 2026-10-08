@@ -14,7 +14,7 @@ comment in `worker.js` for why blocking belongs in the WAF rules instead.
 ## Prerequisites
 1. A Cloudflare API token with **Account → Workers Scripts:Edit** and
    **Zone → Workers Routes:Edit** on `example.com`.
-2. A Discord **webhook URL** for `#network-admin-alerts`.
+2. A Discord **webhook URL** for your alert channel.
    Note this is a *webhook*, not the bot token used by `notify.py`: a Worker
    runs at the edge and cannot reach anything on the LAN, so it posts directly
    to Discord rather than through the estate's notifier.
@@ -31,7 +31,7 @@ wrangler deploy
 
 ## Verify before trusting it
 ```sh
-# should appear in #network-admin-alerts within a second or two
+# should appear in your alert channel within a second or two
 curl -s -o /dev/null "https://photos.example.com/.env"
 
 # should NOT alert — /.well-known/ is excluded on purpose (ACME + OIDC)
