@@ -167,12 +167,12 @@ def ip_in(v4, ip):
 def pull_dns(con):
     wm = con.execute("select pos from watermarks where source='adguard'").fetchone()
     inode, off = (wm[0].split(":") + ["0"])[:2] if wm else ("", "0")
-    st = subprocess.run(ROUTER() + [f"stat -c %i:%s {QLOG()}"], capture_output=True, text=True, timeout=30).stdout.strip()
+    st = subprocess.run(ROUTER() + [f"stat -c %i:%s {QLOG()}"], capture_output=True, stdin=subprocess.DEVNULL, text=True, timeout=30).stdout.strip()
     if not st:
         raise RuntimeError("AdGuard query log not readable on the router")
     cur, size = st.split(":")
     off = int(off) if cur == inode and int(off) <= int(size) else max(0, int(size) - 2_000_000)   # first run: last ~2 MB
-    data = subprocess.run(ROUTER() + [f"tail -c +{off + 1} {QLOG()} | head -c 30000000"], capture_output=True,
+    data = subprocess.run(ROUTER() + [f"tail -c +{off + 1} {QLOG()} | head -c 30000000"], capture_output=True, stdin=subprocess.DEVNULL,
                           timeout=180).stdout
     cut = data.rfind(b"\n")
     data = data[:cut + 1] if cut >= 0 else b""
@@ -187,7 +187,7 @@ def pull_dns(con):
 
 
 def pull_conntrack():
-    txt = subprocess.run(ROUTER() + ["cat /proc/net/nf_conntrack"], capture_output=True, text=True, timeout=60).stdout
+    txt = subprocess.run(ROUTER() + ["cat /proc/net/nf_conntrack"], capture_output=True, stdin=subprocess.DEVNULL, text=True, timeout=60).stdout
     flows = set()
     lans = lan_nets()
     for l in txt.splitlines():

@@ -4,7 +4,8 @@
 
 Lookup order:
   1. environment variable of that name (spaces/slashes → underscores, upper-cased)
-  2. $WARDEN_DATA/secrets.env  (KEY=value lines, chmod 600; written by warden-setup)
+  2. $WARDEN_DATA/secrets.env  (KEY=value lines, chmod 600; written by warden-setup),
+     then any files listed in `secrets.files` (e.g. an agent's existing .env)
   3. an optional backend from warden.yml `secrets.backend`:
        env        nothing further (default)
        infisical  `infisical secrets get` via the CLI, folder from `secrets.map`
@@ -24,14 +25,17 @@ def _envname(name):
 
 
 def _file():
+    """data/secrets.env, then any extra KEY=value files listed in `secrets.files` (first one wins)."""
     out = {}
-    try:
-        for line in (config.DATA / "secrets.env").read_text().splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                k, v = line.split("=", 1)
-                out[k.strip()] = v.strip().strip("'\"")
-    except OSError:
-        pass
+    paths = [config.DATA / "secrets.env"] + [config.Path(p) for p in (config.get("secrets.files") or [])]
+    for path in paths:
+        try:
+            for line in path.read_text().splitlines():
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, v = line.split("=", 1)
+                    out.setdefault(k.strip().removeprefix("export ").strip(), v.strip().strip("'\""))
+        except OSError:
+            pass
     return out
 
 

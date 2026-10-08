@@ -169,7 +169,7 @@ def from_crowdsec(con, selfset):
     if argv is None:
         return out
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=45)
+        p = subprocess.run(argv, capture_output=True, stdin=subprocess.DEVNULL, text=True, timeout=45)
         if p.returncode != 0:
             return out
         data = json.loads(p.stdout) if p.stdout.strip() not in ("", "null") else []

@@ -14,7 +14,8 @@ from . import config, hosts, secrets
 
 def _ago_h(ts):
     try:
-        return (time.time() - time.mktime(time.strptime(ts[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S"))) / 3600
+        import calendar  # noqa: PLC0415 - stored timestamps are UTC; mktime would read them as local time
+        return (time.time() - calendar.timegm(time.strptime(ts[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S"))) / 3600
     except (TypeError, ValueError):
         return None
 
