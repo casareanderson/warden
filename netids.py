@@ -72,13 +72,13 @@ def db():
 def pull(con):
     wm = con.execute("select pos from watermarks where source='suricata'").fetchone()
     inode, off = (wm[0].split(":") + ["0"])[:2] if wm else ("", "0")
-    st = subprocess.run(SSH() + [f"stat -c %i:%s {EVE()}"], capture_output=True, text=True, timeout=30).stdout.strip()
+    st = subprocess.run(SSH() + [f"stat -c %i:%s {EVE()}"], capture_output=True, stdin=subprocess.DEVNULL, text=True, timeout=30).stdout.strip()
     if not st:
         raise RuntimeError(f"eve.json not readable on {config.get('ids.suricata_host')}")
     cur_inode, size = st.split(":")
     off = int(off) if cur_inode == inode and int(off) <= int(size) else 0       # rotated/truncated → start over
     n = min(int(size) - off, MAX_BYTES)
-    data = subprocess.run(SSH() + [f"tail -c +{off + 1} {EVE()} | head -c {n}"], capture_output=True, timeout=120).stdout
+    data = subprocess.run(SSH() + [f"tail -c +{off + 1} {EVE()} | head -c {n}"], capture_output=True, stdin=subprocess.DEVNULL, timeout=120).stdout
     last_nl = data.rfind(b"\n")
     data = data[:last_nl + 1] if last_nl >= 0 else b""
     con.execute("insert or replace into watermarks(source,pos) values('suricata',?)", (f"{cur_inode}:{off + len(data)}",))
