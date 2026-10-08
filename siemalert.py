@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""siemalert — the one place estate security findings turn into a Discord post.
+"""siemalert — the one place estate security findings turn into an alert post.
 
-Reads the shared warden store and pushes anything new to #network-admin-alerts.
+Reads the shared warden store and pushes anything new to the alert channel
+(wlib.notify: Discord, a webhook, ntfy …).
 Covers three producers:
   - netscan   (net_alerts)  — new device, IP change, IP conflict, new port
   - warden    (bans)        — scored ban proposals from the log side
@@ -17,7 +18,7 @@ own engines are forwarded.
 
 ⚠️ SELF-REPORT SUPPRESSION
 On 2026-09-21 the only local alert in seven days was `http-probing` from the
-owner's own WAN address — an iPhone Immich client 404ing on deleted asset
+owner's own WAN address — a phone photo-backup client 404ing on deleted asset
 thumbnails, eleven requests in four seconds. CrowdSec's own console flags this
 class as "a security engine reported itself". An alerting tool that pages you
 about your own phone is worse than no alerting tool, so anything matching the
@@ -35,15 +36,30 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, "/opt/hermes-agent")
-
 BASE = Path(__file__).resolve().parent
-DB = BASE / "data" / "warden.db"
-SELF_FILE = BASE / "self-ips.txt"
+sys.path.insert(0, str(BASE))
+from wlib import config, notify  # noqa: E402
 
-# #network-admin-alerts in HomeLab-CN1-Lab.
-CHANNEL = os.environ.get("NETADMIN_CHANNEL", "YOUR_CHANNEL_ID")
-CROWDSEC_HOST = os.environ.get("CROWDSEC_HOST", "")
+DB = Path(config.DB)
+SELF_FILE = config.HOME / "self-ips.txt"
+
+
+def crowdsec_argv(cmd):
+    """Where `cscli` runs. warden.yml:
+         sources: {crowdsec: {ssh: root@lapi-host}}              cscli on that host
+         sources: {crowdsec: {ssh: me@nas, container: crowdsec}} cscli inside a container there
+         sources: {crowdsec: {ssh: local}}                       cscli on this box
+       CROWDSEC_HOST env (an address, reached as root) still works. None -> CrowdSec is skipped."""
+    cs = config.get("sources.crowdsec") or {}
+    ssh = cs.get("ssh") or (f"root@{os.environ['CROWDSEC_HOST']}" if os.environ.get("CROWDSEC_HOST") else "")
+    if not ssh:
+        return None
+    if cs.get("container"):
+        cmd = f"docker exec {cs['container']} {cmd}"
+    if ssh == "local":
+        return ["sh", "-c", cmd]
+    return ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=10", ssh, cmd]
 # How far back to ask CrowdSec for LOCAL alerts. Comfortably wider than the
 # timer interval so a slow run or a restart cannot skip a window; the content
 # hash stops the overlap becoming a duplicate post.
@@ -74,7 +90,7 @@ def db():
 def load_self():
     """Addresses that are US. Anything reported against these is suppressed.
 
-    Kept in a file rather than hardcoded because a Virgin Media WAN address is
+    Kept in a file rather than hardcoded because a home WAN address is usually
     dynamic — when it changes, this is the one place that needs editing, and
     a stale entry here causes missed alerts rather than a crash.
     """
@@ -149,12 +165,11 @@ def from_crowdsec(con, selfset):
     are not events that happened here and are not forwarded.
     """
     out = []
+    argv = crowdsec_argv(f"cscli alerts list --since {CROWDSEC_SINCE} -o json")
+    if argv is None:
+        return out
     try:
-        p = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
-             "-o", "ConnectTimeout=10", f"root@{CROWDSEC_HOST}",
-             f"cscli alerts list --since {CROWDSEC_SINCE} -o json"],
-            capture_output=True, text=True, timeout=45)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=45)
         if p.returncode != 0:
             return out
         data = json.loads(p.stdout) if p.stdout.strip() not in ("", "null") else []
@@ -223,12 +238,7 @@ def main():
         con.close()
         return 0
 
-    try:
-        from notify import send_discord
-        ok = send_discord(message, channel_id=CHANNEL)
-    except Exception as e:
-        print(f"siemalert: send failed: {e}", file=sys.stderr)
-        ok = False
+    ok = notify.send(message)
 
     # Only record delivery if it actually delivered. A failed send that marked
     # everything as sent would drop the alert permanently and silently — the

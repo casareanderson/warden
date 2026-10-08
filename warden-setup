@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""warden-setup — get warden running on your estate, and connect your agents to it.
+
+  warden-setup init            interactive first run: estate, alerts, machines, Cloudflare → warden.yml
+  warden-setup check [--hosts] ask the RUNNING system what works (with --hosts: try to reach every machine)
+  warden-setup add-host        add one machine to warden.yml (tests it before saving)
+  warden-setup token <name>    mint an API/MCP token (shown once)
+  warden-setup tokens          list tokens          warden-setup revoke <id>
+  warden-setup connect         print the Hermes / Claude Code / curl snippets for your agents
+  warden-setup units [--install] [--python PATH]
+                               show (or write + enable) the systemd units for the features you use
+  warden-setup secret <NAME>   store a secret in data/secrets.env (prompted, never echoed)
+
+Nothing here bans, blocks or patches. It writes warden.yml (old copy kept as warden.yml.bak),
+data/secrets.env (mode 600) and, with --install, systemd units.
+"""
+import getpass
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wlib import config, hosts, secrets, setup, tokens, units  # noqa: E402
+
+G, R, Y, D, B, X = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[1m", "\033[0m"
+if not sys.stdout.isatty():
+    G = R = Y = D = B = X = ""
+
+
+def ask(q, default="", choices=None):
+    hint = f" [{default}]" if default else ""
+    hint += f" ({'/'.join(choices)})" if choices else ""
+    while True:
+        v = input(f"{q}{hint}: ").strip() or default
+        if not choices or v in choices:
+            return v
+        print(f"  pick one of: {', '.join(choices)}")
+
+
+def yes(q, default=True):
+    return ask(q + " y/n", "y" if default else "n", ["y", "n"]) == "y"
+
+
+def put_secret(name):
+    val = getpass.getpass(f"  value for {name} (hidden, Enter to skip): ").strip()
+    if not val:
+        return False
+    f = config.DATA / "secrets.env"
+    config.DATA.mkdir(parents=True, exist_ok=True)
+    lines = [l for l in (f.read_text().splitlines() if f.exists() else []) if not l.startswith(name + "=")]
+    lines.append(f"{name}={val}")
+    old = os.umask(0o077)
+    try:
+        f.write_text("\n".join(lines) + "\n")
+    finally:
+        os.umask(old)
+    os.chmod(f, 0o600)
+    print(f"  {G}saved{X} to {f} (mode 600)")
+    return True
+
+
+def host_wizard():
+    print(f"\n{B}Add a machine{X}  {D}warden reaches machines over SSH with a key (nothing is installed on them){X}")
+    kind = ask("  kind", "linux", list(hosts.KINDS))
+    h = {"kind": kind}
+    if kind != "local":
+        h["ssh"] = ask("  ssh target (user@address)", "root@" if kind == "proxmox" else "")
+    h["name"] = ask("  short name", h.get("ssh", "this-box").split("@")[-1] if kind != "local" else "this-box")
+    if kind == "proxmox":
+        h["discover"] = yes("  scan every running LXC container on it?")
+        cts = ask("  LXC ids that run Docker (comma list, blank for none)", "")
+        if cts.strip():
+            h["docker_cts"] = [int(x) for x in cts.replace(" ", "").split(",") if x.isdigit()]
+    if kind in ("linux", "local") and yes("  does it run Docker?", False):
+        h["docker"] = True
+    if kind in ("proxmox", "linux", "local"):
+        h["patch"] = yes("  may warden PROPOSE patches for it? (each plan still needs your approval)", False)
+        if h["patch"] and kind == "linux" and not h.get("ssh", "").startswith("root@"):
+            if yes("  does sudo need a password there?", False):
+                h["sudo_secret"] = ask("  secret name for that password", f"SUDO_{h['name'].upper().replace('-', '_')}")
+                put_secret(h["sudo_secret"])
+    t = next((t for t in _targets_for(h) if t["kind"] in ("node", "host", "local", "images")), None)
+    if t:
+        ok, err = hosts.check(t)
+        print(f"  reach test: {G + 'ok' + X if ok else R + 'FAILED ' + X + err}")
+        if not ok and not yes("  save it anyway?", False):
+            return None
+    return h
+
+
+def _targets_for(h):
+    saved = config.cfg().get("hosts")
+    config.cfg()["hosts"] = [h]
+    try:
+        return hosts.targets(discover=False)
+    finally:
+        config.cfg()["hosts"] = saved
+
+
+def init():
+    print(f"{B}warden setup{X}  {D}writes {config.CONF}{X}\n")
+    raw = config.raw()
+    if raw and not yes(f"{config.CONF} exists — edit it in place (a .bak is kept)?"):
+        return 1
+    est = raw.setdefault("estate", {})
+    est["name"] = ask("Name for this estate", est.get("name", "home"))
+    est["domain"] = ask("Your public domain, if any (blank = none)", est.get("domain", ""))
+    lan = ask("LAN range(s) to watch, comma separated", ",".join(est.get("lan") or ["192.168.1.0/24"]))
+    est["lan"] = [x.strip() for x in lan.split(",") if x.strip()]
+    est.setdefault("timezone", "Europe/London")
+    raw.setdefault("enforce", False)
+
+    print(f"\n{B}Alerts{X}  {D}where warden tells you things, and asks before acting{X}")
+    n = raw.setdefault("notify", {})
+    n["backend"] = ask("  send alerts via", n.get("backend", "discord"), ["discord", "webhook", "ntfy", "none"])
+    if n["backend"] == "discord":
+        n["channel"] = ask("  channel id", str(n.get("channel", "")))
+        n["owner_id"] = ask("  your Discord user id (only your ✅ counts)", str(n.get("owner_id", "")))
+        n.setdefault("token_secret", "DISCORD_BOT_TOKEN")
+        if not secrets.have(n["token_secret"]):
+            put_secret(n["token_secret"])
+    elif n["backend"] == "webhook":
+        n.setdefault("webhook_secret", "ALERT_WEBHOOK")
+        if not secrets.have(n["webhook_secret"]):
+            put_secret(n["webhook_secret"])
+        print(f"  {D}webhooks can't read replies, so approvals happen in the dashboard's Settings tab{X}")
+    elif n["backend"] == "ntfy":
+        n["ntfy_url"] = ask("  ntfy topic URL", n.get("ntfy_url", "https://ntfy.sh/"))
+
+    hl = raw.setdefault("hosts", [])
+    print(f"\n{B}Machines{X}  {D}{len(hl)} declared{X}")
+    while yes("Add a machine?", not hl):
+        h = host_wizard()
+        if h:
+            hl.append(h)
+
+    if yes("\nUse Cloudflare edge features (WAF audit, edge events, edge blocklist)?", bool(raw.get("cloudflare"))):
+        cf = raw.setdefault("cloudflare", {})
+        cf["zone_id"] = ask("  zone id", cf.get("zone_id", ""))
+        cf["account_id"] = ask("  account id (optional)", cf.get("account_id", ""))
+        cf.setdefault("token_secret", "CF_API_TOKEN")
+        print(f"  {D}token needs: Zone WAF Edit, Zone Settings Read, Analytics Read, DNS Read{X}")
+        if not secrets.have(cf["token_secret"]):
+            put_secret(cf["token_secret"])
+
+    if not raw.get("allow"):
+        me = ask("\nYour own public IP(s), so warden never proposes banning you (comma list)", "")
+        raw["allow"] = [x.strip() for x in me.split(",") if x.strip()]
+
+    config.save(raw)
+    print(f"\n{G}saved{X} {config.CONF}\n")
+    return check([])
+
+
+def check(argv):
+    rows = setup.checks(probe_hosts="--hosts" in argv)
+    for r in rows:
+        mark = f"{G}✓{X}" if r["ok"] else (f"{D}○{X}" if r["optional"] else f"{R}✗{X}")
+        print(f" {mark} {r['title']:<36} {D}{r['detail'][:70]}{X}")
+        if not r["ok"] and r["fix"]:
+            print(f"     {Y}→ {r['fix']}{X}")
+    s = setup.score(rows)
+    print(f"\n {s['required_ok']}/{s['required']} required · {s['optional_ok']}/{s['optional']} optional")
+    return 0 if s["required_ok"] == s["required"] else 1
+
+
+def connect():
+    base = (config.get("api.public_url") or f"http://{config.get('ui.host')}:{config.get('ui.port')}").rstrip("/")
+    print(f"""{B}Hermes{X}  (~/.hermes/config.yaml → mcp_servers)
+  warden:
+    url: {base}/mcp
+    headers:
+      Authorization: "Bearer ${{WARDEN_TOKEN}}"
+
+{B}Claude Code{X}
+  claude mcp add --transport http warden {base}/mcp --header "Authorization: Bearer $WARDEN_TOKEN"
+
+{B}Any HTTP client{X}
+  curl -H "Authorization: Bearer $WARDEN_TOKEN" {base}/api/v1/summary
+
+{D}Mint a token with: warden-setup token <name>. If agents sit on another machine, set api.public_url
+and let your reverse proxy pass /mcp and /api/v1 straight through (the token is the auth there).{X}""")
+    return 0
+
+
+def units_cmd(argv):
+    py = argv[argv.index("--python") + 1] if "--python" in argv else sys.executable
+    for name, group, on in units.plan():
+        print(f" {G + 'on ' + X if on else D + 'off' + X} {name:<26} {D}{group}: {units.GROUPS[group]}{X}")
+    if "--install" not in argv:
+        print(f"\n{D}--install writes them to /etc/systemd/system and enables the ones marked on{X}")
+        return 0
+    enable = units.install(python=py)
+    subprocess.run(["systemctl", "daemon-reload"], check=True)
+    subprocess.run(["systemctl", "enable", "--now", *enable], check=True)
+    print(f"{G}enabled{X} {len(enable)} units")
+    return 0
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "init":
+        return init()
+    if cmd == "check":
+        return check(rest)
+    if cmd == "add-host":
+        h = host_wizard()
+        if h:
+            raw = config.raw()
+            raw.setdefault("hosts", []).append(h)
+            config.save(raw)
+            print(f"{G}saved{X}")
+        return 0
+    if cmd == "token":
+        tok = tokens.mint(rest[0] if rest else "agent")
+        print(f"{tok}\n{D}Shown once — warden stores only its hash.{X}")
+        return 0
+    if cmd == "tokens":
+        for t in tokens.listing():
+            print(f" {t['id']:>3}  {t['name']:<20} {t['hint']}  uses={t['uses']}  last={t['last_used'] or '—'}"
+                  f"{'  REVOKED' if t['revoked'] else ''}")
+        return 0
+    if cmd == "revoke" and rest:
+        print("revoked" if tokens.revoke(int(rest[0])) else "no such active token")
+        return 0
+    if cmd == "connect":
+        return connect()
+    if cmd == "units":
+        return units_cmd(rest)
+    if cmd == "secret" and rest:
+        return 0 if put_secret(rest[0]) else 1
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

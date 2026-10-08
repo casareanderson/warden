@@ -1,0 +1,56 @@
+# warden red list — countries flagged red on the dashboard, and the (smaller) set
+# proposed for a Cloudflare edge block.
+#
+# SOURCE (authoritative, not a university summary):
+#   UK FCDO "UK sanctions regimes under the Sanctions Act" — geographic regimes,
+#   https://www.gov.uk/government/collections/uk-sanctions-regimes-under-the-sanctions-act
+#   (page last updated 25 March 2026, read 2026-10-07)
+# plus the US OFAC comprehensive embargo on Cuba (no UK regime, so listed separately).
+#
+# ⚠️ A sanctions regime is a LEGAL instrument about trade and named people. It says
+# nothing about where attack traffic comes from, and many regimes target a handful
+# of individuals, not a whole country. So:
+#   - `watch`  = shown RED on the dashboard. Costs nothing, blocks nothing.
+#   - `block`  = what the edge rule would drop. A policy choice, approved by the owner,
+#                applied only via `cfsec.py --apply-waf --commit` after a dry run.
+# Re-check the source page when it changes; regimes are added and lifted.
+
+source_checked: "2026-10-07"
+
+watch:
+  AF: Afghanistan
+  BY: Belarus
+  BA: Bosnia and Herzegovina
+  CF: Central African Republic
+  CD: DR Congo
+  KP: North Korea
+  GN: Guinea
+  GW: Guinea-Bissau
+  HT: Haiti
+  IR: Iran              # Iran + Iran (nuclear) regimes
+  IQ: Iraq
+  LB: Lebanon           # Lebanon + Lebanon (Hariri) regimes
+  LY: Libya
+  ML: Mali
+  MM: Myanmar
+  NI: Nicaragua
+  RU: Russia
+  SO: Somalia
+  SS: South Sudan
+  SD: Sudan
+  SY: Syria             # Syria + Syria cultural property regimes
+  VE: Venezuela
+  YE: Yemen
+  ZW: Zimbabwe
+  CN: China             # UK arms embargo only (mainland China + Hong Kong)
+  HK: Hong Kong         # UK arms embargo only
+  CU: Cuba              # US OFAC comprehensive embargo, no UK regime
+
+# PROPOSED edge block — pending owner approval (nothing is blocked until then).
+# Default = countries under broad, country-wide UK measures with an active state
+# cyber programme. Edit freely; cfsec.py builds the rule from exactly this list.
+block:
+  - KP
+  - IR
+  - RU
+  - BY

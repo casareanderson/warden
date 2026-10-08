@@ -11,9 +11,9 @@ It answers the questions no log can:
   - did a known device move to a different address?
   - is something else now answering on an address that belonged to a service?
 
-That last one is not hypothetical here. A WiZ bulb once took Vaultwarden's
-.113 lease, and CT100 losing its .120 lease was read as "Authelia is down"
-87 times. Both are IP-identity failures, and both are invisible in every log
+That last one is not hypothetical here. A smart bulb once took the password
+manager's lease, and the proxy container losing its own lease was read as
+"the SSO portal is down" 87 times. Both are IP-identity failures, and both are invisible in every log
 the estate collects.
 
 ⚠️ DETECT-ONLY BY DESIGN. netscan never blocks, isolates or changes a device.
@@ -48,8 +48,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-DB = BASE / "data" / "warden.db"          # shared store: one place to look
-CONF = BASE / "netscan.yml"
+sys.path.insert(0, str(BASE))
+from wlib import config as wcfg  # noqa: E402
+
+DB = Path(wcfg.DB)                        # shared store: one place to look
+CONF = wcfg.HOME / "netscan.yml"
 OUI_FILE = "/usr/share/nmap/nmap-mac-prefixes"   # ships with nmap, no download
 
 # --------------------------------------------------------------- config ---
@@ -72,6 +75,8 @@ DEFAULTS = {
 def load_conf():
     """Same deliberately tiny YAML subset warden uses — no PyYAML on this box."""
     cfg = dict(DEFAULTS)
+    if wcfg.get("estate.lan"):            # warden.yml's LAN list is the default sweep
+        cfg["networks"] = list(wcfg.get("estate.lan"))
     if not CONF.exists():
         return cfg
     key = None
@@ -412,7 +417,7 @@ def main():
                          now, mac))
 
     # Two different MACs answering on one address inside a single sweep. This
-    # is the bulb-steals-Vaultwarden's-lease case, and it is the reason this
+    # is the smart-bulb-steals-the-password-manager's-lease case (measured, not hypothetical), and it is the reason this
     # check exists rather than being a theoretical nicety.
     by_ip = {}
     for h in found:

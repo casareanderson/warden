@@ -1,159 +1,787 @@
 <!doctype html>
+<html lang="en">
 <meta charset="utf-8">
-<title>warden</title>
+<title>warden · security console</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-:root{--bg:#0e1116;--card:#161b22;--line:#232a34;--fg:#e6edf3;--dim:#8b949e;
-      --red:#f85149;--amb:#d29922;--grn:#3fb950;--acc:#58a6ff}
+:root{
+  --bg:#0b0e13;--panel:#11161d;--panel2:#151b23;--line:#222a35;--line2:#2c3644;
+  --fg:#e6edf3;--dim:#8b949e;--faint:#5c6773;
+  --red:#f85149;--amb:#d29922;--grn:#3fb950;--acc:#58a6ff;--vio:#bc8cff;--cyn:#39c5cf;
+  --c1:#58a6ff;--c2:#3fb950;--c3:#d29922;--c4:#bc8cff;--c5:#39c5cf;--c6:#f778ba;--c7:#ffa657;--c8:#8b949e;
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);
-     font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;padding:20px}
-h1{font-size:18px;margin:0 0 2px} h2{font-size:13px;color:var(--dim);
-   text-transform:uppercase;letter-spacing:.08em;margin:22px 0 8px;font-weight:600}
-.sub{color:var(--dim);margin-bottom:18px;font-size:12px}
-.mode{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;
-      background:#1f2b1f;color:var(--grn);border:1px solid #2b3f2b}
-.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
-.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
-.k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
-.v{font-size:22px;margin-top:3px}
+html,body{margin:0;background:var(--bg);color:var(--fg)}
+body{font:13.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.mono,td.ip,td.mono,code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
+
+/* header */
+header{position:sticky;top:0;z-index:5;background:rgba(11,14,19,.94);backdrop-filter:blur(6px);
+  border-bottom:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:14px;padding:10px 20px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:9px;font-weight:650;font-size:15px;letter-spacing:.02em}
+.brand svg{width:22px;height:22px}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:99px;font-size:11px;
+  border:1px solid var(--line2);color:var(--dim);white-space:nowrap}
+.pill.ok{color:var(--grn);border-color:#244a2c;background:#0f1d13}
+.pill.warn{color:var(--amb);border-color:#4a3a12;background:#211a0a}
+.pill.bad{color:var(--red);border-color:#4a1f1f;background:#211010}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.search{flex:1;min-width:240px;max-width:640px;display:flex;align-items:center;gap:8px;
+  background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:6px 10px}
+.search:focus-within{border-color:var(--acc)}
+.search input{flex:1;background:none;border:0;outline:0;color:var(--fg);font:inherit}
+.search kbd{font:11px ui-monospace,monospace;color:var(--faint);border:1px solid var(--line2);border-radius:4px;padding:0 5px}
+.updated{color:var(--faint);font-size:11.5px;margin-left:auto}
+nav{display:flex;gap:2px;padding:0 14px;overflow-x:auto}
+nav button{background:none;border:0;color:var(--dim);font:inherit;font-size:13px;padding:9px 12px;cursor:pointer;
+  border-bottom:2px solid transparent;white-space:nowrap}
+nav button:hover{color:var(--fg)}
+nav button.on{color:var(--fg);border-bottom-color:var(--acc)}
+nav .count{font-size:10.5px;margin-left:5px;padding:0 6px;border-radius:99px;background:var(--line);color:var(--dim)}
+nav .count.bad{background:#3a1515;color:var(--red)}
+
+main{padding:18px 20px 40px;max-width:1500px;margin:0 auto}
+section.tab{display:none} section.tab.on{display:block}
+h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:22px 0 9px;font-weight:600;
+  display:flex;align-items:center;gap:8px}
+h2:first-child{margin-top:0}
+h2 .hint{text-transform:none;letter-spacing:0;color:var(--faint);font-weight:400}
+
+.kpis{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px;cursor:default}
+.kpi[data-go]{cursor:pointer} .kpi[data-go]:hover{border-color:var(--line2)}
+.kpi .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.kpi .v{font-size:24px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+.kpi .s{color:var(--faint);font-size:11.5px}
+.kpi.red .v{color:var(--red)} .kpi.amb .v{color:var(--amb)} .kpi.grn .v{color:var(--grn)}
+
+.grid{display:grid;gap:12px}
+.g4{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(420px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px;min-width:0}
+.card h3{margin:0 0 10px;font-size:12px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+
+.donut{display:flex;align-items:center;gap:14px}
+.donut svg{flex:0 0 120px;width:120px;height:120px}
+.legend{flex:1;min-width:0;font-size:12px}
+.legend div{display:flex;align-items:center;gap:7px;padding:1.5px 0;cursor:pointer}
+.legend div:hover .lk{color:var(--fg)}
+.legend i{flex:0 0 9px;height:9px;border-radius:2px}
+.legend .lk{flex:1;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legend .ln{font-variant-numeric:tabular-nums}
+.empty{color:var(--faint);padding:14px 2px;font-size:12.5px}
+
+.tl{display:flex;align-items:flex-end;gap:2px;height:150px;padding-top:6px}
+.tl div{flex:1;background:var(--acc);opacity:.75;border-radius:2px 2px 0 0;min-height:1px;position:relative}
+.tl div:hover{opacity:1}
+.tlax{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;margin-top:4px}
+
+.wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
-th{text-align:left;color:var(--dim);font-weight:600;padding:6px 8px;
-   border-bottom:1px solid var(--line);font-size:11px;text-transform:uppercase}
-td{padding:6px 8px;border-bottom:1px solid #1b2029;vertical-align:top}
+th{text-align:left;color:var(--dim);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);
+  font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;position:sticky;top:0;background:var(--panel)}
+td{padding:7px 10px;border-bottom:1px solid #1a2029;vertical-align:top}
 tr:last-child td{border-bottom:0}
-.wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px}
-.ip{color:var(--acc)} .num{text-align:right;font-variant-numeric:tabular-nums}
-.det{color:var(--dim);max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pill{padding:1px 7px;border-radius:99px;font-size:11px;border:1px solid}
-.p-proposed{color:var(--amb);border-color:#4a3a12;background:#241d0c}
-.p-active{color:var(--red);border-color:#4a1f1f;background:#241010}
-.p-failed{color:var(--dim);border-color:var(--line)}
-.ok{color:var(--grn)} .warn{color:var(--amb)} .bad{color:var(--red)}
-.empty{color:var(--dim);padding:14px}
-.note{color:var(--dim);font-size:11.5px;margin-top:6px;line-height:1.6}
+tbody tr:hover td{background:var(--panel2)}
+td.ip{color:var(--acc);cursor:pointer;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+td.det{color:var(--dim);max-width:560px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.wrapd{color:var(--dim);white-space:normal}
+td.ts{color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl-tools{display:flex;gap:8px;align-items:center;margin:0 0 8px}
+.tbl-tools input{background:var(--panel);border:1px solid var(--line2);border-radius:6px;color:var(--fg);
+  padding:5px 9px;font:inherit;font-size:12.5px;min-width:220px}
+.tbl-tools .n{color:var(--faint);font-size:12px}
+
+.b{display:inline-block;padding:0 7px;border-radius:99px;font-size:11px;border:1px solid var(--line2);color:var(--dim);white-space:nowrap}
+.b.high,.b.red,.b.block{color:var(--red);border-color:#4a1f1f;background:#211010}
+.b.med,.b.amb,.b.challenge,.b.managed_challenge,.b.jschallenge{color:var(--amb);border-color:#4a3a12;background:#211a0a}
+.b.low,.b.info{color:var(--acc);border-color:#1f3550;background:#0d1826}
+.b.ok,.b.grn,.b.allow,.b.skip{color:var(--grn);border-color:#244a2c;background:#0f1d13}
+.b.acc{color:var(--dim)}
+.b.t-log{color:var(--acc)} .b.t-edge{color:var(--vio)} .b.t-host{color:var(--grn)} .b.t-net-alert{color:var(--amb)}
+.flag{font-size:14px;margin-right:4px}
+.y{color:var(--grn)} .n{color:var(--red)} .q{color:var(--faint)}
+.banner{border:1px solid #4a3a12;background:#1a150a;color:#e3c27a;border-radius:10px;padding:11px 14px;margin-bottom:14px;font-size:13px}
+.banner.bad{border-color:#4a1f1f;background:#1a0d0d;color:#f0a39f}
+.banner.ok{border-color:#244a2c;background:#0d1a10;color:#9bd8a7}
+.banner code{background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px}
+.note{color:var(--faint);font-size:12px;margin-top:7px;line-height:1.6}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
+.chip{font:11.5px ui-monospace,monospace;color:var(--dim);border:1px solid var(--line2);border-radius:99px;padding:1px 9px;cursor:pointer;background:none}
+.chip:hover{color:var(--fg);border-color:var(--acc)}
+.btn{background:#13233a;border:1px solid #1f3a5f;color:var(--acc);border-radius:6px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:#18304f} .btn:disabled{opacity:.45;cursor:default}
+tr.sel td{background:#14202f}
+footer{color:var(--faint);font-size:11.5px;text-align:center;padding:20px}
+@media (max-width:600px){.bar{padding:10px 14px}main{padding:14px}.g2{grid-template-columns:1fr}.updated{display:none}}
+.ov-head{display:flex;align-items:center;justify-content:space-between;margin:2px 0 10px}
+.btn{background:var(--acc);color:#0b0e13;border:0;border-radius:6px;padding:5px 12px;font:inherit;font-weight:600;cursor:pointer}
+.btn.ghost{background:none;color:var(--dim);border:1px solid var(--line2);font-weight:500}
+.btn.ghost:hover{color:var(--fg);border-color:var(--acc)}
+.btn.sm{padding:2px 9px;font-size:12px}
+.row{display:flex;gap:8px;margin-bottom:10px}
+.row input,#ov-editor input[type=text]{flex:1;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;color:var(--fg);padding:5px 9px;font:inherit}
+#t-overview .kpis{margin-bottom:12px}
+.grid.ov{grid-template-columns:repeat(4,minmax(0,1fr))}
+.ov .s2{grid-column:span 2}.ov .s4{grid-column:1/-1}
+@media(max-width:1100px){.grid.ov{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.grid.ov{grid-template-columns:1fr}.ov .s2{grid-column:1/-1}}
+#ov-editor{background:var(--panel);border:1px solid var(--acc);border-radius:10px;padding:14px;margin:0 0 14px}
+#ov-editor h3{margin:0 0 8px}
+.pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:6px;margin-bottom:12px}
+.pick label{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 8px;cursor:pointer}
+.pick label.on{border-color:var(--acc)}
+.pick .mv{margin-left:auto;display:flex;gap:2px}
+.pick .mv button{background:none;border:1px solid var(--line2);color:var(--dim);border-radius:4px;width:22px;height:20px;cursor:pointer;padding:0;line-height:1}
+.tokbox{font-family:ui-monospace,monospace;font-size:12px;background:#0f1d13;border:1px solid #244a2c;color:var(--grn);padding:8px;border-radius:6px;word-break:break-all;margin-bottom:8px}
+pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px;font-size:11.5px;overflow:auto;white-space:pre-wrap}
+.appr{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:10px;margin-bottom:8px}
+.appr pre{flex:1;margin:0;white-space:pre-wrap;font:12.5px/1.45 inherit}
 </style>
-<h1>warden</h1>
-<div class="sub">in-house detection · second opinion to CrowdSec ·
-  <span class="mode" id="mode">detect-only</span></div>
 
-<div class="grid" id="tiles"></div>
+<header>
+  <div class="bar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="1.8"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
+      warden
+    </div>
+    <span class="pill" id="mode"><span class="dot"></span>…</span>
+    <label class="search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b949e" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" placeholder="Search events, edge, hosts…  ip:  cc:RU  kind:sqli  src:npm  type:edge" autocomplete="off">
+      <kbd>/</kbd>
+    </label>
+    <span class="updated" id="updated"></span>
+  </div>
+  <nav id="nav"></nav>
+</header>
 
-<h2>Source health — is it actually reading anything?</h2>
-<div class="wrap"><table id="health"></table></div>
-<div class="note">The failure that started this project was a detector that looked
-healthy while reading nothing. If a source shows 0 lines, it is blind — treat that
-as an outage, not as quiet.</div>
+<main>
+<!-- OVERVIEW -->
+<section class="tab" id="t-overview">
+  <div class="ov-head"><span class="hint">last 30 days · click a slice to search it</span>
+    <button class="btn ghost" id="ov-edit">Customise</button></div>
+  <div class="kpis" id="kpis"></div>
+  <div id="ov-editor" hidden></div>
+  <div class="grid g4 ov" id="ov-widgets"></div>
+</section>
 
-<h2>Ban decisions</h2>
-<div class="wrap"><table id="bans"></table></div>
+<!-- DETECTIONS -->
+<section class="tab" id="t-detections">
+  <h2>Ban decisions <span class="hint" id="ban-hint"></span></h2>
+  <div class="wrap"><table id="bans"></table></div>
+  <h2>Edge blocklist <span class="hint">proposed hourly · you ✅/❌ in your alerts channel or Settings · enforced as ONE Cloudflare WAF rule · bans lapse after 30 days</span></h2>
+  <div class="wrap"><table id="ebans"></table></div>
+  <h2>Log detections</h2>
+  <div class="tbl-tools"><input data-filter="recent" placeholder="filter these rows…"><span class="n" id="recent-n"></span></div>
+  <div class="wrap"><table id="recent"></table></div>
+  <div class="note">Sources: whatever <code>sources:</code> in warden.yml points at (reverse-proxy access log, SSO portal, tunnel). Event time is taken from the log line, never from ingestion.</div>
+</section>
 
-<h2>Top scoring addresses (24h)</h2>
-<div class="wrap"><table id="top"></table></div>
+<!-- EDGE -->
+<section class="tab" id="t-edge">
+  <div id="edge-banner"></div>
+  <div class="grid g2">
+    <div class="card"><h3>Edge events · 48 h</h3><div id="tl-edge"></div></div>
+    <div class="card"><h3>WAF custom rules <span class="q" id="waf-n"></span></h3><div id="waf"></div></div>
+  </div>
+  <h2>What Cloudflare stopped</h2>
+  <div class="tbl-tools"><input data-filter="edge" placeholder="filter these rows…"><span class="n" id="edge-n"></span></div>
+  <div class="wrap"><table id="edge"></table></div>
+  <div class="note"><b>link_maze_injected</b> = Cloudflare AI Labyrinth fed decoy links to a suspected bot; it is not a block. Rows from our own addresses are tagged <span class="b acc">self</span> and left out of every count (mostly our own monitoring curl).<br>WAF rules run before the edge-sentry Worker, so the Worker only ever sees what the WAF lets through.</div>
+</section>
 
-<h2>Recent events</h2>
-<div class="wrap"><table id="recent"></table></div>
+<!-- ATTACK SURFACE -->
+<section class="tab" id="t-surface">
+  <div class="kpis" id="sf-kpis"></div>
+  <h2>Findings <span class="hint" id="sf-ts"></span></h2>
+  <div class="wrap"><table id="findings"></table></div>
+  <h2>Public names <span class="hint">probed the way the internet sees them (public DNS, not the LAN rewrite)</span></h2>
+  <div class="wrap"><table id="names"></table></div>
+  <div class="grid g2" style="margin-top:12px">
+    <div class="card"><h3>Cloudflare zone settings</h3><div id="settings"></div></div>
+    <div class="card"><h3>GitHub Pages sites</h3><div id="pages"></div></div>
+  </div>
+  <h2>Reverse-proxy sites · SSO <span class="hint">read from your proxy config — changing SSO is deliberately not a button here</span></h2>
+  <div class="wrap"><table id="sso"></table></div>
+  <h2>LAN listening services <span class="hint">netscan port sweep — the inside surface</span></h2>
+  <div class="tbl-tools"><input data-filter="ports" placeholder="filter these rows…"><span class="n" id="ports-n"></span></div>
+  <div class="wrap"><table id="ports"></table></div>
+</section>
 
-<h2 id="netsec">Network — what is on the wire</h2>
-<div class="wrap"><table id="netalerts"></table></div>
-<div class="note">netscan is <strong>detect-only and has no enforcement path at
-all</strong>: acting automatically against a LAN device (a laptop, the printer,
-a door sensor) has a far worse blast radius than a late alert. New devices are
-adopted silently during the learning window, because an ARP sweep only sees
-what is awake — two sweeps twelve minutes apart found 48 then 46 devices here.</div>
+<!-- VULNERABILITIES -->
+<section class="tab" id="t-vulns">
+  <div class="kpis" id="v-kpis"></div>
+  <div class="grid g4" style="margin-top:12px">
+    <div class="card"><h3>Fixable CVEs by severity</h3><div id="ch-vsev"></div></div>
+    <div class="card"><h3>Fixable CVEs by box</h3><div id="ch-vbox"></div></div>
+  </div>
+  <h2>Boxes <span class="hint">daily scan 03:30 · Patch = queue a request → plan + ✅ (chat or Settings) → snapshot → full upgrade → reboot if needed (never Proxmox nodes)</span></h2>
+  <div class="wrap"><table id="vt"></table></div>
+  <div id="vdetail"></div>
+  <h2>Docker containers <span class="hint">how each is managed decides how it can be updated — automatic only where it's safe (compose), everything else says why</span></h2>
+  <div class="wrap"><table id="vimg"></table></div>
+  <h2>Must-fix across the estate <span class="hint">known-exploited (CISA KEV) first, then severity, then how many boxes</span></h2>
+  <div class="tbl-tools"><input data-filter="vtop" placeholder="filter: CVE, package, box…"><span class="n" id="vtop-n"></span></div>
+  <div class="wrap"><table id="vtop"></table></div>
+  <h2>Patch jobs</h2>
+  <div class="wrap"><table id="vjobs"></table></div>
+  <div class="note">Scanner: Trivy 0.74.0 (checksum + Sigstore verified — v0.69.4 and the v0.69.5/6 images were the 2026 supply-chain compromise). Nothing is installed on scanned boxes: only their package database is read. Raw CVE totals are mostly "affected, no fix released yet" — fixable and KEV are what you can act on.</div>
+</section>
 
-<h2>Device inventory</h2>
-<div class="wrap"><table id="nethosts"></table></div>
+<!-- ENDPOINTS -->
+<section class="tab" id="t-endpoints">
+  <div class="kpis" id="ep-kpis"></div>
+  <h2>Boxes <span class="hint">agentless integrity sweep hourly (deep daily 04:10) · Lynis hardening weekly (Sun 05:00) — nothing stays installed</span></h2>
+  <div class="wrap"><table id="ep"></table></div>
+  <div id="ep-detail"></div>
+  <h2>Integrity findings <span class="hint">✅ (chat or Settings) accepts a change into the baseline</span></h2>
+  <div class="tbl-tools"><input data-filter="epf" placeholder="filter…"><span class="n" id="epf-n"></span></div>
+  <div class="wrap"><table id="epf"></table></div>
+</section>
 
-<h2>Most-exposed hosts (listening ports)</h2>
-<div class="wrap"><table id="netports"></table></div>
-<div class="note">A TCP connect scan, not a SYN scan: this runs unprivileged in
-an LXC where raw sockets are not reliable, and a SYN scan that silently falls
-back produces results you cannot trust. Slower, but honest.</div>
+<!-- GEO -->
+<section class="tab" id="t-geo">
+  <div id="geo-banner"></div>
+  <div class="grid g2">
+    <div class="card"><h3>Traffic by country · 30 days</h3><div class="wrap" style="border:0"><table id="geo"></table></div></div>
+    <div class="card"><h3>Red list <span class="q" id="rl-src"></span></h3><div id="redlist"></div>
+      <div class="note">Source: <a href="https://www.gov.uk/government/collections/uk-sanctions-regimes-under-the-sanctions-act" target="_blank" rel="noopener">UK FCDO geographic sanctions regimes</a> + US OFAC (Cuba).
+      A sanctions regime is about trade and named people, not attack traffic — so the red list only <b>flags</b>; the <b>block</b> set is a separate, owner-approved choice applied as one Cloudflare WAF rule.</div></div>
+  </div>
+</section>
 
-<h2>Suppressed findings</h2>
-<div class="wrap"><table id="suppressed"></table></div>
-<div class="note">Shown deliberately. A filter you cannot see is
-indistinguishable from a detector that has stopped working. The common entry
-here is a self-report: CrowdSec flagging our own WAN address.</div>
+<!-- NETWORK -->
+<section class="tab" id="t-network">
+  <div class="grid g4">
+    <div class="card"><h3>LAN alerts · 30 days</h3><div id="ch-net"></div></div>
+    <div class="card"><h3>Last sweep</h3><div id="netrun"></div></div>
+  </div>
+  <h2>Intrusion detection · Suricata <span class="hint" id="ids-hint">Suricata eve.json from <code>ids.suricata_host</code> · ET Open</span></h2>
+  <div class="grid g4"><div class="card"><h3>Alerts by signature · 7 d</h3><div id="ch-ids"></div></div>
+    <div class="card"><h3>Threat-intel hits by device · 7 d</h3><div id="ch-intel"></div></div></div>
+  <div class="tbl-tools" style="margin-top:12px"><input data-filter="ids" placeholder="filter IDS alerts…"><span class="n" id="ids-n"></span></div>
+  <div class="wrap"><table id="ids"></table></div>
+  <h2>Threat intel · whole LAN <span class="hint">router DNS log + connection table vs URLhaus, ThreatFox, OpenPhish, Feodo, FireHOL L1, red list</span></h2>
+  <div class="wrap"><table id="intel"></table></div>
+  <h2>Hosts</h2>
+  <div class="tbl-tools"><input data-filter="hosts" placeholder="filter: ip, name, vendor, mac…"><span class="n" id="hosts-n"></span></div>
+  <div class="wrap"><table id="hosts"></table></div>
+  <h2>Network alerts</h2>
+  <div class="tbl-tools"><input data-filter="netalerts" placeholder="filter these rows…"><span class="n" id="netalerts-n"></span></div>
+  <div class="wrap"><table id="netalerts"></table></div>
+  <div class="note">netscan is detect-only with no enforcement path: acting automatically against a LAN device has a far worse blast radius than a late alert.</div>
+</section>
+
+<!-- HEALTH -->
+<section class="tab" id="t-health">
+  <h2>Source health — is it actually reading anything?</h2>
+  <div class="wrap"><table id="health"></table></div>
+  <div class="note">A detector that looks healthy while reading nothing is the failure this project started from. 0 lines = blind, treat it as an outage.</div>
+  <h2>Suppressed findings <span class="hint">shown on purpose — a filter you can't see looks like a broken detector</span></h2>
+  <div class="wrap"><table id="suppressed"></table></div>
+</section>
+
+<!-- SEARCH -->
+<section class="tab" id="t-settings">
+  <h2>Waiting for you <span class="hint">what warden proposed — same as reacting ✅ / ❌ in your chat channel</span></h2>
+  <div id="appr"></div>
+  <h2>Setup <span class="hint" id="setup-score"></span></h2>
+  <div class="wrap"><table id="setup"></table></div>
+  <h2>Connect an agent <span class="hint">read-only REST API + MCP — Hermes, Claude, Cursor, anything that speaks MCP</span></h2>
+  <div class="grid g2">
+    <div class="card"><h3>Tokens</h3>
+      <div class="row"><input id="tok-name" placeholder="name, e.g. hermes" maxlength="60"><button class="btn" id="tok-new">New token</button></div>
+      <div id="tok-once"></div><div class="wrap" style="border:0"><table id="toks"></table></div></div>
+    <div class="card"><h3>Snippets</h3><div id="snips"></div></div>
+  </div>
+  <div class="note">Agents can read everything on this console and nothing more: no tool bans, blocks, patches or approves. Your reverse proxy must pass <code>/mcp</code> and <code>/api/v1</code> straight through (no login page) — the token is the auth there.</div>
+</section>
+
+<section class="tab" id="t-search">
+  <h2>Search <span class="hint" id="s-meta"></span></h2>
+  <div class="chips" id="s-chips"></div>
+  <div class="wrap" style="margin-top:10px"><table id="sres"></table></div>
+</section>
+</main>
+<footer>warden · read-only console · no control here can ban or block · IP geolocation by <a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP</a> (CC BY 4.0)</footer>
 
 <script>
-const el = id => document.getElementById(id);
-const esc = s => String(s??"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
-const tbl = (id, cols, rows, cell) => {
-  const t = el(id);
-  if (!rows.length) { t.outerHTML = `<table id="${id}"><tr><td class="empty">nothing yet</td></tr></table>`; return; }
-  t.innerHTML = "<tr>" + cols.map(c=>`<th>${c}</th>`).join("") + "</tr>" +
-    rows.map(r=>"<tr>"+cell(r).map(c=>`<td>${c}</td>`).join("")+"</tr>").join("");
-};
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const PAL = ["--c1","--c2","--c3","--c4","--c5","--c6","--c7","--c8"].map(v => getComputedStyle(document.documentElement).getPropertyValue(v).trim());
+const RED = getComputedStyle(document.documentElement).getPropertyValue("--red").trim();
+const names = (() => { try { return new Intl.DisplayNames(["en"], {type: "region"}); } catch { return null; } })();
+const flag = cc => cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 127397 + c.charCodeAt())) : "";
+const cname = cc => { try { return names ? names.of(cc) : cc; } catch { return cc; } };
+const ago = ts => { if (!ts) return "—"; const d = (Date.now() - new Date(ts.replace(" ", "T") + (/[Z+]/.test(ts.slice(10)) ? "" : "Z"))) / 1000;
+  return d < 90 ? "just now" : d < 5400 ? Math.round(d/60) + " min ago" : d < 129600 ? Math.round(d/3600) + " h ago" : Math.round(d/86400) + " d ago"; };
+const selfB = r => r.self ? ' <span class="b acc" title="our own address (self-ips.txt / warden.yml allow) — excluded from counts">self</span>' : "";
+const ccCell = (cc, red) => cc ? `<span class="flag">${flag(cc)}</span>${esc(cc)}${red ? ' <span class="b red">red list</span>' : ""}` : '<span class="q">—</span>';
 
-fetch("/api").then(r=>r.json()).then(d=>{
-  const active = d.bans.filter(b=>b.state==="active").length;
-  const proposed = d.bans.filter(b=>b.state==="proposed").length;
-  const events24 = d.top.reduce((a,b)=>a+b.n,0);
-  el("tiles").innerHTML = [
-    ["scored events 24h", events24],
-    ["addresses seen", d.top.length],
-    ["bans proposed", proposed],
-    ["bans enforced", active],
-    ["unattributed", d.unattributed[0]?.n ?? 0],
-    ["devices on LAN", d.net_hosts.length],
-    ["open ports known", d.port_count[0]?.n ?? 0],
-    ["network alerts", d.net_alerts.length],
-  ].map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+const TABS = [["overview","Overview"],["detections","Detections"],["edge","Edge · Cloudflare"],["surface","Attack surface"],["vulns","Vulnerabilities"],["endpoints","Endpoints"],
+              ["geo","Geo & red list"],["network","Network"],["health","Health"],["settings","Settings"],["search","Search"]];
+let D = null;
 
-  tbl("health", ["source","last run","lines read","scored"], d.health, r=>[
-    esc(r.source),
-    esc((r.last_run||"").replace("T"," ").slice(0,16)),
-    `<span class="${r.lines>0?"ok":"bad"}">${r.lines||0}</span>`,
-    `<span class="num">${r.scored||0}</span>`]);
+function nav() {
+  $("#nav").innerHTML = TABS.map(([id, label]) => `<button data-tab="${id}">${label}<span class="count" id="c-${id}" hidden></span></button>`).join("");
+  $("#nav").onclick = e => { const b = e.target.closest("button"); if (b) show(b.dataset.tab); };
+}
+function show(id) {
+  document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "t-" + id));
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id));
+  if (location.hash !== "#" + id) history.replaceState(null, "", "#" + id);
+  try { localStorage.setItem("warden-tab", id); } catch {}
+}
+function badge(id, n, bad) { const el = $("#c-" + id); if (!el) return; el.hidden = !n; el.textContent = n; el.classList.toggle("bad", !!bad); }
 
-  tbl("bans", ["when","ip","score","reasons","state","note"], d.bans, r=>[
-    esc((r.ts||"").replace("T"," ").slice(0,16)),
-    `<span class="ip">${esc(r.ip)}</span>`,
-    `<span class="num">${r.score}</span>`,
-    esc(r.reasons), `<span class="pill p-${esc(r.state)}">${esc(r.state)}</span>`,
-    `<span class="det">${esc(r.note)}</span>`]);
+function donut(el, data, opts = {}) {
+  if (!data || !data.length) { el.innerHTML = '<div class="empty">' + (opts.empty || "No data in this window.") + "</div>"; return; }
+  const total = data.reduce((a, d) => a + d.n, 0), R = 52, r = 34, cx = 60, cy = 60;
+  let a0 = -Math.PI / 2, paths = "";
+  data.forEach((d, i) => {
+    const col = d.red ? RED : PAL[i % PAL.length], frac = d.n / total;
+    if (frac >= 0.9999) { paths += `<circle cx="${cx}" cy="${cy}" r="${(R + r) / 2}" fill="none" stroke="${col}" stroke-width="${R - r}"/>`; d._c = col; return; }
+    const a1 = a0 + frac * 2 * Math.PI, big = frac > .5 ? 1 : 0, gap = .012;
+    const p = (rad, a) => [cx + rad * Math.cos(a), cy + rad * Math.sin(a)].map(v => v.toFixed(2)).join(",");
+    paths += `<path d="M${p(R, a0 + gap)}A${R},${R} 0 ${big} 1 ${p(R, a1 - gap)}L${p(r, a1 - gap)}A${r},${r} 0 ${big} 0 ${p(r, a0 + gap)}Z" fill="${col}"><title>${esc(d.k)}: ${d.n}</title></path>`;
+    d._c = col; a0 = a1;
+  });
+  el.innerHTML = `<div class="donut"><svg viewBox="0 0 120 120">${paths}
+      <text x="60" y="58" text-anchor="middle" fill="#e6edf3" font-size="19" font-weight="600">${total}</text>
+      <text x="60" y="74" text-anchor="middle" fill="#8b949e" font-size="9.5">${opts.unit || "total"}</text></svg>
+    <div class="legend">${data.map(d => `<div data-q="${esc(opts.q ? opts.q(d) : d.k)}"><i style="background:${d._c}"></i>
+      <span class="lk">${opts.label ? opts.label(d) : esc(d.k)}</span><span class="ln">${d.n}</span></div>`).join("")}</div></div>`;
+  el.querySelectorAll(".legend div").forEach(x => x.onclick = () => runSearch(x.dataset.q));
+}
 
-  tbl("top", ["ip","score","events","kinds"], d.top, r=>[
-    `<span class="ip">${esc(r.ip)}</span>`,
-    `<span class="num">${r.score}</span>`, `<span class="num">${r.n}</span>`,
-    `<span class="det">${esc(r.kinds)}</span>`]);
+function timeline(el, rows, days) {
+  if (!rows.length) { el.innerHTML = '<div class="empty">Nothing in this window.</div>'; return; }
+  const map = Object.fromEntries(rows.map(r => [r.d, r.n])), keys = [];
+  if (days) { for (let i = days - 1; i >= 0; i--) keys.push(new Date(Date.now() - i * 864e5).toISOString().slice(0, 10)); }
+  else { for (let i = 47; i >= 0; i--) { const t = new Date(Date.now() - i * 36e5); keys.push(t.toISOString().slice(0, 13).replace("T", " ") + ":00"); } }
+  const max = Math.max(1, ...keys.map(k => map[k] || 0));
+  el.innerHTML = `<div class="tl">${keys.map(k => `<div style="height:${((map[k] || 0) / max * 100).toFixed(1)}%" title="${k}: ${map[k] || 0}"></div>`).join("")}</div>
+    <div class="tlax"><span>${keys[0].slice(5)}</span><span>peak ${max}</span><span>${keys[keys.length - 1].slice(5)}</span></div>`;
+}
 
-  tbl("recent", ["when","src","ip","kind","detail","pts"], d.recent, r=>[
-    esc((r.ts||"").replace("T"," ").slice(5,16)),
-    esc(r.source), `<span class="ip">${esc(r.ip||"—")}</span>`, esc(r.kind),
-    `<span class="det">${esc(r.detail)}</span>`,
-    `<span class="num">${r.score}</span>`]);
-  const kindCls = k => ({IP_CONFLICT:"bad",CRITICAL_MISSING:"bad",
-    NEW_DEVICE:"warn",NEW_PORT:"warn",IP_CHANGE:"",MAC_MULTI_IP:""}[k] ?? "");
+function table(id, cols, rows, empty) {
+  const t = $("#" + id);
+  if (!rows.length) { t.innerHTML = `<tr><td class="empty">${empty || "Nothing to show."}</td></tr>`; return; }
+  t.innerHTML = `<thead><tr>${cols.map(c => `<th${c.num ? ' style="text-align:right"' : ""}>${c.h}</th>`).join("")}</tr></thead><tbody>` +
+    rows.map(r => `<tr data-s="${esc(Object.values(r).join(" ").toLowerCase())}">${cols.map(c => {
+      const v = c.f ? c.f(r) : esc(r[c.k]);
+      return `<td class="${c.cls || ""}"${c.ip ? ` data-ip="${esc(r[c.k])}"` : ""}${c.title ? ` title="${esc(r[c.k])}"` : ""}>${v}</td>`;
+    }).join("")}</tr>`).join("") + "</tbody>";
+  const n = $("#" + id + "-n"); if (n) n.textContent = rows.length + " rows";
+}
 
-  tbl("netalerts", ["when","kind","ip","mac","detail"], d.net_alerts, r=>[
-    esc((r.ts||"").replace("T"," ").slice(5,16)),
-    `<span class="${kindCls(r.kind)}">${esc(r.kind)}</span>`,
-    `<span class="ip">${esc(r.ip)}</span>`,
-    `<span class="det">${esc(r.mac)}</span>`,
-    `<span class="det">${esc(r.detail)}</span>`]);
+document.addEventListener("click", e => { const td = e.target.closest("td[data-ip]"); if (td && td.dataset.ip) runSearch("ip:" + td.dataset.ip); });
+document.addEventListener("input", e => {
+  const f = e.target.dataset.filter; if (!f) return;
+  const v = e.target.value.toLowerCase(); let n = 0;
+  document.querySelectorAll(`#${f} tbody tr`).forEach(tr => { const ok = tr.dataset.s.includes(v); tr.hidden = !ok; n += ok; });
+  const c = $("#" + f + "-n"); if (c) c.textContent = n + " rows";
+});
 
-  tbl("nethosts", ["ip","hostname","vendor","mac","first seen","last seen"],
-    d.net_hosts, r=>[
-    `<span class="ip">${esc(r.ip)}</span>`,
-    esc(r.hostname||"—"),
-    `<span class="det">${esc(r.vendor||"unknown")}</span>`,
-    `<span class="det">${esc(r.mac)}</span>`,
-    esc((r.first_seen||"").replace("T"," ").slice(0,16)),
-    esc((r.last_seen||"").replace("T"," ").slice(0,16))]);
+function render() {
+  const d = D, k = d.kpi;
+  const m = $("#mode"); m.className = "pill " + (d.mode === "enforcing" ? "bad" : "ok");
+  m.innerHTML = `<span class="dot"></span>${esc(d.mode)}`;
+  $("#updated").textContent = "updated " + new Date().toLocaleTimeString();
+  const edgeBlind = (d.health.find(h => h.source === "cf-edge") || {}).note || "";
 
-  tbl("netports", ["ip","hostname","vendor","open","ports"], d.net_ports, r=>[
-    `<span class="ip">${esc(r.ip)}</span>`, esc(r.hostname||"—"),
-    `<span class="det">${esc(r.vendor||"unknown")}</span>`,
-    `<span class="num">${r.n}</span>`,
-    `<span class="det">${esc(r.ports)}</span>`]);
+  const S = d.surface || {findings: [], hosts: [], waf: [], settings: {}, pages: []};
+  renderOverview(d, edgeBlind);
+  const open = S.findings.filter(f => !f.accepted);
 
-  tbl("suppressed", ["when","kind","detail","why suppressed"], d.suppressed, r=>[
-    esc((r.ts||"").replace("T"," ").slice(5,16)),
-    esc(r.kind), `<span class="det">${esc(r.detail)}</span>`,
-    `<span class="det">${esc(r.reason)}</span>`]);
-}).catch(e=>{document.body.insertAdjacentHTML("beforeend",
-  `<p class="bad">failed to load /api: ${esc(e)}</p>`)});
+  // detections
+  $("#ban-hint").textContent = d.mode === "detect-only" ? "detect-only — these are what warden WOULD ban; nothing is applied" : "";
+  table("bans", [{h: "When", k: "ts", cls: "ts"}, {h: "Address", k: "ip", cls: "ip", ip: 1}, {h: "Country", f: r => ccCell(r.cc, r.red)},
+    {h: "Score", k: "score", cls: "num", num: 1}, {h: "State", f: r => `<span class="b ${r.state === "active" ? "red" : "amb"}">${esc(r.state)}</span>`},
+    {h: "Reasons", k: "reasons", cls: "det", title: 1}], d.bans, "No ban proposals. That is normal: the threshold is deliberately high.");
+  table("ebans", [{h: "Target", k: "target", cls: "ip mono", ip: 1}, {h: "Country", f: r => ccCell(r.cc, false)},
+    {h: "Status", f: r => `<span class="b ${{active: "block", pending: "amb", rejected: "acc", lapsed: "acc", failed: "red"}[r.status] || ""}">${esc(r.status)}</span>`},
+    {h: "Why", k: "reason", cls: "wrapd"}, {h: "Proposed", k: "created", cls: "ts"}, {h: "Until", f: r => esc((r.expires || "—").slice(0, 10)), cls: "ts"}],
+    d.edge_bans || [], "No proposals yet.");
+  badge("detections", (d.edge_bans || []).filter(b => b.status === "pending").length, false);
+  table("recent", [{h: "When", k: "ts", cls: "ts"}, {h: "Source", f: r => `<span class="b">${esc(r.source)}</span>`},
+    {h: "Address", k: "ip", cls: "ip", ip: 1}, {h: "Country", f: r => ccCell(r.cc, r.red)}, {h: "Kind", k: "kind", cls: "mono"},
+    {h: "Score", k: "score", cls: "num", num: 1}, {h: "Detail", k: "detail", cls: "det", title: 1}], d.recent);
+  badge("detections", k.bans, k.bans);
+
+  // edge
+  $("#edge-banner").innerHTML = edgeBlind.startsWith("BLIND")
+    ? `<div class="banner"><b>Edge view is blind.</b> Your Cloudflare token (<code>cloudflare.token_secret</code>) can read the WAF but not analytics.
+       Add <b>Zone → Analytics → Read</b> to that token in Cloudflare → My Profile → API Tokens, and this tab fills on the next hourly run.</div>` : "";
+  timeline($("#tl-edge"), d.edge_timeline, 0);
+  $("#waf-n").textContent = `${S.waf.length} of 5 (free plan)`;
+  $("#waf").innerHTML = S.waf.length ? `<table>${S.waf.map(w => `<tr><td><span class="b ${w.action}">${esc(w.action)}</span></td><td>${esc(w.desc)}<div class="q mono" style="font-size:11px">${esc((w.expr || "").slice(0, 140))}</div></td><td>${w.enabled ? '<span class="y">on</span>' : '<span class="n">off</span>'}</td></tr>`).join("")}</table>` : '<div class="empty">No custom rules (or not readable).</div>';
+  table("edge", [{h: "When", k: "ts", cls: "ts"}, {h: "Action", f: r => `<span class="b ${esc(r.action)}">${esc(r.action)}</span>`},
+    {h: "Address", f: r => esc(r.ip) + selfB(r), cls: "ip", ip: 1, k: "ip"}, {h: "Country", f: r => ccCell(r.cc, r.red)}, {h: "Host", k: "host", cls: "mono"},
+    {h: "Path", k: "path", cls: "det mono", title: 1}, {h: "Rule / source", f: r => esc(r.rule || r.source), cls: "det"}], d.edge,
+    edgeBlind.startsWith("BLIND") ? "Blind — see the banner above." : "Cloudflare stopped nothing in the retained window.");
+  badge("edge", edgeBlind.startsWith("BLIND") ? "!" : k.edge_24h, false);
+
+  // surface
+  const pub = S.hosts.filter(h => h.kind !== "lan-only");
+  $("#sf-kpis").innerHTML = [
+    ["Public names", pub.length, `${S.hosts.length - pub.length} LAN-only`],
+    ["Through the tunnel", S.hosts.filter(h => h.kind === "tunnel").length, "reach into the LAN"],
+    ["GitHub Pages", S.pages.length, "static, no LAN route"],
+    ["Open findings", open.length, `${S.findings.length - open.length} accepted`],
+    ["WAF rules", S.waf.length, "of 5 on the free plan"],
+  ].map(([t, v, s]) => `<div class="kpi"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join("");
+  $("#sf-ts").textContent = d.surface ? "snapshot " + ago(d.surface.snap_ts) + (S.errors && S.errors.length ? " · ⚠ " + S.errors.join("; ") : "") : "no snapshot yet";
+  table("findings", [{h: "Severity", f: r => r.accepted ? '<span class="b acc">accepted</span>' : `<span class="b ${r.sev}">${r.sev}</span>`},
+    {h: "Asset", k: "host", cls: "mono"}, {h: "Finding", k: "issue"}, {h: "Why it matters / decision", f: r => esc(r.accepted ? "✓ " + r.accepted : r.why), cls: "wrapd"}],
+    S.findings, "No findings.");
+  const hd = h => { const p = h.probe || {}; if (!p.headers) return '<span class="q">—</span>';
+    return ["strict-transport-security","content-security-policy","x-frame-options","x-content-type-options"].map(x =>
+      `<span class="${p.headers[x] ? "y" : "n"}" title="${x}">${{"strict-transport-security":"HSTS","content-security-policy":"CSP","x-frame-options":"XFO","x-content-type-options":"XCTO"}[x]}</span>`).join(" "); };
+  table("names", [{h: "Name", k: "name", cls: "mono"}, {h: "Exposure", f: r => `<span class="b ${r.kind === "tunnel" ? "amb" : r.kind === "lan-only" ? "grn" : ""}">${esc(r.kind)}</span>`},
+    {h: "Points at", f: r => esc(r.origin || r.content), cls: "det mono"}, {h: "HTTP", f: r => r.probe && r.probe.status ? `<span class="${/^[23]/.test(r.probe.status) ? "y" : /^4/.test(r.probe.status) ? "q" : "n"}">${esc(r.probe.status)}</span>` : '<span class="q">—</span>'},
+    {h: "TLS", f: r => r.probe && "tls_ok" in r.probe ? (r.probe.tls_ok ? '<span class="y">valid</span>' : '<span class="n">bad</span>') : '<span class="q">—</span>'},
+    {h: "SSO", f: r => r.kind === "tunnel" && r.probe && "sso" in r.probe ? (r.probe.sso ? '<span class="y">gated</span>' : '<span class="q">app login</span>') : '<span class="q">—</span>'},
+    {h: "Headers", f: hd}], S.hosts, "No snapshot yet — intel.py runs hourly.");
+  const st = S.settings || {}, good = {ssl: ["strict"], min_tls_version: ["1.2", "1.3"], always_use_https: ["on"], browser_check: ["on"], automatic_https_rewrites: ["on"]};
+  $("#settings").innerHTML = Object.keys(st).length ? `<table>${Object.entries(st).map(([kk, v]) => `<tr><td class="mono">${esc(kk)}</td><td><span class="${good[kk] ? (good[kk].includes(String(v)) ? "y" : "n") : ""}">${esc(v ?? "unreadable")}</span></td></tr>`).join("")}</table>` : '<div class="empty">Not readable.</div>';
+  $("#pages").innerHTML = S.pages.length ? `<table>${S.pages.map(p => `<tr><td class="mono">${esc(p.repo)}</td><td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></td></tr>`).join("")}</table>` : '<div class="empty">None.</div>';
+  table("sso", [{h: "Site", k: "host", cls: "mono"},
+    {h: "SSO", f: r => `<span class="b ${r.sso === "on" ? "ok" : r.sso === "custom" ? "info" : "amb"}">${esc(r.sso)}</span>`},
+    {h: "Live check", f: r => r.live === "login-required" ? '<span class="y">login required</span>' : `<span class="q">${esc(r.live)}</span>`}],
+    S.sso || [], "No data yet — runs with the hourly snapshot.");
+  table("ports", [{h: "Address", k: "ip", cls: "ip mono"}, {h: "Host", f: r => esc(r.hostname || "") + (r.vendor ? ` <span class="q">${esc(r.vendor)}</span>` : "")},
+    {h: "Ports", k: "n", cls: "num", num: 1}, {h: "Listening", k: "ports", cls: "wrapd mono"}], d.net_ports);
+  badge("surface", open.filter(f => f.sev !== "low").length, S.findings.some(f => f.sev === "high" && !f.accepted));
+
+  // geo
+  const RL = d.redlist, ruleOn = !!RL.rule;
+  $("#geo-banner").innerHTML = ruleOn
+    ? `<div class="banner ok"><b>Country block is live at the edge</b> — ${esc(RL.rule.desc)}</div>`
+    : `<div class="banner">Country block <b>not applied</b>. Proposed set: ${RL.block.map(c => `${flag(c)} ${esc(cname(c))}`).join(", ") || "none"}.
+       Apply with <code>cfsec.py --apply-waf</code> (dry run) then <code>--commit</code> once approved.</div>`;
+  table("geo", [{h: "Country", f: r => `<span class="flag">${flag(r.cc)}</span>${esc(cname(r.cc))}`}, {h: "Log", k: "log", cls: "num", num: 1},
+    {h: "Edge", k: "edge", cls: "num", num: 1}, {h: "IPs", k: "ips", cls: "num", num: 1},
+    {h: "Status", f: r => r.blocked ? (ruleOn ? '<span class="b block">blocked</span>' : '<span class="b red">block proposed</span>') : r.red ? '<span class="b red">red list</span>' : ""}],
+    d.geo, "No located traffic in 30 days.");
+  $("#rl-src").textContent = RL.checked ? "checked " + RL.checked : "";
+  $("#redlist").innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px">${Object.entries(RL.watch).map(([cc, nm]) =>
+    `<span class="b ${RL.block.includes(cc) ? "block" : "acc"}" title="${esc(nm)}">${flag(cc)} ${esc(cc)}${RL.block.includes(cc) ? " · block" : ""}</span>`).join("")}</div>`;
+  badge("geo", k.red_hits_7d, k.red_hits_7d);
+
+  // network
+  donut($("#ch-net"), d.charts.net_alerts, {unit: "alerts", q: x => "type:net-alert kind:" + x.k});
+  const nr = (d.net_runs || [])[0] || {};
+  $("#netrun").innerHTML = `<div class="kpi" style="border:0;padding:0"><div class="v">${nr.hosts ?? "—"}</div><div class="s">hosts answered in the last hour · ${ago(nr.last_run)}</div></div>`;
+  table("hosts", [{h: "Address", k: "ip", cls: "ip mono", ip: 1}, {h: "Name", k: "hostname"}, {h: "Vendor", k: "vendor", cls: "det"},
+    {h: "MAC", k: "mac", cls: "mono q"}, {h: "First seen", k: "first_seen", cls: "ts"}, {h: "Last seen", f: r => ago(r.last_seen), cls: "ts"}], d.net_hosts);
+  table("netalerts", [{h: "When", k: "ts", cls: "ts"}, {h: "Kind", f: r => `<span class="b ${r.kind === "NEW_DEVICE" || r.kind === "NEW_PORT" ? "amb" : ""}">${esc(r.kind)}</span>`},
+    {h: "Address", k: "ip", cls: "ip mono", ip: 1}, {h: "MAC", k: "mac", cls: "mono q"}, {h: "Detail", k: "detail", cls: "det", title: 1}], d.net_alerts);
+
+  // health
+  table("health", [{h: "Source", k: "source", cls: "mono"}, {h: "Last run", f: r => ago(r.last_run), cls: "ts"},
+    {h: "Lines 24 h", k: "lines", cls: "num", num: 1}, {h: "Scored", k: "scored", cls: "num", num: 1},
+    {h: "State", f: r => (r.note || "").startsWith("BLIND") ? `<span class="b red">blind</span> <span class="q">${esc(r.note)}</span>` :
+       (r.lines ? '<span class="b ok">reading</span>' : '<span class="b amb">0 lines</span>') + (r.note && r.note !== "ok" ? ` <span class="q">${esc(r.note)}</span>` : "")}], d.health);
+  badge("health", d.health.filter(h => (h.note || "").startsWith("BLIND") || !h.lines).length, true);
+  table("suppressed", [{h: "When", k: "ts", cls: "ts"}, {h: "Kind", k: "kind", cls: "mono"}, {h: "Detail", k: "detail", cls: "det", title: 1}, {h: "Reason", k: "reason"}],
+    d.suppressed, "Nothing suppressed.");
+}
+
+
+const SEVN = {4: "CRITICAL", 3: "HIGH", 2: "MEDIUM", 1: "LOW", 0: "UNKNOWN"};
+const sevB = v => { const n = typeof v === "number" ? SEVN[v] : v; return `<span class="b ${{CRITICAL: "high", HIGH: "med", MEDIUM: "low"}[n] || ""}">${esc(n)}</span>`; };
+function renderVulns(V) {
+  if (!V) { $("#v-kpis").innerHTML = '<div class="empty">No scan yet — vulnscan.py runs daily at 03:30.</div>'; return; }
+  const T = V.targets, tot = V.totals || {};
+  const reb = T.filter(t => t.reboot_required).length, blind = T.filter(t => t.status !== "ok");
+  $("#v-kpis").innerHTML = [
+    ["Boxes scanned", T.filter(t => t.status === "ok" || t.status === "partial").length, `${blind.length} blind / error`, blind.length ? "amb" : ""],
+    ["Known-exploited", tot.kev || 0, "CISA KEV, any box", tot.kev ? "red" : "grn"],
+    ["Critical w/ fix", tot.crit || 0, "patch these first", tot.crit ? "red" : "grn"],
+    ["Fixable CVEs", tot.fixable || 0, "a patch exists", tot.fixable ? "amb" : "grn"],
+    ["All known CVEs", tot.total || 0, "mostly no fix upstream yet", ""],
+    ["Reboot pending", reb, "new kernel / libs waiting", reb ? "amb" : "grn"],
+  ].map(([t, v, s2, c]) => `<div class="kpi ${c}"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${s2}</div></div>`).join("");
+  donut($("#ch-vsev"), V.sev_fixable, {unit: "fixable", q: x => "type:vuln kind:" + x.k, empty: "Nothing fixable — every box is current. 🎉"});
+  donut($("#ch-vbox"), V.by_target, {unit: "fixable", empty: "Nothing fixable."});
+  table("vt", [{h: "Box", f: r => `<b>${esc(r.name)}</b> <span class="q mono">${esc(r.target)}</span>`},
+    {h: "OS", k: "os", cls: "det"}, {h: "KEV", f: r => r.n_kev ? `<span class="b red">${r.n_kev}</span>` : '<span class="q">0</span>', cls: "num"},
+    {h: "Crit fix", f: r => r.n_crit_fix ? `<span class="n">${r.n_crit_fix}</span>` : '<span class="q">0</span>', cls: "num"},
+    {h: "Fixable", k: "n_fixable", cls: "num", num: 1}, {h: "All", k: "n_total", cls: "num q", num: 1},
+    {h: "Upgradable", f: r => r.upgradable == null ? '<span class="q">—</span>' : r.upgradable, cls: "num"},
+    {h: "Reboot", f: r => r.reboot_required ? `<span class="b amb" title="${esc((r.kernel || "") + " → " + (r.newest_kernel || ""))}">pending</span>` : ""},
+    {h: "Scan", f: r => `<span class="b ${r.status === "ok" ? "ok" : r.status === "partial" ? "amb" : "red"}">${esc(r.status)}</span> <span class="q">${ago(r.last_scan)}</span>` + (r.note ? `<div class="q" style="font-size:11px">${esc(r.note.slice(0, 160))}</div>` : "")},
+    {h: "", f: r => `<button class="btn" data-cves="${esc(r.target)}">CVEs</button> ` + (r.patchable ? `<button class="btn" data-patch="${esc(r.target)}" data-name="${esc(r.name)}">Patch…</button>` : "")}],
+    T, "No targets.");
+  table("vimg", [{h: "Container", f: r => `<b>${esc(r.container)}</b> <span class="q">${esc(r.host.replace(/^img:/, ""))}</span>`},
+    {h: "Image", k: "image", cls: "mono det", title: 1}, {h: "Managed", f: r => `<span class="b">${esc(r.managed)}</span>`},
+    {h: "Newer on disk", f: r => r.newer_pulled ? '<span class="b amb">yes</span>' : ""},
+    {h: "KEV", f: r => r.kev ? `<span class="b red">${r.kev}</span>` : '<span class="q">0</span>', cls: "num"},
+    {h: "Crit fix", f: r => r.crit_fix ? `<span class="n">${r.crit_fix}</span>` : '<span class="q">0</span>', cls: "num"},
+    {h: "Action", f: r => `<span class="b ${r.action === "manual" ? "acc" : "ok"}">${esc(r.action)}</span>`}, {h: "Why", k: "why", cls: "wrapd"},
+    {h: "", f: r => r.action !== "manual" ? `<button class="btn" data-patch="ctr:${esc(r.host.slice(4))}:${esc(r.container)}" data-name="${esc(r.container)}">Update…</button>` : ""}],
+    V.images || [], "No container data yet.");
+  table("vtop", [{h: "CVE", f: r => `<a href="https://nvd.nist.gov/vuln/detail/${esc(r.vid)}" target="_blank" rel="noopener" class="mono">${esc(r.vid)}</a>`},
+    {h: "Severity", f: r => sevB(r.sev)}, {h: "KEV", f: r => r.kev ? '<span class="b red">exploited</span>' : ""},
+    {h: "Boxes", k: "n_targets", cls: "num", num: 1}, {h: "Package", k: "pkgs", cls: "mono det"}, {h: "Fixed in", k: "fixed", cls: "mono"},
+    {h: "Where", k: "targets", cls: "det mono", title: 1}, {h: "Title", k: "title", cls: "det", title: 1}], V.top, "Nothing known-exploited or fixable. 🎉");
+  table("vjobs", [{h: "#", k: "id", cls: "num"}, {h: "Box", f: r => esc(r.name || r.target)},
+    {h: "Status", f: r => `<span class="b ${{done: "ok", failed: "red", refused: "red", pending: "amb", running: "amb", approved: "amb", planning: "amb"}[r.status] || "acc"}">${esc(r.status)}</span>`},
+    {h: "By", k: "requested_by"}, {h: "Requested", k: "requested", cls: "ts"},
+    {h: "When", f: r => r.timing ? `<span class="b ${String(r.timing).startsWith("now") ? "" : "info"}" title="${esc(r.timing_why || "")}">${String(r.timing).startsWith("now") ? "now" : "🌙 " + esc((r.run_after || "").slice(11, 16)) + " UTC"}</span>` : ""}, {h: "Pkgs", k: "n_pkgs", cls: "num"},
+    {h: "Fixable before → after", f: r => `${r.before_fix ?? "—"} → ${r.after_fix ?? "—"}`}, {h: "Reboot", k: "reboot", cls: "det", title: 1},
+    {h: "Snapshot", k: "snapshot", cls: "mono q"}], V.jobs, "No patch jobs yet.");
+  badge("vulns", (tot.kev || 0) + (tot.crit || 0), !!((tot.kev || 0) + (tot.crit || 0)));
+}
+document.addEventListener("click", async e => {
+  const c = e.target.closest("[data-cves]");
+  if (c) {
+    const t = c.dataset.cves;
+    document.querySelectorAll("#vt tr").forEach(tr => tr.classList.toggle("sel", tr.contains(c)));
+    $("#vdetail").innerHTML = `<h2>CVEs on <span class="mono">${esc(t)}</span> <span class="hint">KEV and fixable first</span></h2>
+      <div class="tbl-tools"><input data-filter="vdet" placeholder="filter…"><span class="n" id="vdet-n"></span></div><div class="wrap"><table id="vdet"></table></div>`;
+    const r = await (await fetch("api/vuln?target=" + encodeURIComponent(t))).json();
+    table("vdet", [{h: "CVE", k: "vid", cls: "mono"}, {h: "Severity", f: x => sevB(x.severity)}, {h: "KEV", f: x => x.kev ? '<span class="b red">exploited</span>' : ""},
+      {h: "Package", k: "pkg", cls: "mono"}, {h: "Installed", k: "installed", cls: "mono q"}, {h: "Fixed in", f: x => x.fixed ? `<span class="y mono">${esc(x.fixed)}</span>` : `<span class="q">${esc(x.status || "no fix")}</span>`},
+      {h: "Image", k: "image", cls: "mono det"}, {h: "Title", k: "title", cls: "det", title: 1}], r.rows, "No CVEs recorded.");
+    return;
+  }
+  const b = e.target.closest("[data-patch]");
+  if (!b) return;
+  if (!confirm(`Queue a patch request for ${b.dataset.name}?\n\nNothing changes yet: a plan (packages, removals, snapshot, reboot) is posted to your alerts channel and Settings, and only your ✅ runs it.`)) return;
+  b.disabled = true;
+  try {
+    const r = await (await fetch("api/patch", {method: "POST", headers: {"Content-Type": "application/json", "X-Warden": "patch"},
+      body: JSON.stringify({target: b.dataset.patch})})).json();
+    alert(r.ok ? r.msg : "Not queued: " + r.error);
+  } catch (err) { alert("Request failed: " + err); }
+  setTimeout(load, 1500);
+});
+
+function renderEndpoints(E, N) {
+  if (!E) return;
+  const H = Object.fromEntries((E.harden || []).map(h => [h.target, h]));
+  const I = E.integrity || [];
+  const open = I.reduce((a, r) => a + (r.open || 0), 0), avg = (E.harden || []).filter(h => h.idx != null);
+  const mean = avg.length ? Math.round(avg.reduce((a, h) => a + h.idx, 0) / avg.length) : "—";
+  $("#ep-kpis").innerHTML = [
+    ["Boxes watched", I.length, "integrity sweep", ""], ["Open drift", open, "needs ✅/❌", open ? "amb" : "grn"],
+    ["Avg hardening", mean, "Lynis index /100", typeof mean === "number" && mean < 60 ? "amb" : ""],
+    ["Lynis warnings", avg.reduce((a, h) => a + JSON.parse(h.warnings || "[]").length, 0), "across all boxes", ""],
+    ["IDS alerts 24 h", N ? N.ids_24h : 0, "Suricata", N && N.ids_24h ? "amb" : "grn"],
+    ["Intel hits 24 h", N ? N.intel_24h : 0, "bad domains / IPs / red list", N && N.intel_24h ? "red" : "grn"],
+  ].map(([t, v, s2, c]) => `<div class="kpi ${c}"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${s2}</div></div>`).join("");
+  const rows = I.map(r => ({...r, h: H[r.target] || {}}));
+  table("ep", [{h: "Box", f: r => `<b>${esc(r.name)}</b> <span class="q mono">${esc(r.target)}</span>`},
+    {h: "Sweep", f: r => `<span class="b ${r.status === "ok" ? "ok" : "red"}">${esc(r.status)}</span> <span class="q">${ago(r.ts)}</span>`},
+    {h: "Facts", k: "facts", cls: "num"}, {h: "Open drift", f: r => r.open ? `<span class="b amb">${r.open}</span>` : '<span class="q">0</span>', cls: "num"},
+    {h: "Hardening", f: r => r.h.idx == null ? '<span class="q">—</span>' : `<b class="${r.h.idx < 60 ? "n" : r.h.idx < 70 ? "" : "y"}">${r.h.idx}</b>` + (r.h.prev_idx != null && r.h.prev_idx !== r.h.idx ? ` <span class="q">(was ${r.h.prev_idx})</span>` : "")},
+    {h: "Lynis warnings", f: r => r.h.warnings ? JSON.parse(r.h.warnings).length : '<span class="q">—</span>', cls: "num"},
+    {h: "Notes", f: r => esc(r.note || r.h.note || ""), cls: "det"},
+    {h: "", f: r => r.h.idx != null ? `<button class="btn" data-hard="${esc(r.target)}">Details</button>` : ""}], rows, "No sweeps yet.");
+  table("epf", [{h: "When", k: "ts", cls: "ts"}, {h: "Box", k: "target", cls: "mono"}, {h: "Kind", k: "kind"},
+    {h: "Change", f: r => `<span class="b ${r.kind === "bad" ? "red" : r.change === "removed" ? "" : "amb"}">${esc(r.change)}</span>`},
+    {h: "Item", k: "item", cls: "mono det", title: 1}, {h: "Now", k: "new", cls: "det mono", title: 1},
+    {h: "Status", f: r => `<span class="b ${r.status === "open" ? "amb" : "acc"}">${esc(r.status)}</span>`}, {h: "Note", k: "note", cls: "det"}],
+    E.findings, "No findings.");
+  badge("endpoints", open + (N ? N.intel_24h : 0), !!(N && N.intel_24h));
+  window._harden = H;
+}
+function renderNetsec(N) {
+  if (!N) return;
+  donut($("#ch-ids"), N.ids_top.map(x => ({k: x.k, n: x.n, red: x.sev === 1})), {unit: "alerts", q: x => "type:ids " + x.k.split(" ").slice(0, 3).join(" ")});
+  donut($("#ch-intel"), N.intel_by_device, {unit: "hits", empty: "No threat-intel hits. 🎉"});
+  table("ids", [{h: "When", k: "ts", cls: "ts"}, {h: "Sev", f: r => `<span class="b ${r.severity === 1 ? "high" : r.severity === 2 ? "med" : "low"}">${r.severity}</span>`},
+    {h: "Signature", k: "signature", cls: "det", title: 1}, {h: "Category", k: "category", cls: "det"},
+    {h: "From", f: r => `${esc(r.src)}:${r.sport ?? ""}`, cls: "mono"}, {h: "To", f: r => `${esc(r.dst)}:${r.dport ?? ""}`, cls: "mono"},
+    {h: "App", f: r => esc(r.app || r.proto)}, {h: "Country", f: r => ccCell(r.cc, false)}], N.ids_recent, "No IDS alerts.");
+  table("intel", [{h: "When", k: "ts", cls: "ts"}, {h: "Device", f: r => `<b>${esc(r.device_name || "")}</b> <span class="mono q">${esc(r.device)}</span>`},
+    {h: "Kind", f: r => `<span class="b red">${esc(r.kind)}</span>`}, {h: "Indicator", k: "indicator", cls: "mono"}, {h: "Feed", k: "feed"},
+    {h: "Detail", k: "detail", cls: "det", title: 1}], N.intel, "No threat-intel hits — no device on the LAN looked up a known-bad domain or talked to a known-bad IP.");
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-hard]"); if (!b) return;
+  const h = (window._harden || {})[b.dataset.hard]; if (!h) return;
+  const w = JSON.parse(h.warnings || "[]"), s = JSON.parse(h.suggestions || "[]");
+  $("#ep-detail").innerHTML = `<h2>Lynis · ${esc(h.name)} <span class="hint">index ${h.idx} · ${h.tests} tests · ${ago(h.ts)}</span></h2>
+    <div class="grid g2"><div class="card"><h3>Warnings (${w.length})</h3>${w.length ? `<table>${w.map(x => `<tr><td class="mono q">${esc(x.id)}</td><td>${esc(x.text)}</td></tr>`).join("")}</table>` : '<div class="empty">None.</div>'}</div>
+    <div class="card"><h3>Suggestions (${s.length})</h3><div style="max-height:360px;overflow:auto"><table>${s.map(x => `<tr><td class="mono q">${esc(x.id)}</td><td>${esc(x.text)}${x.detail ? `<div class="q" style="font-size:11px">${esc(x.detail)}</div>` : ""}</td></tr>`).join("")}</table></div></div></div>`;
+});
+
+
+// ── Overview: driven by the saved layout (Customise) ─────────────────────────
+const pick = (o, path) => path.split(".").reduce((x, k) => x == null ? x : x[k], o);
+function kpiDefs(d, edgeBlind) {
+  const k = d.kpi, V = (d.vuln || {}).totals || {}, N = d.netsec || {}, E = d.endpoints || {integrity: []};
+  const blind = edgeBlind.startsWith("BLIND"), integ = E.integrity.reduce((a, r) => a + (r.open || 0), 0), ap = (d.approvals || []).length;
+  return {
+    events_24h: ["Detections 24 h", k.events_24h, `${k.events_7d} in 30 days`, "", "detections"],
+    ips_7d: ["Scored IPs 30 d", k.ips_7d, `${d.unattributed} unattributed`, "", "detections"],
+    edge_24h: ["Edge blocks 24 h", blind ? "—" : k.edge_24h, blind ? "needs CF Analytics:Read" : `blocked/challenged · ${k.edge_self_30d} own-IP rows ignored`, blind ? "amb" : "", "edge"],
+    red_hits_7d: ["Red-list hits 30 d", k.red_hits_7d, "red-listed country traffic", k.red_hits_7d ? "red" : "grn", "geo"],
+    findings_open: ["Open findings", k.findings_open, `${k.findings_high} high`, k.findings_high ? "red" : k.findings_open ? "amb" : "grn", "surface"],
+    bans: ["Ban proposals", k.bans, d.mode, k.bans ? "amb" : "", "detections"],
+    hosts: ["LAN hosts", k.hosts, `${k.ports} listening ports`, "", "network"],
+    vuln_kev: ["Known-exploited CVEs", V.kev || 0, "CISA KEV, any box", V.kev ? "red" : "grn", "vulns"],
+    vuln_fixable: ["Fixable CVEs", V.fixable || 0, `${V.crit || 0} critical`, V.crit ? "red" : V.fixable ? "amb" : "grn", "vulns"],
+    ids_24h: ["IDS alerts 24 h", N.ids_24h || 0, `${N.intel_24h || 0} threat-intel hits`, N.ids_24h ? "amb" : "grn", "network"],
+    integrity_open: ["Integrity changes", integ, "open, not yet accepted", integ ? "amb" : "grn", "endpoints"],
+    approvals: ["Waiting for you", ap, "approve in Settings or chat", ap ? "amb" : "grn", "settings"],
+  };
+}
+const KPI_TITLES = {events_24h: "Detections 24 h", ips_7d: "Scored IPs 30 d", edge_24h: "Edge blocks 24 h", red_hits_7d: "Red-list hits",
+  findings_open: "Open findings", bans: "Ban proposals", hosts: "LAN hosts", vuln_kev: "Known-exploited CVEs", vuln_fixable: "Fixable CVEs",
+  ids_24h: "IDS alerts 24 h", integrity_open: "Integrity changes", approvals: "Waiting for you"};
+let LAYOUT = null, EDIT = null;
+
+function renderOverview(d, edgeBlind) {
+  LAYOUT = d.layout; const W = d.widgets, defs = kpiDefs(d, edgeBlind);
+  $("#kpis").innerHTML = LAYOUT.kpis.map(id => defs[id]).filter(Boolean).map(([t, v, s, cls, go]) =>
+    `<div class="kpi ${cls}" data-go="${go}"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${esc(s)}</div></div>`).join("");
+  document.querySelectorAll(".kpi[data-go]").forEach(x => x.onclick = () => show(x.dataset.go));
+  const box = $("#ov-widgets");
+  if (!LAYOUT.widgets.length) { box.innerHTML = '<div class="empty s4">No charts pinned — press <b>Customise</b>.</div>'; return; }
+  box.innerHTML = LAYOUT.widgets.map(id => `<div class="card s${W[id].size || 1}"><h3>${esc(W[id].title)}</h3><div id="w-${id}"></div></div>`).join("");
+  for (const id of LAYOUT.widgets) {
+    const w = W[id], el = $("#w-" + id);
+    if (w.type === "donut") {
+      let rows = pick(d, w.src) || [];
+      if (id === "ids") rows = rows.map(x => ({k: x.k, n: x.n, red: x.sev === 1}));
+      const o = {unit: w.unit};
+      if (w.q) o.q = x => w.q + (id === "ids" ? x.k.split(" ").slice(0, 3).join(" ") : x.k);
+      if (id === "country") o.label = x => `${flag(x.k)} ${esc(cname(x.k))}${x.red ? " ●" : ""}`;
+      if (id === "edge" && edgeBlind.startsWith("BLIND")) o.empty = "Blind until the Cloudflare token gets <b>Zone Analytics:Read</b>.";
+      donut(el, rows, o);
+    } else if (w.type === "timeline") timeline(el, pick(d, w.src) || [], w.days);
+    else if (w.type === "findings") {
+      const open = ((d.surface || {}).findings || []).filter(f => !f.accepted);
+      el.innerHTML = open.length ? `<table>${open.slice(0, 7).map(f => `<tr><td><span class="b ${f.sev}">${f.sev}</span></td><td class="mono">${esc(f.host)}</td><td class="wrapd">${esc(f.issue)}</td></tr>`).join("")}</table>
+        <div class="note"><a href="#surface" onclick="show('surface');return false">all ${open.length} →</a></div>` : '<div class="empty">No open findings. 🎉</div>';
+    } else if (w.type === "approvals") {
+      const ap = d.approvals || [];
+      el.innerHTML = ap.length ? ap.slice(0, 5).map(a => `<div class="q" style="margin-bottom:6px">${esc(a.text.split("\n")[0]).slice(0, 140)}</div>`).join("") +
+        `<div class="note"><a href="#settings" onclick="show('settings');return false">decide →</a></div>` : '<div class="empty">Nothing waiting. 🎉</div>';
+    } else if (w.type === "top") {
+      el.innerHTML = '<div class="wrap" style="border:0"><table id="ov-top"></table></div>';
+      table("ov-top", [
+        {h: "Address", k: "ip", cls: "ip", ip: 1}, {h: "Country", f: r => ccCell(r.cc, r.red)}, {h: "Score", k: "score", cls: "num", num: 1},
+        {h: "Events", k: "n", cls: "num", num: 1}, {h: "Behaviour", f: r => (r.kinds || "").split(",").map(x => `<span class="b">${esc(x)}</span>`).join(" ")},
+        {h: "Last seen", f: r => ago(r.last), cls: "ts"}], d.top, "No scored addresses in 30 days.");
+    }
+  }
+}
+
+function openEditor() {
+  EDIT = {kpis: [...LAYOUT.kpis], widgets: [...LAYOUT.widgets]};
+  drawEditor(); $("#ov-editor").hidden = false; $("#ov-edit").textContent = "Close";
+}
+function drawEditor() {
+  const W = D.widgets;
+  const list = (kind, all, title) => {
+    const on = EDIT[kind], order = [...on, ...all.filter(x => !on.includes(x))];
+    return `<h3>${title}</h3><div class="pick">${order.map(id => `<label class="${on.includes(id) ? "on" : ""}">
+      <input type="checkbox" data-k="${kind}" data-id="${id}" ${on.includes(id) ? "checked" : ""}>${esc(kind === "kpis" ? KPI_TITLES[id] : W[id].title)}
+      ${on.includes(id) ? `<span class="mv"><button data-mv="-1" data-k="${kind}" data-id="${id}" title="earlier">↑</button><button data-mv="1" data-k="${kind}" data-id="${id}" title="later">↓</button></span>` : ""}</label>`).join("")}</div>`;
+  };
+  $("#ov-editor").innerHTML = list("kpis", Object.keys(KPI_TITLES), "Numbers across the top") + list("widgets", Object.keys(W), "Charts and tables") +
+    `<div class="row" style="margin:0"><button class="btn" id="ed-save">Save layout</button><button class="btn ghost" id="ed-reset">Back to default</button><span class="q" id="ed-msg" style="align-self:center"></span></div>`;
+}
+document.addEventListener("change", e => {
+  const c = e.target; if (!c.dataset || !c.dataset.k || c.type !== "checkbox") return;
+  const arr = EDIT[c.dataset.k]; if (c.checked) { if (!arr.includes(c.dataset.id)) arr.push(c.dataset.id); } else arr.splice(arr.indexOf(c.dataset.id), 1);
+  drawEditor(); previewLayout();
+});
+document.addEventListener("click", async e => {
+  const mv = e.target.closest("[data-mv]");
+  if (mv) { e.preventDefault(); const arr = EDIT[mv.dataset.k], i = arr.indexOf(mv.dataset.id), j = i + +mv.dataset.mv;
+    if (j >= 0 && j < arr.length) { [arr[i], arr[j]] = [arr[j], arr[i]]; drawEditor(); previewLayout(); } return; }
+  if (e.target.id === "ov-edit") { $("#ov-editor").hidden ? openEditor() : ($("#ov-editor").hidden = true, $("#ov-edit").textContent = "Customise", load()); }
+  if (e.target.id === "ed-save" || e.target.id === "ed-reset") {
+    const r = await post("api/layout", "layout", e.target.id === "ed-reset" ? {reset: true} : EDIT);
+    $("#ed-msg").textContent = r.ok ? "saved ✓" : "save failed: " + (r.error || "");
+    if (r.ok) { D.layout = r.layout; if (e.target.id === "ed-reset") { EDIT = {kpis: [...r.layout.kpis], widgets: [...r.layout.widgets]}; drawEditor(); } previewLayout(); }
+  }
+});
+function previewLayout() { D.layout = {...D.layout, ...EDIT}; renderOverview(D, ((D.health.find(h => h.source === "cf-edge") || {}).note || "")); }
+
+async function post(url, hdr, body) {
+  try { const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json", "X-Warden": hdr}, body: JSON.stringify(body)});
+        return await r.json(); } catch (e) { return {ok: false, error: String(e)}; }
+}
+
+// ── Settings: approvals, setup checks, tokens, snippets ──────────────────────
+let SET = null;
+async function loadSettings() {
+  try { SET = await (await fetch("api/settings", {cache: "no-store"})).json(); } catch { return; }
+  const ap = SET.approvals || [];
+  badge("settings", ap.length, false);
+  $("#appr").innerHTML = ap.length ? ap.map(a => { const ch = JSON.parse(a.choices || "[]");
+    return `<div class="appr"><pre>${esc(a.text)}</pre><div style="display:flex;flex-direction:column;gap:6px">${ch.map(c =>
+      `<button class="btn ${c === "❌" ? "ghost" : ""} sm" data-appr="${esc(a.id)}" data-c="${c}">${c} ${{"✅": "approve", "❌": "reject", "⚡": "approve, now"}[c] || ""}</button>`).join("")}</div></div>`; }).join("")
+    : '<div class="empty">Nothing waiting for a decision.</div>';
+  const sc = SET.score; $("#setup-score").textContent = `${sc.required_ok}/${sc.required} required · ${sc.optional_ok}/${sc.optional} optional`;
+  table("setup", [{h: "", f: r => r.ok ? '<span class="y">✓</span>' : r.optional ? '<span class="q">○</span>' : '<span class="n">✗</span>'},
+    {h: "Check", f: r => esc(r.title) + (r.optional ? ' <span class="q">optional</span>' : "")}, {h: "Detail", k: "detail", cls: "det mono", title: 1},
+    {h: "Fix", f: r => r.ok ? "" : esc(r.fix), cls: "wrapd"}], SET.checks);
+  table("toks", [{h: "Name", k: "name"}, {h: "Token", k: "hint", cls: "mono"}, {h: "Uses", k: "uses", cls: "num", num: 1},
+    {h: "Last used", f: r => ago(r.last_used), cls: "ts"},
+    {h: "", f: r => r.revoked ? '<span class="q">revoked</span>' : `<button class="btn ghost sm" data-revoke="${r.id}">revoke</button>`}],
+    SET.tokens, "No tokens yet.");
+  const mcp = SET.mcp_url || location.origin + location.pathname.replace(/\/$/, "") + "/mcp", api = SET.api_url || mcp.replace(/\/mcp$/, "/api/v1");
+  $("#snips").innerHTML = `<div class="q">Hermes (config.yaml → mcp_servers)</div><pre class="snip">warden:
+  url: ${esc(mcp)}
+  headers:
+    Authorization: "Bearer \${WARDEN_TOKEN}"</pre>
+  <div class="q">Claude Code</div><pre class="snip">claude mcp add --transport http warden ${esc(mcp)} \\
+  --header "Authorization: Bearer $WARDEN_TOKEN"</pre>
+  <div class="q">Any HTTP client</div><pre class="snip">curl -H "Authorization: Bearer $WARDEN_TOKEN" ${esc(api)}/summary</pre>
+  ${SET.mcp_url ? "" : '<div class="note">Set <code>api.public_url</code> in warden.yml if agents reach warden at a different address.</div>'}`;
+}
+document.addEventListener("click", async e => {
+  const a = e.target.closest("[data-appr]");
+  if (a) { a.disabled = true; const r = await post("api/approvals", "approvals", {id: a.dataset.appr, choice: a.dataset.c});
+    if (!r.ok) alert("Could not record that — it may already be decided."); loadSettings(); return; }
+  const rv = e.target.closest("[data-revoke]");
+  if (rv && confirm("Revoke this token? Anything using it stops working immediately.")) { await post("api/tokens", "tokens", {revoke: +rv.dataset.revoke}); loadSettings(); return; }
+  if (e.target.id === "tok-new") {
+    const r = await post("api/tokens", "tokens", {name: $("#tok-name").value.trim() || "agent"});
+    $("#tok-once").innerHTML = r.ok ? `<div class="tokbox">${esc(r.token)}</div><div class="note" style="margin:0 0 8px">${esc(r.note)}</div>` : `<div class="n">${esc(r.error || "failed")}</div>`;
+    $("#tok-name").value = ""; loadSettings();
+  }
+});
+
+async function load() {
+  try { D = await (await fetch("api", {cache: "no-store"})).json(); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); loadSettings(); }
+  catch (e) { console.error("warden render:", e); $("#updated").textContent = "⚠ refresh failed"; }
+}
+
+async function runSearch(text) {
+  $("#q").value = text; show("search");
+  $("#s-meta").textContent = "searching…";
+  const r = await (await fetch("api/search?q=" + encodeURIComponent(text))).json();
+  $("#s-meta").textContent = `${r.total} match${r.total === 1 ? "" : "es"} for “${r.q}”${r.total > 500 ? " · showing newest 500" : ""}`;
+  table("sres", [{h: "When", k: "ts", cls: "ts"}, {h: "Type", f: x => `<span class="b t-${x.type}">${x.type}</span>`},
+    {h: "Source", k: "source"}, {h: "Address", k: "ip", cls: "ip", ip: 1}, {h: "Country", f: x => ccCell(x.cc, x.red)},
+    {h: "Kind", k: "kind", cls: "mono"}, {h: "Detail", k: "detail", cls: "det", title: 1}], r.rows, "No matches.");
+  badge("search", r.total, false);
+}
+
+$("#s-chips").innerHTML = ["type:edge", "kind:auth-failure", "kind:sensitive-file", "src:authelia", "type:net-alert kind:NEW_DEVICE", "cc:RU", "cc:CN"]
+  .map(c => `<button class="chip">${c}</button>`).join("");
+$("#s-chips").onclick = e => { if (e.target.classList.contains("chip")) runSearch(e.target.textContent); };
+$("#q").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.value.trim()) runSearch(e.target.value.trim()); if (e.key === "Escape") e.target.blur(); });
+document.addEventListener("keydown", e => { if (e.key === "/" && document.activeElement.tagName !== "INPUT") { e.preventDefault(); $("#q").focus(); } });
+
+nav();
+let start = location.hash.slice(1);
+if (!TABS.some(t => t[0] === start)) { try { start = localStorage.getItem("warden-tab") || "overview"; } catch { start = "overview"; } }
+show(TABS.some(t => t[0] === start) ? start : "overview");
+window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (TABS.some(t => t[0] === h)) show(h); });
+load(); setInterval(load, 60000);
 </script>
+</html>

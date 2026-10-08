@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """bringup — wait for the bot to gain Manage Webhooks, then create the
-#network-admin-alerts webhook and deploy edge-sentry in the same process.
+alert-channel webhook (notify.channel in warden.yml) and deploy edge-sentry
+in the same process. Needs the Discord bot token (notify.token_secret).
 
 Doing it in one process is deliberate: the webhook URL is a credential, and
 passing it between steps would put it in a command line (visible in `ps`) or
@@ -12,21 +13,26 @@ creating a second one, and deploy.py skips routes that already exist.
 """
 import sys
 import time
+from pathlib import Path
 
-sys.path.insert(0, "/opt/hermes-agent")
-sys.path.insert(0, "/opt/warden/edge-sentry")
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE))
 
 import requests                                    # noqa: E402
-import notify                                      # noqa: E402
 import deploy as D                                 # noqa: E402
+from wlib import config, notify, secrets           # noqa: E402
 
-CHANNEL = "YOUR_CHANNEL_ID"
+CHANNEL = notify.channel()
 POLL_SECONDS = 15
 MAX_WAIT = int(sys.argv[1]) if len(sys.argv) > 1 else 600
 
 
 def main():
-    tok = notify._get_discord_token()
+    tok = secrets.get(config.get("notify.token_secret") or "DISCORD_BOT_TOKEN")
+    if not tok or not CHANNEL:
+        print("needs notify.channel and a Discord bot token (DISCORD_BOT_TOKEN)", file=sys.stderr)
+        return 2
     h = {"Authorization": "Bot " + tok}
     base = f"https://discord.com/api/v10/channels/{CHANNEL}/webhooks"
 
@@ -40,7 +46,7 @@ def main():
             return 1
         if waited >= MAX_WAIT:
             print(f"still no Manage Webhooks after {waited}s — grant it on the "
-                  f"Pat-McChatty role (or as a channel override) and re-run.",
+                  f"bot's role (or as a channel override) and re-run.",
                   file=sys.stderr)
             return 2
         time.sleep(POLL_SECONDS)
@@ -63,11 +69,11 @@ def main():
 
     url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
 
-    # Hand it straight to the deploy path in-process. deploy.main() reads
-    # Infisical first, so shim the lookup rather than putting the URL on argv.
+    # Hand it straight to the deploy path in-process. deploy.main() reads the
+    # secret store first, so shim the lookup rather than putting the URL on argv.
     orig = D.secret
 
-    def patched(key, path):
+    def patched(key, path=None):
         if key == "EDGE_WEBHOOK":
             return url
         return orig(key, path)

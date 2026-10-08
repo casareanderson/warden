@@ -35,45 +35,28 @@ from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-DB = BASE / "data" / "warden.db"
-CONF = BASE / "warden.yml"
-# The host holding the log-source containers, reached over SSH. Set it
-# for your estate; the collectors below run `docker exec` on it. There is
-# nothing magic about SSH+docker here - swap the collectors for however
-# your logs are reachable.
+sys.path.insert(0, str(BASE))
+from wlib import config, secrets  # noqa: E402
+
+DB = Path(config.DB)
+CONF = config.CONF
+# Legacy: one host holding all log-source containers, reached over SSH.
+# Prefer `sources:` in warden.yml (see source_conf). Kept so an old install
+# that only set this env var keeps collecting.
 LOG_HOST = os.environ.get("WARDEN_LOG_HOST", "")
 
 # ---------------------------------------------------------------- config ---
+CONF_KEYS = ("enforce", "ban_threshold", "max_bans_per_run", "window_minutes", "allow", "ban_hours",
+             "subnet_threshold", "subnet_min_ips")
+
+
 def load_conf():
-    """Deliberately tiny YAML subset — no PyYAML dependency on this box."""
-    cfg = {
-        "enforce": False, "ban_threshold": 12, "max_bans_per_run": 3,
-        "window_minutes": 60, "allow": [], "ban_hours": 24,
-        "subnet_threshold": 20, "subnet_min_ips": 3,
-    }
-    if not CONF.exists():
-        return cfg
-    key = None
-    for raw in CONF.read_text().splitlines():
-        line = raw.split("#", 1)[0].rstrip()
-        if not line.strip():
-            continue
-        if line.startswith("  - ") and key:
-            cfg.setdefault(key, []).append(line[4:].strip().strip('"\''))
-            continue
-        if ":" in line and not line.startswith(" "):
-            k, v = line.split(":", 1)
-            k, v = k.strip(), v.strip().strip('"\'')
-            key = k
-            if v == "":
-                cfg[k] = []
-            elif v.lower() in ("true", "false"):
-                cfg[k] = v.lower() == "true"
-            elif v.isdigit():
-                cfg[k] = int(v)
-            else:
-                cfg[k] = v
-    return cfg
+    """The scoring settings from warden.yml (defaults in wlib.config.DEFAULTS).
+    Same keys as ever — edgeban imports this."""
+    c = config.cfg()
+    out = {k: c[k] for k in CONF_KEYS}
+    out["allow"] = [str(x) for x in (out["allow"] or [])]
+    return out
 
 # ------------------------------------------------------------- allowlist ---
 # Cloudflare's published ranges. Banning these = banning the front door.
@@ -157,32 +140,65 @@ def wm_set(con, src, pos):
                 "on conflict(source) do update set pos=excluded.pos", (src, str(pos)))
 
 # ------------------------------------------------------------- collectors --
-def zssh(cmd, timeout=60):
-    """Run a command on the log host over SSH. Complex quoting breaks over this
-    hop, so callers keep the commands they pass simple."""
-    if not LOG_HOST:
+# Where each log lives. warden.yml:
+#   sources:
+#     npm:         {ssh: me@nas, container: npmplus,  log: /data/nginx/logs/access.log}
+#     authelia:    {ssh: me@nas, container: crowdsec, log: /acquis/authelia.log}
+#     cloudflared: {ssh: me@nas, container: cloudflared}
+# `ssh: local` reads on this box; no `container` reads the file on the host itself.
+# A source that is not configured is skipped (0 lines), never an error.
+LEGACY = {"npm": {"container": "npmplus", "log": "/data/nginx/logs/access.log"},
+          "authelia": {"container": "crowdsec", "log": "/acquis/authelia.log"},
+          "cloudflared": {"container": "cloudflared"}}
+
+
+def source_conf(name):
+    c = config.get(f"sources.{name}")
+    if c:
+        return dict(LEGACY.get(name, {}), **c)
+    if LOG_HOST:
+        return dict(LEGACY.get(name, {}), ssh=LOG_HOST)
+    return None
+
+
+def src_sh(src, cmd, timeout=60, in_container=True):
+    """Run a simple command where the source lives. Complex quoting breaks over
+    an SSH hop, so callers keep the commands they pass simple. "" on failure."""
+    if not src or not src.get("ssh"):
         return ""
+    if in_container and src.get("container"):
+        cmd = f"docker exec {src['container']} sh -c '{cmd}'"
+    argv = (["sh", "-c", cmd] if src["ssh"] == "local" else
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", src["ssh"], cmd])
     try:
-        p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-                            LOG_HOST, cmd], capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
         return p.stdout if p.returncode == 0 else ""
     except Exception:
         return ""
 
-def collect_npm(con):
-    """NPMplus access log. Byte-offset watermark; resets on rotation."""
-    size = zssh("docker exec npmplus sh -c 'wc -c < /data/nginx/logs/access.log'").strip()
+
+def tail_log(con, name):
+    """Byte-offset watermark over one log file; resets on rotation."""
+    src = source_conf(name)
+    if not src or not src.get("log"):
+        return [], 0
+    size = src_sh(src, f"wc -c < {src['log']}").strip()
     if not size.isdigit():
         return [], 0
     size = int(size)
-    pos = int(wm_get(con, "npm") or 0)
+    pos = int(wm_get(con, name) or 0)
     if size < pos:            # rotated
         pos = 0
     if size == pos:
         return [], 0
-    chunk = zssh(f"docker exec npmplus sh -c 'tail -c +{pos+1} /data/nginx/logs/access.log'")
-    wm_set(con, "npm", size)
+    chunk = src_sh(src, f"tail -c +{pos+1} {src['log']}")
+    wm_set(con, name, size)
     return chunk.splitlines(), size - pos
+
+
+def collect_npm(con):
+    """NPMplus access log."""
+    return tail_log(con, "npm")
 
 # NPMplus format. NOTE the bracketed timestamp CONTAINS A SPACE, so the client
 # IP is the 4th whitespace field, not the 3rd. Getting this wrong makes the
@@ -196,15 +212,7 @@ AUTH_FAIL = re.compile(r'remote_ip=(?P<ip>[0-9a-fA-F:.]+)')
 CFD_RE = re.compile(r'dest=https?://(?P<host>[^/\s]+)(?P<path>\S*)')
 
 def collect_authelia(con):
-    size = zssh("docker exec crowdsec sh -c 'wc -c < /acquis/authelia.log'").strip()
-    if not size.isdigit():
-        return [], 0
-    size = int(size); pos = int(wm_get(con, "authelia") or 0)
-    if size < pos: pos = 0
-    if size == pos: return [], 0
-    chunk = zssh(f"docker exec crowdsec sh -c 'tail -c +{pos+1} /acquis/authelia.log'")
-    wm_set(con, "authelia", size)
-    return chunk.splitlines(), size - pos
+    return tail_log(con, "authelia")
 
 def collect_cloudflared(con):
     """The tunnel's own log — the ONLY place that sees hostnames routed direct
@@ -214,9 +222,12 @@ def collect_cloudflared(con):
     a 5-minute timer a fixed 10-minute window re-reads half of every previous
     run, double-counting each attack and inflating scores toward a false ban.
     """
+    src = source_conf("cloudflared")
+    if not src or not src.get("container"):
+        return [], 0
     since = wm_get(con, "cloudflared") or "10m"
     started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    out = zssh(f"docker logs cloudflared --since {since} 2>&1 | tail -400")
+    out = src_sh(src, f"docker logs {src['container']} --since {since} 2>&1 | tail -400", in_container=False)
     wm_set(con, "cloudflared", started)
     return out.splitlines(), len(out)
 
@@ -319,8 +330,8 @@ def score_cloudflared(line):
 def cf_ban(ip, note, cfg):
     """Cloudflare IP Access Rule — block at the edge. Only layer that works."""
     import urllib.request
-    tok = os.environ.get("CLOUDFLARE_API_TOKEN")
-    acct = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+    tok = secrets.get("CLOUDFLARE_API_TOKEN")
+    acct = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or config.get("cloudflare.account_id")
     if not tok or not acct:
         return False, "no CF credentials in env"
     # Cloudflare access rules use a different target keyword for a range.

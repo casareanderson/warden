@@ -36,10 +36,26 @@ enforcement caveats below apply. Read this before you flip `enforce: true`.
 
 ## Coupling
 
-The three collectors are specific to one estate's log layout (container names,
-paths, an SSH+docker hop). Treat them as worked examples and adapt them; the
+The collectors are configurable (`sources:` in warden.yml: SSH target, container,
+log path) but the **parsers** assume three formats: NGINX/NPMplus access logs,
+Authelia, and cloudflared. Other proxies or SSO portals need a parser; the
 scoring, timestamp handling, dedup, /24 roll-up and edge-ban logic are general.
 
+## v2: API, MCP and approvals
+
+- **Serve it over TLS.** `/api/v1` and `/mcp` use bearer tokens. Over plain HTTP
+  on an untrusted network a token can be sniffed — put warden behind a TLS proxy
+  before agents on other machines connect to it.
+- **Your proxy must not put a login page in front of `/mcp` or `/api/v1`.** An MCP
+  client cannot follow a redirect; it receives HTML, reports a parse error, and the
+  real cause is invisible from the agent's side.
+- **A dashboard approval is the owner's approval.** Anyone who can reach the console
+  can approve a patch plan. That is why the console binds to localhost and expects
+  auth in front of it — don't expose it without some.
+- **Large estates make big MCP answers.** Tool results are capped at 200 KB and
+  say so when truncated; ask narrower questions (a target, an IP, fewer hours).
+- **Run the trivy server with its token in a file or environment file,** not on its
+  command line — `--token` on the command line is readable by every local user via `ps`.
 
 ## netscan
 

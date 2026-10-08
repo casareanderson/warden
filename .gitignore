@@ -1,8 +1,14 @@
+# never commit an estate's own config, secrets or data
+warden.yml
+warden.yml.bak
+netscan.yml
+redlist.yml
+self-ips.txt
 data/
 *.db
 *.db-wal
 *.db-shm
+*.env
+.venv/
 __pycache__/
 *.pyc
-warden.yml
-*.env

@@ -1,225 +1,227 @@
 # warden
 
-A dependency-free intrusion detector for a homelab behind a Cloudflare tunnel: it reads the logs your WAF can't see, scores hostile behaviour, and proposes bans at the Cloudflare edge. Detect-only by default.
+A lightweight, self-hosted security console for a homelab or small estate. warden reads the logs your WAF can't see, sweeps your LAN, scans your machines and containers for vulnerabilities, watches files for drift, and lets your AI agent ask it questions over MCP. Detect-only by default: anything that changes something waits for your approval.
 
-![warden.py scoring six sample access-log lines and refusing a /24 ban that would cover an allowlisted address](docs/scoring-demo.png)
+![warden Overview: headline numbers, detection breakdowns, a 30-day timeline, open attack-surface findings and the top-scoring addresses](docs/v2-overview.png)
 
-*The real scorer (`score_npm()`) and range guard (`net_overlaps_allow()`) run against sample lines using documentation addresses. `203.0.113.7` is in the allowlist, so its whole /24 is refused.*
+*The Overview on demo data (`tools/demo.py`: documentation addresses only). Every chart and number on it can be swapped. See [Make the home page yours](#make-the-home-page-yours).*
 
-![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue) ![Python 3](https://img.shields.io/badge/python-3-3776ab) ![Mode: detect-only](https://img.shields.io/badge/mode-detect--only-2ea44f)
+![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue) ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776ab) ![Mode: detect-only](https://img.shields.io/badge/mode-detect--only-2ea44f) ![MCP](https://img.shields.io/badge/MCP-read--only-8a63d2)
 
 ## Contents
 
-- [The idea](#the-idea)
+- [What's new in v2](#whats-new-in-v2)
 - [What it does](#what-it-does)
-- [Screenshots](#screenshots)
+- [Minimum spec](#minimum-spec)
 - [Quick start](#quick-start)
-- [Usage](#usage)
+- [Connect your agent (MCP and REST)](#connect-your-agent-mcp-and-rest)
+- [Make the home page yours](#make-the-home-page-yours)
+- [Approvals](#approvals)
 - [Configuration](#configuration)
 - [How it works](#how-it-works)
+- [Security model](#security-model)
 - [Status, limits and real results](#status-limits-and-real-results)
-- [Licence and credits](#licence-and-credits)
+- [Roadmap](#roadmap)
+- [Support and licence](#support-and-licence)
 
-## The idea
+## What's new in v2
 
-If your services sit behind a Cloudflare tunnel, a local `iptables` ban does nothing. At layer 3 every packet comes from Cloudflare's edge. The attacker's real IP exists only in the HTTP layer (`CF-Connecting-IP`). So:
-
-- a local ban keyed on the attacker never matches a packet, and
-- banning what does arrive at layer 3 bans Cloudflare and takes your whole estate offline.
-
-warden reads the real IP out of the access logs and enforces with Cloudflare IP Access Rules, before traffic enters the tunnel. There is no `iptables` or `nftables` code in it.
+- **Runs on your estate, not the author's.** Machines, log sources, alerts and secrets are all in `warden.yml`. `warden-setup init` writes it for you.
+- **An MCP connector and a REST API**, both read-only and token-protected, so Hermes, Claude, Cursor or a script can ask "what's attacking me?" and get real data back.
+- **A home page you can arrange**: pick which numbers, pies, timelines and tables appear, and in what order.
+- **Approvals without chat**: Discord reactions still work, and now the dashboard's Settings tab can approve or reject too, so a webhook or ntfy setup gets the full feature set.
+- **Eleven more modules**: vulnerability scanning, patch proposals, file integrity, hardening audits, network IDS, router threat-intel, Cloudflare edge blocklist and more (listed below).
+- **A setup check that asks the running system.** A key that stopped working shows as missing, not ticked.
 
 ## What it does
 
-- **Tails three log sources** every run: an nginx/NPMplus access log, an Authelia auth log, and the `cloudflared` tunnel log (the only place direct-to-origin hostnames show up).
-- **Scores requests** against a small rule set: path traversal, `/etc/passwd`, `.env`/`.git`/`.aws` probes, SQL injection, scanner user agents, WordPress and phpMyAdmin sweeps, and one point for bare 4xx noise.
-- **Proposes a ban** when one IP crosses a score threshold inside a time window, and rolls activity up to a /24 to catch an attacker spread thin across a subnet.
-- **Refuses to ban yourself**: private ranges, Cloudflare's published ranges and your allowlist can never be banned, and a /24 that merely contains an allowed address is refused too.
-- **Serves a read-only dashboard** with per-source health, so a blind collector shows up as "0 lines read" rather than as a quiet day. There is no ban button.
-- **Ships four companion pieces** sharing one SQLite store: LAN discovery (`netscan.py`), chat alerts (`siemalert.py`), a Cloudflare zone audit (`cfsec.py`) and an edge Worker (`edge-sentry/`).
+| Area | Module | What you get |
+|---|---|---|
+| Log detection | `warden.py` | Scores reverse-proxy, SSO and tunnel logs (path traversal, `.env`/`.git` probes, SQLi, scanner agents, auth failures). Proposes per-IP and /24 bans. Never bans you, private ranges or Cloudflare. |
+| LAN | `netscan.py` | ARP discovery every 15 min, daily port sweep, new-device, IP-conflict and new-port alerts, with a learning window so sleeping bulbs don't page you. |
+| Vulnerabilities | `vulnscan.py`, `images.py` | Agentless: copies only the package database off each box and runs trivy locally; scans the images of running containers; ranks CISA known-exploited > critical with a fix > the rest. Checks NAS firmware against the vendor's latest release. |
+| Patching | `patcher.py` | Turns a request into a plan (packages, removals, snapshot, reboot) and waits for your ✅. Snapshots containers first. Holds core services for the night window. Never auto-reboots a hypervisor. |
+| Endpoint drift | `integrity.py`, `harden.py` | Agentless file and config baselines with ✅-to-accept; weekly Lynis hardening score per box (run from a temp dir, nothing left installed). |
+| Network IDS | `netids.py`, `netintel.py` | Pulls Suricata alerts; checks router DNS and connection logs against threat feeds. Both optional. |
+| Edge | `intel.py`, `edgeban.py`, `cfsec.py`, `edge-sentry/` | Cloudflare edge events, an attack-surface snapshot (public names, WAF rules, zone settings, SSO coverage), a proposed edge blocklist, a zone audit, and a report-only Worker. All optional. |
+| Alerts | `siemalert.py`, `wlib/notify.py` | New findings to Discord, a webhook or ntfy, with self-report suppression. |
+| Console | `warden-ui.py` | Eleven tabs, unified search (`ip:` `cc:` `kind:` `type:`), per-collector health, a customisable home page, settings and approvals. |
+| Agents | `wlib/mcp.py`, `/api/v1` | Twelve read-only MCP tools and the same views over REST. |
 
-## Screenshots
+Every optional feature switches itself off when it isn't configured. A box with no Cloudflare zone never runs the Cloudflare jobs.
 
-![warden dashboard straight after a first run from a fresh clone, with every source reading 0 lines](docs/dashboard-first-run.png)
+## Minimum spec
 
-*`warden-ui.py` after one sweep from a fresh clone with no log host set. Every source reads 0 lines and is shown in red: the dashboard tells you the collectors are blind rather than reporting a quiet day.*
+Measured on the author's running install (Ubuntu 24.04, Python 3.12, an LXC container watching two Proxmox nodes, a NAS, ~50 LAN devices and 15 containers), October 2026:
 
-![edge-sentry unit tests: 11 cases passing](docs/edge-sentry-tests.png)
+| Recommended | Core (detection, LAN, console, API, MCP) | Plus vulnerability scanning |
+|---|---|---|
+| CPU | 1 vCPU | 1–2 vCPU |
+| RAM | 512 MB | 1.5 GB |
+| Disk | 300 MB | 2.5 GB |
+| Measured | console 29 MB resident (70 MB peak); warden + its data 122 MB | trivy server 89 MB resident, its database cache 1.4 GB, binary 161 MB; the daily scan used 24 CPU-seconds (its memory peak was not measured, hence the headroom) |
 
-*`node edge-sentry/test.mjs`: the Worker's rules exercised with a stubbed `fetch`, no network needed. ACME and OIDC discovery paths must not alert, your own address is suppressed, and the Worker fails open if scoring throws.*
+- **OS:** Linux with systemd and Python 3. Tested on Ubuntu 24.04 (Python 3.12) and Debian 13 (Python 3.13), x86_64. Other distros and arm64 should work but are untested.
+- **Packages:** `python3-yaml`, `python3-requests`; `nmap` for LAN discovery; trivy for vulnerability scanning (see below).
+- **Access:** SSH keys to the machines you want scanned. Nothing is installed on them.
+- **trivy:** install a release you have checksum-verified. Builds 0.69.4 and the 0.69.5/0.69.6 container images were malicious (CVE-2026-33634); never `docker pull` it unpinned.
 
 ## Quick start
 
-You need Python 3 and SSH access to the host where your log containers run. Nothing to `pip install`.
+```sh
+git clone https://github.com/casareanderson/warden.git /opt/warden
+cd /opt/warden
+sudo apt install python3-yaml python3-requests nmap
+./warden-setup init                 # estate, alerts, machines, Cloudflare → warden.yml
+./warden-setup check --hosts        # asks the running system what works
+sudo ./warden-setup units --install # writes + enables only the timers for features you use
+```
+
+Then open the console (it binds to `127.0.0.1:8792`; put your reverse proxy with auth in front, or set `ui.basic_user` and the `WARDEN_UI_PASSWORD` secret).
+
+Want to look before you wire anything up?
 
 ```sh
-git clone https://github.com/casareanderson/warden.git
-cd warden
-cp warden.yml.example warden.yml       # put YOUR public IPs under allow:
-python3 warden.py
+WARDEN_DATA=/tmp/warden-demo python3 tools/demo.py
+WARDEN_DATA=/tmp/warden-demo python3 warden-ui.py   # http://127.0.0.1:8792
 ```
 
-Success with no log host configured looks like this, and creates `data/warden.db`:
+## Connect your agent (MCP and REST)
 
-```
-warden: 0 scored events, 0 ban(s) proposed (detect-only)
-```
+![Settings: decisions waiting for approval, the setup check, API tokens and copy-paste snippets for Hermes, Claude Code and curl](docs/v2-settings.png)
 
-Point it at your logs and look at the dashboard:
+1. Mint a token: **Settings → Connect an agent → New token**, or `./warden-setup token hermes`. It's shown once; warden stores only its hash.
+2. Point your agent at `/mcp`:
+
+```yaml
+# Hermes: ~/.hermes/config.yaml → mcp_servers
+warden:
+  url: https://warden.example.com/mcp
+  headers:
+    Authorization: "Bearer ${WARDEN_TOKEN}"
+```
 
 ```sh
-export WARDEN_LOG_HOST=user@loghost    # SSH target holding the log containers
-python3 warden.py                      # one sweep; run it from a 5-minute timer
-python3 warden-ui.py                   # read-only dashboard on 127.0.0.1:8792
+# Claude Code
+claude mcp add --transport http warden https://warden.example.com/mcp --header "Authorization: Bearer $WARDEN_TOKEN"
+# anything else
+curl -H "Authorization: Bearer $WARDEN_TOKEN" https://warden.example.com/api/v1/summary
 ```
 
-The collectors run `docker exec` against containers named `npmplus`, `crowdsec` and `cloudflared` on that host. If your logs live elsewhere, change `collect_npm()`, `collect_authelia()` and `collect_cloudflared()` in `warden.py` (about ten lines each).
+**Tools:** `warden_summary` (start here), `warden_detections`, `warden_top_ips`, `warden_lookup_ip`, `warden_search`, `warden_bans`, `warden_vulnerabilities`, `warden_attack_surface`, `warden_network`, `warden_ids`, `warden_integrity`, `warden_health`. The REST views mirror them at `/api/v1/<view>`; `/api/v1/openapi.json` describes them.
 
-## Usage
+**Read-only, enforced by a test.** No tool can ban, block, patch or approve. A model that can reach your firewall through a chat window is a different risk class; it can tell you what to do, and you decide.
 
-**Log-side detection.** Run `python3 warden.py` on a timer. It prints how many events it scored and how many bans it proposed. Proposals land in the `bans` table and on the dashboard with state `proposed`.
+If your reverse proxy has a login page, let `/mcp` and `/api/v1` straight through. An MCP client has no browser and can't follow a login redirect; the bearer token is the auth on those two paths.
 
-**LAN discovery.** Needs `nmap` and a network interface on every network you list.
+## Make the home page yours
 
-```sh
-cp netscan.yml.example netscan.yml     # your networks, your critical hosts
-python3 netscan.py --no-ports          # ARP discovery only; every 15 minutes
-python3 netscan.py                     # discovery plus TCP port sweep; daily
-```
+![The Customise panel: tick the numbers and charts you want, move them up or down, save](docs/v2-customise.png)
 
-The first sweep becomes the baseline and raises no new-device alerts.
+Press **Customise** on the Overview. Tick the numbers and charts you want, use ↑ ↓ to order them, and **Save layout**. Fifteen charts and tables and twelve headline numbers are available, including fixable CVEs, known-exploited CVEs, IDS alerts, threat-intel hits, integrity changes and decisions waiting for you. The layout is stored in warden's database, so it survives upgrades, and **Back to default** undoes it. It works on a phone too (no sideways scrolling at 390 px).
 
-**Cloudflare audit and WAF rules.** Needs a token with Zone:Read, Zone Settings:Read and Zone WAF:Read (Zone WAF:Edit to apply).
+## Approvals
 
-```sh
-export CF_API_TOKEN=...  CF_ZONE_ID=...
-python3 cfsec.py                       # audit, read-only
-python3 cfsec.py --apply-waf           # show the proposed WAF rules (dry run)
-python3 cfsec.py --apply-waf --commit  # create them
-```
+warden proposes; you decide. Patch plans, edge-block proposals and integrity changes each arrive as a message with ✅ / ❌ (and ⚡ "do it now" for patches).
 
-**Alerts.** `python3 siemalert.py --dry-run` prints the message it would send for new netscan, warden and CrowdSec findings. Sending uses this estate's `notify.send_discord` helper, so wire your own sender in before running it without `--dry-run`.
+- **Discord:** react on the message. Only `notify.owner_id`'s reactions count.
+- **Anything else (webhook, ntfy, none):** **Settings → Waiting for you** has the same buttons. A dashboard decision counts as the owner's and the first decision wins.
 
-**Edge Worker tests.** `cd edge-sentry && node test.mjs` runs the 11 tests shown above. Deployment steps are in [edge-sentry/DEPLOY.md](edge-sentry/DEPLOY.md).
+Unanswered proposals expire and nothing changes.
 
 ## Configuration
 
-`warden.yml` (a small YAML subset parsed without PyYAML). Defaults are the values used when the key is missing.
+`warden-setup init` writes `warden.yml`; [warden.yml.example](warden.yml.example) documents every key. The sections:
 
-| Key | Default | What it does |
-|---|---|---|
-| `enforce` | `false` | `false` records proposed bans only. `true` posts them to Cloudflare IP Access Rules. Read [KNOWN-ISSUES.md](KNOWN-ISSUES.md) first. |
-| `ban_threshold` | `12` | Per-IP score total inside the window needed to propose a ban. |
-| `window_minutes` | `60` | Scoring window. |
-| `max_bans_per_run` | `3` | Cap on proposals per sweep. |
-| `subnet_threshold` | `20` | /24 score total needed for a range proposal. |
-| `subnet_min_ips` | `3` | Distinct addresses needed in the /24 as well. |
-| `ban_hours` | `24` | Written as the ban's expiry. Nothing removes the rule yet; see Limits. |
-| `allow` | `[]` | IPs or CIDRs never to ban, on top of the built-in private and Cloudflare ranges. |
-
-`netscan.yml`:
-
-| Key | Default | What it does |
-|---|---|---|
-| `networks` | one /24 | Networks to ARP-sweep. Only list networks this host has an interface on. |
-| `port_scan` | `true` | Run the TCP connect scan (turned off by `--no-ports`). |
-| `top_ports` | `200` | Ports per host in the TCP scan. |
-| `critical` | `[]` | Hosts whose absence from a sweep raises an alert. |
-| `alert` | `true` | Record alerts for `siemalert.py` to send. |
-| `learn_hours` | `48` | Hours after the first sweep during which new devices are adopted silently. Don't set it to 0. |
-
-Environment variables:
-
-| Variable | Used by | Default | What it does |
-|---|---|---|---|
-| `WARDEN_LOG_HOST` | `warden.py` | empty | SSH target for the collectors. Empty means nothing is collected. |
-| `CLOUDFLARE_API_TOKEN` | `warden.py` | none | Token for IP Access Rules. Only read when `enforce: true`. |
-| `CLOUDFLARE_ACCOUNT_ID` | `warden.py` | none | Account the access rules are written to. |
-| `WARDEN_DB` | `warden-ui.py` | `/opt/warden/data/warden.db` | Database the dashboard reads (read-only). Set it to `data/warden.db` in your clone. |
-| `WARDEN_UI_HOST` / `WARDEN_UI_PORT` | `warden-ui.py` | `127.0.0.1` / `8792` | Dashboard bind address. Put auth in front of it. |
-| `CF_API_TOKEN` | `cfsec.py` | none | Token for the audit and WAF rules. |
-| `CF_ZONE_ID` | `cfsec.py` | empty | Zone to audit. Required. |
-| `CROWDSEC_HOST` | `siemalert.py` | empty | Where to run `cscli alerts list` for local CrowdSec alerts. |
-| `NETADMIN_CHANNEL` | `siemalert.py` | estate channel id | Chat channel for alerts. |
-
-`siemalert.py` also reads `self-ips.txt` (one address per line): findings against these are recorded as suppressed and not sent. The Worker takes `ALERT_WEBHOOK` and `SELF_IPS` as `wrangler` secrets.
+| Section | What it's for |
+|---|---|
+| `enforce`, `ban_threshold`, `allow`, … | Detection thresholds and your own IPs (never banned). |
+| `estate` | Name, public domain, LAN ranges, timezone, the box warden runs on. |
+| `sources` | Where the logs are: `ssh: user@host` (or `local`) and an optional `container`. |
+| `hosts`, `roles`, `core` | Machines to scan and patch: `proxmox`, `docker`, `linux` or `local`. Proxmox nodes report their running containers on every run. |
+| `notify` | `discord`, `webhook`, `ntfy` or `none`. |
+| `secrets` | Names only. Values come from the environment, `data/secrets.env` (mode 600, `warden-setup secret NAME`), Infisical or a command. |
+| `cloudflare`, `ids`, `router` | Optional integrations. |
+| `ui`, `api`, `dashboard` | Console bind address and auth, the public URL agents use, and the default home layout. |
 
 ## How it works
 
 ```mermaid
 flowchart LR
-  subgraph loghost[Log host, over SSH]
-    NPM[NPMplus access log]
-    AUTH[Authelia log]
-    CFD[cloudflared log]
+  subgraph estate[Your estate, over SSH — nothing installed]
+    LOGS[proxy / SSO / tunnel logs]
+    BOXES[nodes, containers, hosts]
+    DOCKER[Docker hosts]
+    LAN[LAN]
   end
-  NPM & AUTH & CFD --> W[warden.py<br/>score, dedupe, decide]
-  LAN[LAN, via nmap] --> N[netscan.py]
-  W --> DB[(data/warden.db)]
-  N --> DB
-  DB --> UI[warden-ui.py<br/>read-only dashboard]
-  DB --> S[siemalert.py] --> CHAT[chat channel]
-  W -. enforce: true only .-> CF[Cloudflare IP Access Rules]
-  CFS[cfsec.py] -. commit flag only .-> WAF[Cloudflare WAF rules]
-  EDGE[edge-sentry Worker] -. reports .-> CHAT
+  LOGS --> W[warden.py]
+  BOXES --> V[vulnscan / integrity / harden]
+  DOCKER --> I[images]
+  LAN --> N[netscan]
+  W & V & I & N --> DB[(SQLite)]
+  DB --> UI[console]
+  DB --> API[REST /api/v1]
+  DB --> MCP[MCP /mcp]
+  MCP --> AGENT[your agent]
+  DB --> S[siemalert] --> CHAT[Discord / webhook / ntfy]
+  CHAT -. ✅ .-> P[patcher / edgeban / integrity]
+  UI -. ✅ .-> P
+  P -. after approval only .-> ACT[snapshot + upgrade · one WAF rule]
 ```
 
-Each sweep reads new log bytes from a per-source watermark, scores each line, and drops any line whose hash it has already seen. An event is stamped with the time in the log line, not the time it was read, so a first-run backlog can't land inside the ban window. Then it sums scores per IP and per /24 inside `window_minutes` and writes proposals.
+Everything shares one SQLite file. Collectors run on systemd timers; the console, API and MCP read that file and nothing else. Three lessons built into the detector:
 
-Three lessons are built into the code:
-
-1. **An event's time is the time in the log line.** The first run ingests weeks of backlog at once. Stamp it with "now" and old history falls inside the ban window.
-2. **A fixed `--since 10m` under a 5-minute timer double-counts.** The `cloudflared` collector uses a real timestamp watermark, plus a content hash against restarts and rotation.
-3. **A per-IP threshold misses subnet spread.** Seven addresses in one /24, each just under the line, never fire the per-IP rule.
-
-Design rules: nothing blocks automatically. `netscan.py` has no enforcement code at all, because acting against a laptop or a door sensor does more harm than a late alert. The Worker reports and never blocks, because a Worker that blocks can lock you out with no UI to switch it off. Blocking belongs in WAF rules, which you can see and revert in a dashboard. A sweep that finds zero hosts is treated as an error, not an empty network. Suppressed findings are shown on the dashboard.
+1. **An event's time is the time in the log line.** The first run ingests weeks of backlog; stamped "now", old history would fall inside the ban window.
+2. **A fixed `--since 10m` under a 5-minute timer double-counts.** Collectors keep real watermarks plus a content hash against restarts and rotation.
+3. **A per-IP threshold misses subnet spread.** The /24 roll-up catches seven addresses each just under the line.
 
 ```
 warden/
-├── warden.py              log collectors, scoring, ban decisions, Cloudflare enforcement
-├── warden-ui.py           read-only dashboard server (SQLite opened read-only)
-├── warden-ui.html         the dashboard page
-├── warden.yml.example     detection thresholds and allowlist
-├── netscan.py             ARP discovery, port drift, IP-change and conflict alerts
-├── netscan.yml.example
-├── siemalert.py           new findings -> chat, with self-report suppression
-├── cfsec.py               Cloudflare zone audit and proposed WAF rules (dry run by default)
-├── edge-sentry/
-│   ├── worker.js          Cloudflare Worker: detect and report, fail open
-│   ├── test.mjs           11 unit tests
-│   ├── deploy.py, bringup.py, selftest.py, DEPLOY.md
-│   └── wrangler.toml.example
-├── NETSEC.md              field notes and measurements from the running estate
-└── KNOWN-ISSUES.md        read before enforce: true
+├── warden.py            log collectors, scoring, ban proposals
+├── warden-ui.py/.html   console + REST API + MCP
+├── warden-setup         init, check, add-host, tokens, connect, units
+├── wlib/                config, secrets, notify/approvals, hosts, views, mcp, tokens, setup, units
+├── netscan.py  vulnscan.py  images.py  patcher.py  integrity.py  harden.py
+├── intel.py  edgeban.py  cfsec.py  netids.py  netintel.py  siemalert.py  geo.py  warden-facts.py
+├── edge-sentry/         report-only Cloudflare Worker (+ 11 offline tests)
+├── tools/demo.py        demo data for screenshots and try-outs
+├── tests/               36 tests: API, MCP traps, read-only guard, hosts, patch timing, intel
+└── KNOWN-ISSUES.md      read before enforce: true
 ```
+
+## Security model
+
+- **Detect-only by default.** `enforce: false` records what warden would ban and changes nothing.
+- **Nothing acts without you.** Patching, edge blocks and baseline changes each need an explicit ✅, expire if ignored, and are logged with who decided.
+- **Agents read; people decide.** MCP and REST are read-only, and a test fails if any tool name contains a write verb.
+- **Tokens are hashed at rest** (`wdn_` + 32 random bytes, SHA-256 stored), counted on every use, revocable at once.
+- **Browser writes are same-origin only** and need an `X-Warden` header, so a link on another site can't fire them. The console's systemd unit may write only the data directory.
+- **Secrets are names in config, never values.** Values live in the environment, a mode-600 file, or your secret manager.
+- **Agentless.** Scans copy package metadata off a box; Lynis runs from a temp directory and is removed.
 
 ## Status, limits and real results
 
-Status: a working reference implementation, not a plug-and-play product. It runs in detect-only mode in the author's homelab. The collectors are written for one estate's container names and SSH hop.
+Status: v2.0, running in detect-only mode on the author's estate since September 2026. It's a second opinion, not a replacement for CrowdSec or a WAF: it reads what they miss.
 
-Measured (field notes in [NETSEC.md](NETSEC.md), September 2026):
+Measured on that estate:
 
-- **The loudest signal was the owner.** In one week, 27 of 29 application-layer events came from the estate's own WAN address: a phone photo app requesting thumbnails for deleted assets. CrowdSec's only local alert that week was the same thing. The big numbers in `cscli metrics` were community blocklists, not traffic that reached the estate.
-- **ARP sees only what is awake.** Two sweeps twelve minutes apart found 48 then 46 devices, and six "new" devices were bulbs and a TV that had been asleep. That is why `learn_hours` exists.
-- **Percent-encoding defeats a naive WAF rule.** A rule matching `union select` never fires on `union%20select`. The Worker and the proposed WAF rule had the same flaw; both now decode first.
-- **The published copy and the running copy drifted.** A fix made here on 2026-09-10 was not copied to the live install for eleven days, during which the live copy could have edge-banned its own WAN address. If you run this, run this repo, not a fork you patched once.
+- **The loudest signal was the owner.** In one week, 27 of 29 application-layer events came from the estate's own WAN address: a phone photo app requesting thumbnails for deleted assets.
+- **ARP sees only what is awake.** Two sweeps twelve minutes apart found 48 then 46 devices; six "new" ones were bulbs and a TV that had been asleep. That's why `learn_hours` exists.
+- **Percent-encoding defeats a naive WAF rule.** `union select` never matches `union%20select`. Both the Worker and the proposed rule now decode first.
+- **Raw CVE counts are mostly noise.** One container had 4,592 findings and 0 with a fix available, which is why the console leads with fixable and known-exploited.
 
-Known limits (full list in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)):
+Known limits (full list in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)): the legacy Cloudflare IP Access Rules enforcement path is less proven than detection, and bans don't expire there; a broken SSH connection looks like a quiet log (watch Health); log formats assume NGINX/NPMplus, Authelia and cloudflared.
 
-- The enforcement path is less proven than detection. `cf_ban()` uses the account IP Access Rules API; confirm it still accepts writes on your account.
-- Bans never expire. `ban_hours` is recorded, but nothing removes the Cloudflare rule.
-- A failed SSH connection looks like a quiet log. Watch the source-health table.
-- The tunnel collector reads the last 400 lines per sweep, so a burst bigger than that is undercounted.
-- `cloudflared` logs the edge IP, so tunnel-only events can't be attributed to a bannable address.
-- `edge-sentry` is not deployed by this repo and has only been tested offline.
-- `siemalert.py` and `cfsec.py` fall back to this estate's secret store and notifier helpers. Pass tokens in the environment and wire in your own sender.
+## Roadmap
 
-It is a second opinion, not a replacement for CrowdSec or a WAF. It reads what they miss.
+- **Cloud connectors:** read-only posture checks for your own cloud accounts.
+- **An evolve agent:** watches security advisories and tool trends, and proposes improvements to warden's own rules with the same ✅ / ❌ flow.
+- More log formats (Caddy, Traefik, Authentik).
 
-## Licence and credits
+## Support and licence
+
+If warden is useful to you, [buy me a coffee](https://buymeacoffee.com/iamc_tech). More field notes at [dev.to/iam-tech](https://dev.to/iam-tech).
 
 Copyright (c) 2026 Christian Asare-Anderson. Licensed under the GNU Affero General Public License v3.0, see [LICENSE](LICENSE). If you run a modified warden as a network service, the AGPL requires you to offer your users the modified source. For a commercial licence without those terms, open an issue.
 
-Versions up to and including commit `48f2ba1` (2026-10-08) were released under MIT and remain available under MIT; everything after is AGPL-3.0 only. `warden.py`, `netscan.py` and the dashboard use only the Python standard library and SQLite (the edge-sentry helper scripts use `requests`); `netscan.py` calls [nmap](https://nmap.org) (its own licence) and reads nmap's MAC-prefix table. Cloudflare IP ranges are Cloudflare's published list.
-
-Write-up on putting one identity provider in front of a self-hosted estate: [Security First, Honestly](https://asareanderson.gumroad.com/l/jlaeoh) (pay what you want). More field notes: [dev.to/c1-anderson](https://dev.to/c1-anderson).
+Versions up to and including commit `48f2ba1` (2026-10-08) were released under MIT and remain available under MIT; everything after is AGPL-3.0 only. IP geolocation by [DB-IP](https://db-ip.com) (CC BY 4.0). `netscan.py` calls [nmap](https://nmap.org) and vulnerability scanning uses [trivy](https://trivy.dev), each under its own licence. Cloudflare IP ranges are Cloudflare's published list.
