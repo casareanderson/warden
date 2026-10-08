@@ -8,6 +8,18 @@ A dependency-free intrusion detector for a homelab behind a Cloudflare tunnel: i
 
 ![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue) ![Python 3](https://img.shields.io/badge/python-3-3776ab) ![Mode: detect-only](https://img.shields.io/badge/mode-detect--only-2ea44f)
 
+## Contents
+
+- [The idea](#the-idea)
+- [What it does](#what-it-does)
+- [Screenshots](#screenshots)
+- [Quick start](#quick-start)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [How it works](#how-it-works)
+- [Status, limits and real results](#status-limits-and-real-results)
+- [Licence and credits](#licence-and-credits)
+
 ## The idea
 
 If your services sit behind a Cloudflare tunnel, a local `iptables` ban does nothing. At layer 3 every packet comes from Cloudflare's edge. The attacker's real IP exists only in the HTTP layer (`CF-Connecting-IP`). So:
