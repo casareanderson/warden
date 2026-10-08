@@ -6,7 +6,7 @@ A dependency-free intrusion detector for a homelab behind a Cloudflare tunnel: i
 
 *The real scorer (`score_npm()`) and range guard (`net_overlaps_allow()`) run against sample lines using documentation addresses. `203.0.113.7` is in the allowlist, so its whole /24 is refused.*
 
-![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue) ![Python 3](https://img.shields.io/badge/python-3-3776ab) ![Mode: detect-only](https://img.shields.io/badge/mode-detect--only-2ea44f)
+![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue) ![Python 3](https://img.shields.io/badge/python-3-3776ab) ![Mode: detect-only](https://img.shields.io/badge/mode-detect--only-2ea44f)
 
 ## Contents
 
@@ -218,6 +218,8 @@ It is a second opinion, not a replacement for CrowdSec or a WAF. It reads what t
 
 ## Licence and credits
 
-MIT, see [LICENSE](LICENSE). `warden.py`, `netscan.py` and the dashboard use only the Python standard library and SQLite (the edge-sentry helper scripts use `requests`); `netscan.py` calls [nmap](https://nmap.org) (its own licence) and reads nmap's MAC-prefix table. Cloudflare IP ranges are Cloudflare's published list.
+Copyright (c) 2026 Christian Asare-Anderson. Licensed under the GNU Affero General Public License v3.0, see [LICENSE](LICENSE). If you run a modified warden as a network service, the AGPL requires you to offer your users the modified source. For a commercial licence without those terms, open an issue.
+
+Versions up to and including commit `48f2ba1` (2026-10-08) were released under MIT and remain available under MIT; everything after is AGPL-3.0 only. `warden.py`, `netscan.py` and the dashboard use only the Python standard library and SQLite (the edge-sentry helper scripts use `requests`); `netscan.py` calls [nmap](https://nmap.org) (its own licence) and reads nmap's MAC-prefix table. Cloudflare IP ranges are Cloudflare's published list.
 
 Write-up on putting one identity provider in front of a self-hosted estate: [Security First, Honestly](https://asareanderson.gumroad.com/l/jlaeoh) (pay what you want). More field notes: [dev.to/c1-anderson](https://dev.to/c1-anderson).
