@@ -45,7 +45,9 @@ def _addr(ssh):
 
 
 def run(cmd, timeout=300, binary=False, inp=None):
-    p = subprocess.run(cmd, capture_output=True, timeout=timeout, input=inp, text=not binary)
+    # never inherit stdin: ssh would swallow whatever the caller pipes in (a script, a heredoc)
+    p = subprocess.run(cmd, capture_output=True, timeout=timeout, input=inp, text=not binary,
+                       **({} if inp is not None else {"stdin": subprocess.DEVNULL}))
     return p.returncode, p.stdout, p.stderr
 
 

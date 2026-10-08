@@ -171,7 +171,7 @@ def src_sh(src, cmd, timeout=60, in_container=True):
     argv = (["sh", "-c", cmd] if src["ssh"] == "local" else
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", src["ssh"], cmd])
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(argv, capture_output=True, stdin=subprocess.DEVNULL, text=True, timeout=timeout)
         return p.stdout if p.returncode == 0 else ""
     except Exception:
         return ""
