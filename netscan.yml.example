@@ -1,27 +1,18 @@
-# netscan configuration.
+# netscan configuration. Copy to netscan.yml and edit.
 #
 # netscan NEVER blocks or changes a device — it only records and alerts.
 # There is no enforce flag here because there is no enforcement path.
 
-# Networks to sweep. CT100 has one LAN interface (eth0, 192.168.1.0/24), so
-# that is all it can ARP-scan today.
-#
-# ⚠️ VLAN 10 (the IoT network) is NOT covered, and as of
-# 2026-09-21 that is the RIGHT call — do not "fix" it without re-checking.
-#
-# Measured: 22 IoT-class devices (WiZ, Espressif, Broadlink, Sonos, Nest) are
-# all on 192.168.1.0/24 — the MAIN LAN. The bulk migration to the IoT SSID
-# never happened, so VLAN10 is effectively empty and netscan already covers
-# 100% of where the IoT devices actually live.
-#
-# Covering VLAN10 would need a trunk port on the TL-SG108E, VLAN filtering on
-# vmbr0 (currently 0 on both nodes) and a second NIC on CT100. That risks
-# dropping a Proxmox node off the network, and it would put a management
-# container on BOTH sides of the very boundary the segmentation exists to
-# enforce. Revisit only once devices are actually moved onto VLAN10.
-#
-# An ARP sweep is layer 2: adding a network here without an interface on it
+# Networks to sweep. An ARP sweep is layer 2: it only sees networks this box
+# has an interface on. Adding a network here without an interface on it
 # returns zero hosts SILENTLY, which is worse than not scanning it.
+# If unset, netscan uses `estate.lan` from warden.yml.
+#
+# IoT VLANs: if your IoT devices sit on a separate VLAN, this box needs an
+# interface (or a tagged sub-interface) on it before netscan can see them.
+# Check where the devices ACTUALLY are first — a VLAN that exists on paper but
+# holds nothing is common, and putting a management box on both sides of the
+# boundary weakens the segmentation it exists for.
 networks:
   - 192.168.1.0/24
 
@@ -34,10 +25,9 @@ top_ports: 200
 # phones, laptops and the printer come and go, and alerting on that teaches
 # you to ignore the channel. These are infrastructure that should always answer.
 critical:
-  - 192.168.1.120   # CT100 — Hermes, warden, Caddy
-  - 192.168.1.10    # c1-pn2 — Proxmox node
-  - 192.168.1.20    # C1-G4  — Proxmox node
-  - 192.168.1.204   # CT106 — CrowdSec LAPI
+  - 192.168.1.2     # hypervisor
+  - 192.168.1.5     # NAS
+  - 192.168.1.10    # the box warden runs on
 
 alert: true
 

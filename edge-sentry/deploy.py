@@ -6,7 +6,7 @@ container that has neither, and it hides what is actually sent. This does the
 same three API calls directly, which also makes the required token scopes
 obvious when one is missing.
 
-Scopes needed (verified present on the Infisical `WAF token` 2026-09-21):
+Scopes needed (verified on the author's WAF token 2026-09-21):
   Account -> Workers Scripts:Edit   (upload the script)
   Zone    -> Workers Routes:Edit    (attach it to hostnames)
 Note that listing /accounts needs a SEPARATE permission this token lacks, so
@@ -27,19 +27,26 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-sys.path.insert(0, "/opt/hermes-agent")
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from wlib import config, secrets  # noqa: E402
 
 API = "https://api.cloudflare.com/client/v4"
-ZONE = ""
+ZONE = os.environ.get("CF_ZONE_ID") or config.get("cloudflare.zone_id", "")
 SCRIPT = "edge-sentry"
-# The hostnames the Worker should sit in front of. Yours, not these.
-HOSTS = os.environ.get("EDGE_HOSTS", "auth,photos,vpn,app").split(",")
-HERE = Path(__file__).resolve().parent
+# The hostnames the Worker should sit in front of: `cloudflare.edge_hosts` in
+# warden.yml (labels like "auth" are joined to estate.domain; full names are
+# used as-is), or EDGE_HOSTS=auth,photos for a one-off.
+HOSTS = (os.environ.get("EDGE_HOSTS", "").split(",") if os.environ.get("EDGE_HOSTS")
+         else list(config.get("cloudflare.edge_hosts") or []))
+DOMAIN = config.get("estate.domain") or "example.com"
+SELF_IPS = config.HOME / "self-ips.txt"
+WAF = config.get("cloudflare.token_secret") or "CF_API_TOKEN"
 
 
-def secret(key, path):
-    import hermes_secrets
-    return (hermes_secrets.get(key, path) or "").strip()
+def secret(key, path=None):
+    """`path` is unused (kept so bringup.py can shim this function)."""
+    return (secrets.get(key) or "").strip()
 
 
 def req(method, path, tok, data=None, ctype="application/json"):
@@ -92,28 +99,30 @@ def upload(tok, acct, webhook, self_ips):
 
 
 def main():
-    tok = secret("WAF token", "/Cloudflare")
+    if not ZONE:
+        print("no zone: set cloudflare.zone_id in warden.yml (or CF_ZONE_ID)", file=sys.stderr)
+        return 2
+    tok = secret(WAF)
     if not tok:
-        print("no Cloudflare token in Infisical /Cloudflare", file=sys.stderr)
+        print(f"no Cloudflare token (secret {WAF})", file=sys.stderr)
         return 2
 
-    # Webhook: Infisical first, then argv, so nothing secret lands in shell
+    # Webhook: secret store first, then argv, so nothing secret lands in shell
     # history or a process listing when it can be avoided.
-    webhook = secret("EDGE_WEBHOOK", "/Cloudflare")
+    webhook = secret("EDGE_WEBHOOK")
     if not webhook and len(sys.argv) > 1 and sys.argv[1].startswith("http"):
         webhook = sys.argv[1].strip()
     if not webhook:
-        print("no EDGE_WEBHOOK in Infisical /Cloudflare and none passed.",
+        print("no EDGE_WEBHOOK secret and none passed.",
               file=sys.stderr)
         print("The Worker's only job is reporting; deploying it without a "
-              "destination puts code in the request path of six hostnames "
+              "destination puts code in the request path of your hostnames "
               "for no benefit. Refusing.", file=sys.stderr)
         return 2
 
     self_ips = ",".join(
         l.split("#")[0].strip()
-        for l in (Path("/opt/warden/self-ips.txt").read_text().splitlines()
-                  if Path("/opt/warden/self-ips.txt").exists() else [])
+        for l in (SELF_IPS.read_text().splitlines() if SELF_IPS.exists() else [])
         if l.split("#")[0].strip() and ":" not in l.split("#")[0])
 
     ok, d = req("GET", f"/zones/{ZONE}", tok)
@@ -131,7 +140,10 @@ def main():
     existing = {r["pattern"]: r["id"] for r in d.get("result", [])} if ok else {}
 
     for h in HOSTS:
-        pat = f"{h}.example.com/*"
+        h = h.strip()
+        if not h:
+            continue
+        pat = f"{h if '.' in h else h + '.' + DOMAIN}/*"
         if pat in existing:
             print(f"  route exists  {pat}")
             continue

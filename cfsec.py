@@ -9,14 +9,16 @@ Two modes:
                 needs --commit to actually write.
 
 ⚠️ TOKEN SCOPES — the reason this script reports gaps instead of failing
-The tokens that already exist in this estate are deliberately narrow:
-  - the Caddy token (/etc/caddy/caddy.env)  = DNS:Edit only
-  - the NetBird token (CT108)               = Tunnel:Edit + DNS:Edit
-  - the CrowdSec token (CT106)              = Firewall Access Rules only
+Cloudflare tokens in a typical homelab are deliberately narrow, e.g.:
+  - a reverse proxy's ACME token (caddy.env)  = DNS:Edit only
+  - a VPN/tunnel token                        = Tunnel:Edit + DNS:Edit
+  - a CrowdSec bouncer token                  = Firewall Access Rules only
 None can read zone settings or touch the WAF: those return 9109/10000. Audit
 needs Zone:Read + Zone Settings:Read + Zone WAF:Read; applying rules needs
 Zone WAF:Edit. Mint one at Cloudflare → My Profile → API Tokens → Custom, and
-pass it as CF_API_TOKEN.
+store it as the secret CF_API_TOKEN (env, data/secrets.env, or your
+secrets backend — see wlib/secrets.py). Zone: CF_ZONE_ID env or
+`cloudflare.zone_id` in warden.yml.
 
 ⚠️⚠️ WHY THE PROPOSED RULES ARE NARROW
 On 2026-07-03 a host-wide rate-limit rule (20 req/10s) broke the NetBird
@@ -26,7 +28,7 @@ ChunkLoadError. It looked like an origin outage and was not. The lesson is that
 a rule matching whole hostnames will eventually block something you need. Every
 rule below matches a specific hostile PATH or USER AGENT, never a whole host,
 and nothing here touches /.well-known/ (ACME + OIDC discovery) or /api/ and
-/_next/ (Immich, Authelia and NetBird all depend on them).
+/_next/ (photo apps, SSO portals and VPN dashboards all depend on them).
 """
 import json
 import os
@@ -34,37 +36,35 @@ import sys
 import urllib.error
 import urllib.request
 
-ZONE = os.environ.get("CF_ZONE_ID", "")   # required: your Cloudflare zone id
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from wlib import config, secrets  # noqa: E402
+
+ZONE = os.environ.get("CF_ZONE_ID") or config.get("cloudflare.zone_id", "")   # required
 API = "https://api.cloudflare.com/client/v4"
 PRIVATE_PREFIXES = ("192.168.", "10.", "172.16.", "172.17.", "172.18.",
                     "172.19.", "172.2", "172.30.", "172.31.")
 
 
-# No Cloudflare credential is stored in this file. Resolution order mirrors
-# hermes_secrets: an explicit env override first (tests, one-offs), then
-# Infisical, then the Caddy token as a last resort.
+# No Cloudflare credential is stored in this file. Resolution: wlib.secrets
+# (env override first, then data/secrets.env, then the configured backend),
+# then a reverse proxy's env file as a last resort.
 #
 # ⚠️ NO SINGLE TOKEN COVERS EVERYTHING, and that is deliberate — see the
-# docstring. The Infisical `WAF token` reads zone settings and the WAF but is
-# 403 on DNS; the Caddy token is the reverse. So the audit uses BOTH and
-# reports per-section, rather than picking one and calling the other half
+# docstring. A WAF token reads zone settings and the WAF but is 403 on DNS; a
+# proxy's ACME token is the reverse. So the audit uses BOTH and reports
+# per-section, rather than picking one and calling the other half
 # "not configured".
-INFISICAL_PATH = "/Cloudflare"
-INFISICAL_KEY = "WAF token"          # note the space — that is the real key name
+def _waf_token():
+    return (secrets.get(config.get("cloudflare.token_secret") or "CF_API_TOKEN") or "").strip()
 
 
-def _infisical_token():
-    try:
-        sys.path.insert(0, "/opt/hermes-agent")
-        import hermes_secrets
-        return (hermes_secrets.get(INFISICAL_KEY, INFISICAL_PATH) or "").strip()
-    except Exception:
-        return ""
+def _dns_token():
+    return (secrets.get(config.get("cloudflare.dns_token_secret") or "CF_DNS_TOKEN") or "").strip()
 
 
 def _caddy_token():
     try:
-        for line in open("/etc/caddy/caddy.env"):
+        for line in open(config.get("cloudflare.caddy_env") or "/etc/caddy/caddy.env"):
             if line.startswith("CF_API_TOKEN="):
                 return line.split("=", 1)[1].strip().strip('"\'')
     except OSError:
@@ -73,8 +73,7 @@ def _caddy_token():
 
 
 def token():
-    return (os.environ.get("CF_API_TOKEN") or _infisical_token()
-            or _caddy_token())
+    return _waf_token() or _caddy_token()
 
 
 def call(path, method="GET", body=None, tok=None):
@@ -294,16 +293,76 @@ def apply_waf(tok, commit):
     return 0 if ok else 1
 
 
+# ------------------------------------------------------------- geo block --
+# Built ONLY from redlist.yml `block:` (owner-approved). Kept out of PROPOSED on
+# purpose: `--apply-waf` must never start blocking whole countries as a side
+# effect. Same dry-run → --commit discipline, same "send existing rules back"
+# rule (the ruleset is replaced as a set).
+GEO_DESC = "warden: block red-list countries (redlist.yml)"
+
+
+def geo_rule():
+    import yaml
+    path = config.HOME / "redlist.yml"           # deliberately NOT the .example: blocking is the owner's own list
+    if not path.exists():
+        return None
+    cfg = yaml.safe_load(open(path)) or {}
+    ccs = sorted({str(c).upper() for c in (cfg.get("block") or []) if len(str(c)) == 2})
+    if not ccs:
+        return None
+    return {"description": GEO_DESC, "action": "block",
+            "expression": "(ip.src.country in {" + " ".join(f'"{c}"' for c in ccs) + "})"}
+
+
+def apply_geo(tok, commit):
+    want = geo_rule()
+    ok, d = call(f"/zones/{ZONE}/rulesets/phases/http_request_firewall_custom/entrypoint", tok=tok)
+    if not ok:
+        print(f"cannot read custom rules: {d}"); return 2
+    rsid, existing = d["result"]["id"], d["result"].get("rules", [])
+    keep = [r for r in existing if (r.get("description") or "") != GEO_DESC]
+    cur = next((r for r in existing if (r.get("description") or "") == GEO_DESC), None)
+    print(f"existing custom rules: {len(existing)} (free plan max 5)")
+    for r in keep:
+        print(f"  keep  [{r.get('action')}] {r.get('description','')[:60]}")
+    if want is None:
+        print("  redlist.yml block: is EMPTY" + (" → REMOVE the geo rule" if cur else " → nothing to do"))
+        if not cur:
+            return 0
+    elif cur and cur.get("expression") == want["expression"]:
+        print(f"  same  [{cur['action']}] {want['expression']}  — already live, nothing to do")
+        return 0
+    else:
+        print(f"  {'CHANGE' if cur else 'ADD   '} [block] {want['expression']}")
+        if not cur and len(keep) >= 5:
+            print("refusing: would exceed the free plan's 5 custom rules"); return 2
+    if not commit:
+        print("\nDRY RUN — nothing written. Re-run with --commit to apply.")
+        return 0
+    rules = [{"action": r["action"], "expression": r["expression"], "description": r.get("description", ""),
+              "enabled": r.get("enabled", True)} for r in keep]
+    if want:
+        rules.append({**want, "enabled": True})
+    ok, d = call(f"/zones/{ZONE}/rulesets/{rsid}", "PUT", {"rules": rules}, tok)
+    print("applied" if ok else f"FAILED: {json.dumps(d)[:200]}")
+    return 0 if ok else 1
+
+
 def main():
+    if not ZONE:
+        print("no zone: set CF_ZONE_ID or cloudflare.zone_id in warden.yml", file=sys.stderr)
+        return 2
     tok = token()
     if not tok:
-        print("no CF_API_TOKEN and no readable /etc/caddy/caddy.env", file=sys.stderr)
+        print("no CF_API_TOKEN secret and no readable caddy env file", file=sys.stderr)
         return 2
+    if "--apply-geo" in sys.argv:
+        return apply_geo(tok, "--commit" in sys.argv)
     if "--apply-waf" in sys.argv:
         return apply_waf(tok, "--commit" in sys.argv)
     # The WAF token cannot read DNS and the Caddy token can. Hand the DNS
     # section whichever one is not the primary, so one audit covers both.
-    other = _caddy_token() if tok != _caddy_token() else _infisical_token()
+    other = _dns_token() or (_caddy_token() if tok != _caddy_token() else _waf_token())
     return audit(tok, dns_tok=other or tok)
 
 
