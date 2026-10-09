@@ -189,9 +189,26 @@ def sweep(deep=False, only=None):
                 if con.execute("select name from sqlite_master where name='patch_jobs'").fetchone() else None
             msgs.append((t, lines, patch))
     for t, lines, patch in msgs:
-        head = (f"🧬 **Integrity drift: {t['name']}** (`{t['target']}`)" +
-                (f" — likely expected (patch #{patch[0]} ran today)" if patch else ""))
-        body = "\n".join(lines[:25]) + (f"\n… +{len(lines) - 25} more (warden → Endpoints)" if len(lines) > 25 else "")
+        if patch:
+            # warden's own patch run changed these files/listeners: accept them into the baseline quietly.
+            # Only 🚨 (bad) and login/uid0 changes still need a human after a patch.
+            n = con.execute("select count(*) from integ_find where target=? and status='open' and message_id is null "
+                            "and kind in ('file','suid','module','listen')", (t["target"],)).fetchone()[0]
+            for r in con.execute("select * from integ_find where target=? and status='open' and message_id is null "
+                                 "and kind in ('file','suid','module','listen')", (t["target"],)).fetchall():
+                if r["change"] == "removed":
+                    con.execute("delete from integ_base where target=? and kind=? and item=?", (r["target"], r["kind"], r["item"]))
+                else:
+                    con.execute("insert or replace into integ_base values(?,?,?,?)", (r["target"], r["kind"], r["item"], r["new"]))
+                con.execute("update integ_find set status='accepted', note=? where id=?",
+                            (f"auto: changed by warden patch #{patch[0]}", r["id"]))
+            con.commit()
+            lines = [l for l in lines if l.startswith("🚨") or " login " in l or " uid0 " in l]
+            print(f"{t['target']}: {n} change(s) auto-accepted (patch #{patch[0]})")
+            if not lines:
+                continue
+        head = f"🧬 **Integrity drift: {t['name']}** (`{t['target']}`)"
+        body = "\n".join(lines[:8]) + (f"\n… +{len(lines) - 8} more → warden · Endpoints" if len(lines) > 8 else "")
         try:
             mid = notify.post(f"{head}\n{body}\n✅ = expected, accept as the new baseline · ❌ = keep open, I'll investigate")
             notify.react(mid, notify.APPROVE); notify.react(mid, notify.REJECT)
@@ -225,7 +242,7 @@ def poll():
                     con.execute("insert or replace into integ_base values(?,?,?,?)", (r["target"], r["kind"], r["item"], r["new"]))
                 con.execute("update integ_find set status='accepted', note='owner ✅ — new baseline' where id=?", (r["id"],))
             con.commit()
-            notify.post(f"✅ {len(rows)} change(s) accepted into the baseline.", reply_to=mid)
+            notify.resolve(mid, f"✅ accepted — {len(rows)} change(s) are the new baseline")
         elif owner in no:
             con.execute("update integ_find set note='owner ❌ — investigating' where message_id=? and status='open'", (mid,))
             con.commit()

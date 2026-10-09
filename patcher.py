@@ -318,8 +318,9 @@ def make_plan(con, job):
              f"• fixes {fixes[0] or 0} known CVE(s) on this box ({fixes[1] or 0} critical, {fixes[2] or 0} known-exploited)",
              f"• safety: {snap}", f"• reboot: {reboot}"]
     if inst:
-        lines.append("• " + ", ".join(f"{n} {o or ''}→{v}".replace(" →", "→") for n, o, v in inst[:20]) +
-                     (f" … +{len(inst) - 20} more" if len(inst) > 20 else ""))
+        # names only, 6 max: the full old→new list lives in the console (Vulnerabilities → patch jobs)
+        lines.append("• " + ", ".join(n for n, o, v in inst[:6]) +
+                     (f" … +{len(inst) - 6} more (full list in warden)" if len(inst) > 6 else ""))
     if remv:
         lines.append("• ⚠️ removals: " + ", ".join(remv[:15]))
     if bad:
@@ -333,10 +334,12 @@ def make_plan(con, job):
         lines.append(f"⏱ timing: **{'as soon as approved' if timing == 'now' else 'tonight ' + run_after[11:16] + ' UTC'}**"
                      f" ({why})")
     msg = "\n".join(lines)[:1900]
+    full = msg + ("\n\nfull list:\n" + "\n".join(f"{n} {o or ''} → {v}" for n, o, v in inst) if len(inst) > 6 else "")
     if bad or (not inst and not remv):
-        notify.send(msg)
+        if bad:
+            notify.send(msg)              # "already up to date" is not news: recorded, not posted
         con.execute("update patch_jobs set status=?, plan=?, n_pkgs=?, n_remove=?, finished=? where id=?",
-                    ("refused" if bad else "nothing", msg, len(inst), len(remv), iso(), job["id"]))
+                    ("refused" if bad else "nothing", full, len(inst), len(remv), iso(), job["id"]))
     else:
         mid = notify.post(msg + f"\n✅ = approve with that timing · {NOW_REACT} = approve and run NOW · ❌ = cancel "
                                 f"(expires in {EXPIRE_H} h)")
@@ -344,7 +347,7 @@ def make_plan(con, job):
         notify.react(mid, notify.REJECT)
         con.execute("update patch_jobs set status='pending', plan=?, n_pkgs=?, n_remove=?, message_id=?, timing=?, "
                     "run_after=?, timing_why=? where id=?",
-                    (msg, len(inst), len(remv), mid, timing, run_after, why, job["id"]))
+                    (full, len(inst), len(remv), mid, timing, run_after, why, job["id"]))
     con.commit()
 
 
@@ -359,7 +362,7 @@ def execute(con, job):
         return execute_container(con, job, t)
     mid = job["message_id"]
     con.execute("update patch_jobs set status='running', decided=? where id=?", (iso(), job["id"])); con.commit()
-    notify.post("▶️ approved — starting.", reply_to=mid)
+    notify.resolve(mid, "▶️ approved — running")
     snap = None
     if t["kind"] == "ct":
         snap = "warden-prepatch-" + now().strftime("%Y%m%d%H%M")
@@ -427,6 +430,17 @@ def prune_snapshots():
                 log(f"pruned snapshot {vmid} {snap}")
 
 
+
+def say(con, text, reply_to, resolve=True):
+    """Commit the state change FIRST, then tell the channel. notify writes the same warden.db on its own
+    connection: posting with our write still open hit 'database is locked', the run died before its commit,
+    the job stayed pending, and the next run (2 min later) posted the same reply again — 328 times on 2026-10-09."""
+    con.commit()
+    try:
+        notify.resolve(reply_to, text) if resolve else notify.post(text, reply_to=reply_to)
+    except Exception as e:  # noqa: BLE001 — a failed post must never undo or repeat the decision
+        log(f"notify failed (state already saved): {e}")
+
 def run_cycle():
     con = db()
     intake(con)
@@ -446,7 +460,7 @@ def run_cycle():
         if owner in no:
             con.execute("update patch_jobs set status='cancelled', decided=?, finished=? where id=?",
                         (iso(), iso(), job["id"]))
-            notify.post("❌ cancelled — nothing changed.", reply_to=job["message_id"])
+            say(con, "❌ cancelled — nothing changed.", job["message_id"])
         elif owner in (notify.reactors(job["message_id"], NOW_REACT) or []):
             con.execute("update patch_jobs set status='approved', run_after=?, timing='now (owner ⚡)' where id=?",
                         (iso(), job["id"]))
@@ -454,11 +468,11 @@ def run_cycle():
             con.execute("update patch_jobs set status='approved', run_after=coalesce(run_after, ?) where id=?",
                         (iso(), job["id"]))
             if (job["timing"] or "") == "tonight":
-                notify.post(f"🌙 approved — scheduled for {job['run_after'][11:16]} UTC tonight ({job['timing_why']}). "
-                            f"React {NOW_REACT} on the plan to run it now instead.", reply_to=job["message_id"])
+                say(con, f"🌙 approved — scheduled for {job['run_after'][11:16]} UTC tonight ({job['timing_why']}). "
+                         f"React {NOW_REACT} on the plan to run it now instead.", job["message_id"])
         elif job["requested"] < iso(now() - timedelta(hours=EXPIRE_H)):
             con.execute("update patch_jobs set status='expired', finished=? where id=?", (iso(), job["id"]))
-            notify.post("⌛ expired unanswered — nothing changed.", reply_to=job["message_id"])
+            say(con, "⌛ expired unanswered — nothing changed.", job["message_id"])
         con.commit()
     for j in con.execute("select * from patch_jobs where status='approved' and run_after > ?", (iso(),)).fetchall():
         if notify.owner() in (notify.reactors(j["message_id"], NOW_REACT) or []):

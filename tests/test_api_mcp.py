@@ -164,3 +164,64 @@ def test_mcp_is_read_only(env):
     for t in env["mcp"].TOOLS:
         words = set(t["name"].lower().split("_"))
         assert t["name"].startswith("warden_") and not words & verbs, t["name"]
+
+
+# ── 2026-10-09: console edits, write-only secrets, country switch, CVE drawer ──
+def test_config_override_allowlist(env, tmp_path):
+    h = {"X-Warden": "config"}
+    st, r = call(env["url"] + "/api/config", {"key": "api.public_url", "value": "https://w.example"}, headers=h)
+    assert st == 200 and r["ok"]
+    import wlib.config as c
+    assert c.get("api.public_url") == "https://w.example"
+    assert "public_url" in (tmp_path / "overrides.yml").read_text()
+    assert "public_url" not in (tmp_path / "warden.yml").read_text()          # warden.yml never written
+    for bad in ({"key": "enforce", "value": True}, {"key": "hosts", "value": "x"}, {"key": "secrets.backend", "value": "command"}):
+        assert call(env["url"] + "/api/config", bad, headers=h)[0] == 400
+    assert call(env["url"] + "/api/config", {"key": "notify.backend", "value": "smtp"}, headers=h)[0] == 400
+    assert call(env["url"] + "/api/config", {"key": "api.public_url", "value": "x"})[0] == 403    # no header
+
+
+def test_secret_is_write_only(env, tmp_path):
+    st, r = call(env["url"] + "/api/secret", {"name": "DISCORD_BOT_TOKEN", "value": "s3cr3t-value"}, headers={"X-Warden": "secret"})
+    assert st == 200 and r["ok"]
+    f = tmp_path / "secrets.env"
+    assert "DISCORD_BOT_TOKEN=s3cr3t-value" in f.read_text() and (f.stat().st_mode & 0o777) == 0o600
+    assert call(env["url"] + "/api/secret", {"name": "X", "value": "a\nB=c"}, headers={"X-Warden": "secret"})[0] == 400
+    for path in ("/api/settings", "/api"):
+        st, body = call(env["url"] + path)
+        assert "s3cr3t-value" not in json.dumps(body)
+
+
+def test_geo_switch_validates_and_records(env, tmp_path):
+    import wlib.config as c
+    h = {"X-Warden": "geo"}
+    assert call(env["url"] + "/api/geo", {"enabled": True, "block": ["RU"]}, headers=h)[1]["ok"] is False   # no zone
+    (tmp_path / "warden.yml").write_text("estate: {name: test}\nnotify: {backend: none}\ncloudflare: {zone_id: z1}\n")
+    c.cfg(reload=True)
+    assert call(env["url"] + "/api/geo", {"enabled": True, "block": ["RUS"]}, headers=h)[0] == 400
+    assert call(env["url"] + "/api/geo", {"enabled": True, "block": "RU"}, headers=h)[0] == 400
+    st, r = call(env["url"] + "/api/geo", {"enabled": True, "block": ["ru", "KP", "ru"]}, headers=h)
+    assert st == 200 and r["state"]["block"] == ["KP", "RU"]
+    red = env["views"].redlist()
+    assert red["enabled"] and red["block"] == ["KP", "RU"] and red["pending"]
+    call(env["url"] + "/api/geo", {"enabled": False, "block": ["RU"]}, headers=h)
+    red = env["views"].redlist()
+    assert red["block"] == [] and red["chosen"] == ["RU"]                    # off keeps the choice, blocks nothing
+
+
+def test_cve_view_and_tool(env, tmp_path):
+    con = sqlite3.connect(tmp_path / "warden.db")
+    con.executescript("""create table vulns(target text, vid text, pkg text, installed text, fixed text, severity text,
+        title text, kev integer, status text, image text, descr text, url text);
+      create table vuln_targets(target text primary key, name text);
+      insert into vuln_targets values('ct:1','web');
+      insert into vulns values('ct:1','CVE-2099-0001','openssl','3.0.1','3.0.2','CRITICAL','bad bug',1,'fixed','',
+        'a long description','https://example.org/adv');""")
+    con.commit(); con.close()
+    r = env["views"].cve("CVE-2099-0001")
+    assert r["kev"] and r["descr"] == "a long description" and r["rows"][0]["name"] == "web" and "NVD" in r["links"]
+    assert env["views"].cve("CVE-0000-0000")["rows"] == []
+    tok = env["tokens"].mint("t")
+    st, body = call(env["url"] + "/api/v1/cve/CVE-2099-0001", headers={"Authorization": "Bearer " + tok})
+    assert st == 200 and body["severity"] == "CRITICAL"
+    assert "warden_cve" in env["mcp"].BY_NAME

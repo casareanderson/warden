@@ -3,150 +3,216 @@
 <meta charset="utf-8">
 <title>warden · security console</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2.5 4.5 6.8v8.4c0 6.9 4.8 12.4 11.5 14.3 6.7-1.9 11.5-7.4 11.5-14.3V6.8Z' fill='%230f1a28' stroke='%2358a6ff' stroke-width='2.4'/%3E%3Ccircle cx='16' cy='16.4' r='4' fill='%2339c5cf'/%3E%3C/svg%3E">
+<script>try{document.documentElement.dataset.density=localStorage.getItem("warden-density")||"comfortable"}catch(e){}</script>
 <style>
+/* ═══ warden console stylesheet ══════════════════════════════════════════════
+   Laid out like a Sass 7-1 project, in one file because warden ships with no build step:
+   1 abstracts (tokens)  2 base  3 layout  4 components  5 tabs  6 density/responsive.
+   Change a colour or a spacing in §1 — nothing below hard-codes either. */
+
+/* ── 1 · abstracts ─────────────────────────────────────────────────────────── */
 :root{
   --bg:#0b0e13;--panel:#11161d;--panel2:#151b23;--line:#222a35;--line2:#2c3644;
   --fg:#e6edf3;--dim:#8b949e;--faint:#5c6773;
   --red:#f85149;--amb:#d29922;--grn:#3fb950;--acc:#58a6ff;--vio:#bc8cff;--cyn:#39c5cf;
   --c1:#58a6ff;--c2:#3fb950;--c3:#d29922;--c4:#bc8cff;--c5:#39c5cf;--c6:#f778ba;--c7:#ffa657;--c8:#8b949e;
+  --red-bg:#211010;--red-line:#4a1f1f;--amb-bg:#211a0a;--amb-line:#4a3a12;--grn-bg:#0f1d13;--grn-line:#244a2c;
+  --acc-bg:#0d1826;--acc-line:#1f3550;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* density — html[data-density=compact] overrides these (§6) */
+  --fs:13.5px;--fs-sm:12.5px;--pad-cell:7px 10px;--pad-card:13px 15px;--gap:12px;--kpi-v:24px;--pad-main:18px 20px 40px;
+  --radius:10px;--donut:120px;
 }
+
+/* ── 2 · base ──────────────────────────────────────────────────────────────── */
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--fg)}
-body{font:13.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-.mono,td.ip,td.mono,code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+body{font:var(--fs)/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.mono,td.ip,td.mono,code{font-family:var(--mono);font-size:var(--fs-sm)}
 a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
+h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:22px 0 9px;font-weight:600;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+h2:first-child{margin-top:0}
+h2 .hint{text-transform:none;letter-spacing:0;color:var(--faint);font-weight:400}
+.y{color:var(--grn)} .n{color:var(--red)} .q{color:var(--faint)}
 
-/* header */
-header{position:sticky;top:0;z-index:5;background:rgba(11,14,19,.94);backdrop-filter:blur(6px);
-  border-bottom:1px solid var(--line)}
+/* ── 3 · layout ────────────────────────────────────────────────────────────── */
+header{position:sticky;top:0;z-index:5;background:rgba(11,14,19,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
 .bar{display:flex;align-items:center;gap:14px;padding:10px 20px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:9px;font-weight:650;font-size:15px;letter-spacing:.02em}
-.brand svg{width:22px;height:22px}
-.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:99px;font-size:11px;
-  border:1px solid var(--line2);color:var(--dim);white-space:nowrap}
-.pill.ok{color:var(--grn);border-color:#244a2c;background:#0f1d13}
-.pill.warn{color:var(--amb);border-color:#4a3a12;background:#211a0a}
-.pill.bad{color:var(--red);border-color:#4a1f1f;background:#211010}
+nav{display:flex;gap:2px;padding:0 14px;overflow-x:auto}
+main{padding:var(--pad-main);max-width:1500px;margin:0 auto}
+section.tab{display:none} section.tab.on{display:block}
+.grid{display:grid;gap:var(--gap)}
+.g4{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(420px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.grid.ov{grid-template-columns:repeat(4,minmax(0,1fr))}
+.ov .s2{grid-column:span 2}.ov .s4{grid-column:1/-1}
+footer{color:var(--faint);font-size:11.5px;text-align:center;padding:20px}
+
+/* ── 4 · components ────────────────────────────────────────────────────────── */
+/* brand */
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;letter-spacing:.04em}
+.brand svg{width:26px;height:26px;flex:0 0 26px}
+.brand small{font-weight:500;color:var(--faint);letter-spacing:0;font-size:11px}
+/* pills */
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:99px;font-size:11px;border:1px solid var(--line2);color:var(--dim);white-space:nowrap}
+.pill.ok{color:var(--grn);border-color:var(--grn-line);background:var(--grn-bg)}
+.pill.warn{color:var(--amb);border-color:var(--amb-line);background:var(--amb-bg)}
+.pill.bad{color:var(--red);border-color:var(--red-line);background:var(--red-bg)}
 .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
-.search{flex:1;min-width:240px;max-width:640px;display:flex;align-items:center;gap:8px;
-  background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:6px 10px}
+/* search */
+.search{flex:1;min-width:240px;max-width:640px;display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:6px 10px}
 .search:focus-within{border-color:var(--acc)}
 .search input{flex:1;background:none;border:0;outline:0;color:var(--fg);font:inherit}
-.search kbd{font:11px ui-monospace,monospace;color:var(--faint);border:1px solid var(--line2);border-radius:4px;padding:0 5px}
+.search kbd{font:11px var(--mono);color:var(--faint);border:1px solid var(--line2);border-radius:4px;padding:0 5px}
 .updated{color:var(--faint);font-size:11.5px;margin-left:auto}
-nav{display:flex;gap:2px;padding:0 14px;overflow-x:auto}
-nav button{background:none;border:0;color:var(--dim);font:inherit;font-size:13px;padding:9px 12px;cursor:pointer;
-  border-bottom:2px solid transparent;white-space:nowrap}
+/* nav */
+nav button{background:none;border:0;color:var(--dim);font:inherit;font-size:13px;padding:9px 12px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
 nav button:hover{color:var(--fg)}
 nav button.on{color:var(--fg);border-bottom-color:var(--acc)}
 nav .count{font-size:10.5px;margin-left:5px;padding:0 6px;border-radius:99px;background:var(--line);color:var(--dim)}
 nav .count.bad{background:#3a1515;color:var(--red)}
-
-main{padding:18px 20px 40px;max-width:1500px;margin:0 auto}
-section.tab{display:none} section.tab.on{display:block}
-h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:22px 0 9px;font-weight:600;
-  display:flex;align-items:center;gap:8px}
-h2:first-child{margin-top:0}
-h2 .hint{text-transform:none;letter-spacing:0;color:var(--faint);font-weight:400}
-
+/* kpi + card */
 .kpis{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
-.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px;cursor:default}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:11px 13px;cursor:default}
 .kpi[data-go]{cursor:pointer} .kpi[data-go]:hover{border-color:var(--line2)}
 .kpi .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
-.kpi .v{font-size:24px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+.kpi .v{font-size:var(--kpi-v);font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
 .kpi .s{color:var(--faint);font-size:11.5px}
 .kpi.red .v{color:var(--red)} .kpi.amb .v{color:var(--amb)} .kpi.grn .v{color:var(--grn)}
-
-.grid{display:grid;gap:12px}
-.g4{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
-.g2{grid-template-columns:repeat(auto-fit,minmax(420px,1fr))}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px;min-width:0}
-.card h3{margin:0 0 10px;font-size:12px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
-
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:var(--pad-card);min-width:0}
+.card h3{margin:0 0 10px;font-size:12px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:8px}
+.card p{margin:0 0 8px;color:var(--dim);font-size:var(--fs-sm)}
+/* charts */
 .donut{display:flex;align-items:center;gap:14px}
-.donut svg{flex:0 0 120px;width:120px;height:120px}
+.donut svg{flex:0 0 var(--donut);width:var(--donut);height:var(--donut)}
 .legend{flex:1;min-width:0;font-size:12px}
 .legend div{display:flex;align-items:center;gap:7px;padding:1.5px 0;cursor:pointer}
 .legend div:hover .lk{color:var(--fg)}
 .legend i{flex:0 0 9px;height:9px;border-radius:2px}
 .legend .lk{flex:1;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .legend .ln{font-variant-numeric:tabular-nums}
-.empty{color:var(--faint);padding:14px 2px;font-size:12.5px}
-
+.empty{color:var(--faint);padding:14px 2px;font-size:var(--fs-sm)}
 .tl{display:flex;align-items:flex-end;gap:2px;height:150px;padding-top:6px}
 .tl div{flex:1;background:var(--acc);opacity:.75;border-radius:2px 2px 0 0;min-height:1px;position:relative}
 .tl div:hover{opacity:1}
 .tlax{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;margin-top:4px}
-
-.wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px}
-table{width:100%;border-collapse:collapse;font-size:12.5px}
-th{text-align:left;color:var(--dim);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);
-  font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;position:sticky;top:0;background:var(--panel)}
-td{padding:7px 10px;border-bottom:1px solid #1a2029;vertical-align:top}
+/* tables */
+.wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
+table{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+th{text-align:left;color:var(--dim);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;position:sticky;top:0;background:var(--panel)}
+td{padding:var(--pad-cell);border-bottom:1px solid #1a2029;vertical-align:top}
 tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:var(--panel2)}
+tr.sel td{background:#14202f}
 td.ip{color:var(--acc);cursor:pointer;white-space:nowrap}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
 td.det{color:var(--dim);max-width:560px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-td.wrapd{color:var(--dim);white-space:normal}
+td.wrapd{color:var(--dim);white-space:normal;word-break:break-word}
 td.ts{color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
 .tbl-tools{display:flex;gap:8px;align-items:center;margin:0 0 8px}
-.tbl-tools input{background:var(--panel);border:1px solid var(--line2);border-radius:6px;color:var(--fg);
-  padding:5px 9px;font:inherit;font-size:12.5px;min-width:220px}
+.tbl-tools input{background:var(--panel);border:1px solid var(--line2);border-radius:6px;color:var(--fg);padding:5px 9px;font:inherit;font-size:var(--fs-sm);min-width:220px}
 .tbl-tools .n{color:var(--faint);font-size:12px}
-
+/* badges + chips */
 .b{display:inline-block;padding:0 7px;border-radius:99px;font-size:11px;border:1px solid var(--line2);color:var(--dim);white-space:nowrap}
-.b.high,.b.red,.b.block{color:var(--red);border-color:#4a1f1f;background:#211010}
-.b.med,.b.amb,.b.challenge,.b.managed_challenge,.b.jschallenge{color:var(--amb);border-color:#4a3a12;background:#211a0a}
-.b.low,.b.info{color:var(--acc);border-color:#1f3550;background:#0d1826}
-.b.ok,.b.grn,.b.allow,.b.skip{color:var(--grn);border-color:#244a2c;background:#0f1d13}
+.b.high,.b.red,.b.block,.b.critical{color:var(--red);border-color:var(--red-line);background:var(--red-bg)}
+.b.med,.b.amb,.b.challenge,.b.managed_challenge,.b.jschallenge{color:var(--amb);border-color:var(--amb-line);background:var(--amb-bg)}
+.b.low,.b.info{color:var(--acc);border-color:var(--acc-line);background:var(--acc-bg)}
+.b.ok,.b.grn,.b.allow,.b.skip{color:var(--grn);border-color:var(--grn-line);background:var(--grn-bg)}
 .b.acc{color:var(--dim)}
 .b.t-log{color:var(--acc)} .b.t-edge{color:var(--vio)} .b.t-host{color:var(--grn)} .b.t-net-alert{color:var(--amb)}
 .flag{font-size:14px;margin-right:4px}
-.y{color:var(--grn)} .n{color:var(--red)} .q{color:var(--faint)}
-.banner{border:1px solid #4a3a12;background:#1a150a;color:#e3c27a;border-radius:10px;padding:11px 14px;margin-bottom:14px;font-size:13px}
-.banner.bad{border-color:#4a1f1f;background:#1a0d0d;color:#f0a39f}
-.banner.ok{border-color:#244a2c;background:#0d1a10;color:#9bd8a7}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
+.chip{font:11.5px var(--mono);color:var(--dim);border:1px solid var(--line2);border-radius:99px;padding:1px 9px;cursor:pointer;background:none}
+.chip:hover{color:var(--fg);border-color:var(--acc)}
+.chip.on{color:var(--red);border-color:var(--red-line);background:var(--red-bg)}
+/* banners + notes */
+.banner{border:1px solid var(--amb-line);background:#1a150a;color:#e3c27a;border-radius:var(--radius);padding:11px 14px;margin-bottom:14px;font-size:13px}
+.banner.bad{border-color:var(--red-line);background:#1a0d0d;color:#f0a39f}
+.banner.ok{border-color:var(--grn-line);background:#0d1a10;color:#9bd8a7}
 .banner code{background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px}
 .note{color:var(--faint);font-size:12px;margin-top:7px;line-height:1.6}
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
-.chip{font:11.5px ui-monospace,monospace;color:var(--dim);border:1px solid var(--line2);border-radius:99px;padding:1px 9px;cursor:pointer;background:none}
-.chip:hover{color:var(--fg);border-color:var(--acc)}
-.btn{background:#13233a;border:1px solid #1f3a5f;color:var(--acc);border-radius:6px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
-.btn:hover{background:#18304f} .btn:disabled{opacity:.45;cursor:default}
-tr.sel td{background:#14202f}
-footer{color:var(--faint);font-size:11.5px;text-align:center;padding:20px}
-@media (max-width:600px){.bar{padding:10px 14px}main{padding:14px}.g2{grid-template-columns:1fr}.updated{display:none}}
-.ov-head{display:flex;align-items:center;justify-content:space-between;margin:2px 0 10px}
-.btn{background:var(--acc);color:#0b0e13;border:0;border-radius:6px;padding:5px 12px;font:inherit;font-weight:600;cursor:pointer}
+/* buttons + inputs */
+.btn{background:var(--acc);color:#0b0e13;border:0;border-radius:6px;padding:5px 12px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn:hover{filter:brightness(1.1)} .btn:disabled{opacity:.45;cursor:default}
 .btn.ghost{background:none;color:var(--dim);border:1px solid var(--line2);font-weight:500}
 .btn.ghost:hover{color:var(--fg);border-color:var(--acc)}
 .btn.sm{padding:2px 9px;font-size:12px}
-.row{display:flex;gap:8px;margin-bottom:10px}
-.row input,#ov-editor input[type=text]{flex:1;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;color:var(--fg);padding:5px 9px;font:inherit}
+.btn.danger{background:var(--red);color:#fff}
+td .btn{padding:2px 9px;font-size:12px;font-weight:500;background:var(--acc-bg);color:var(--acc);border:1px solid var(--acc-line)}
+td .btn:hover{border-color:var(--acc)}
+td:has(> .btn){white-space:nowrap;text-align:right}
+.linkbtn{background:none;border:0;padding:0;color:var(--acc);font:inherit;cursor:pointer;text-align:left}
+.linkbtn:hover{text-decoration:underline}
+.row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+.row input,.row select,.fld input,.fld select,#ov-editor input[type=text]{flex:1;min-width:140px;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;color:var(--fg);padding:5px 9px;font:inherit;font-size:var(--fs-sm)}
+.fld{display:grid;grid-template-columns:minmax(150px,220px) 1fr auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #1a2029}
+.fld label{color:var(--dim);font:12px var(--mono)}
+.fld:last-child{border-bottom:0}
+.msg{font-size:12px;margin-top:6px}
+/* switch */
+.switch{position:relative;display:inline-flex;align-items:center;gap:9px;cursor:pointer;user-select:none;font-size:13px}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch .track{width:38px;height:21px;border-radius:99px;background:var(--line2);position:relative;transition:background .15s}
+.switch .track::after{content:"";position:absolute;top:3px;left:3px;width:15px;height:15px;border-radius:50%;background:var(--fg);transition:transform .15s}
+.switch input:checked+.track{background:var(--red)}
+.switch input:checked+.track::after{transform:translateX(17px)}
+.switch input:focus-visible+.track{outline:2px solid var(--acc);outline-offset:2px}
+/* drawer — details for a box, a CVE, a Lynis report; never renders below the fold again */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;opacity:0;pointer-events:none;transition:opacity .15s}
+.scrim.on{opacity:1;pointer-events:auto}
+aside.drawer{position:fixed;top:0;right:0;bottom:0;width:min(760px,100vw);background:var(--bg);border-left:1px solid var(--line2);z-index:21;
+  transform:translateX(100%);transition:transform .18s ease;display:flex;flex-direction:column;box-shadow:-12px 0 32px rgba(0,0,0,.4)}
+aside.drawer.on{transform:none}
+.drawer .dh{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.drawer .dh h2{margin:0;flex:1}
+.drawer .db{padding:16px 18px;overflow:auto;flex:1}
+.drawer .db h3{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px}
+.drawer .db h3:first-child{margin-top:0}
+.drawer .lead{font-size:14px;line-height:1.55;margin:0 0 12px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:var(--fs-sm);margin-bottom:12px}
+.kv dt{color:var(--faint)} .kv dd{margin:0}
+/* snippets + tokens + approvals */
+.tokbox{font-family:var(--mono);font-size:12px;background:var(--grn-bg);border:1px solid var(--grn-line);color:var(--grn);padding:8px;border-radius:6px;word-break:break-all;margin-bottom:8px}
+pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px;font-size:11.5px;overflow:auto;white-space:pre-wrap;margin:4px 0 10px;position:relative}
+.snip-h{display:flex;align-items:center;justify-content:space-between;color:var(--dim);font-size:12px}
+.appr{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:10px;margin-bottom:8px}
+.appr pre{flex:1;margin:0;white-space:pre-wrap;font:12.5px/1.45 inherit}
+
+/* ── 5 · tabs ──────────────────────────────────────────────────────────────── */
+.ov-head{display:flex;align-items:center;justify-content:space-between;margin:2px 0 10px}
 #t-overview .kpis{margin-bottom:12px}
-.grid.ov{grid-template-columns:repeat(4,minmax(0,1fr))}
-.ov .s2{grid-column:span 2}.ov .s4{grid-column:1/-1}
-@media(max-width:1100px){.grid.ov{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:640px){.grid.ov{grid-template-columns:1fr}.ov .s2{grid-column:1/-1}}
-#ov-editor{background:var(--panel);border:1px solid var(--acc);border-radius:10px;padding:14px;margin:0 0 14px}
+#ov-editor{background:var(--panel);border:1px solid var(--acc);border-radius:var(--radius);padding:14px;margin:0 0 14px}
 #ov-editor h3{margin:0 0 8px}
 .pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:6px;margin-bottom:12px}
 .pick label{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 8px;cursor:pointer}
 .pick label.on{border-color:var(--acc)}
 .pick .mv{margin-left:auto;display:flex;gap:2px}
 .pick .mv button{background:none;border:1px solid var(--line2);color:var(--dim);border-radius:4px;width:22px;height:20px;cursor:pointer;padding:0;line-height:1}
-.tokbox{font-family:ui-monospace,monospace;font-size:12px;background:#0f1d13;border:1px solid #244a2c;color:var(--grn);padding:8px;border-radius:6px;word-break:break-all;margin-bottom:8px}
-pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px;font-size:11.5px;overflow:auto;white-space:pre-wrap}
-.appr{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:10px;margin-bottom:8px}
-.appr pre{flex:1;margin:0;white-space:pre-wrap;font:12.5px/1.45 inherit}
+.geo-ctl{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.intg .card h3 .b{margin-left:auto}
+
+/* ── 6 · density + responsive ─────────────────────────────────────────────── */
+html[data-density=compact]{--fs:12.5px;--fs-sm:11.5px;--pad-cell:3px 8px;--pad-card:9px 11px;--gap:8px;--kpi-v:19px;--pad-main:10px 12px 28px;--radius:7px;--donut:92px}
+html[data-density=compact] .kpi{padding:7px 10px}
+html[data-density=compact] h2{margin:14px 0 6px}
+html[data-density=compact] .tl{height:100px}
+html[data-density=compact] nav button{padding:7px 10px}
+@media(max-width:1100px){.grid.ov{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.grid.ov{grid-template-columns:1fr}.ov .s2{grid-column:1/-1}.fld{grid-template-columns:1fr}}
+@media(max-width:600px){.bar{padding:10px 14px}main{padding:14px}.g2,.g3{grid-template-columns:1fr}.updated{display:none}}
 </style>
 
 <header>
   <div class="bar">
     <div class="brand">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="1.8"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
-      warden
+      <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="wg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#58a6ff"/><stop offset="1" stop-color="#39c5cf"/></linearGradient></defs>
+        <path d="M16 2.5 4.5 6.8v8.4c0 6.9 4.8 12.4 11.5 14.3 6.7-1.9 11.5-7.4 11.5-14.3V6.8L16 2.5Z" fill="#0f1a28" stroke="url(#wg)" stroke-width="1.8" stroke-linejoin="round"/>
+        <path d="M9.2 16.4c1.9-3.1 4.2-4.6 6.8-4.6s4.9 1.5 6.8 4.6c-1.9 3.1-4.2 4.6-6.8 4.6s-4.9-1.5-6.8-4.6Z" fill="none" stroke="url(#wg)" stroke-width="1.6" stroke-linejoin="round"/>
+        <circle cx="16" cy="16.4" r="2.3" fill="url(#wg)"/><path d="M16 6.6v2.6M16 23.6v2.4" stroke="#39c5cf" stroke-width="1.6" stroke-linecap="round" opacity=".7"/></svg>
+      <span>warden<br><small>homelab security hub</small></span>
     </div>
     <span class="pill" id="mode"><span class="dot"></span>…</span>
     <label class="search">
@@ -155,6 +221,7 @@ pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px
       <kbd>/</kbd>
     </label>
     <span class="updated" id="updated"></span>
+    <button class="btn ghost sm" id="density" title="Switch between comfortable and compact layout">Compact view</button>
   </div>
   <nav id="nav"></nav>
 </header>
@@ -221,7 +288,6 @@ pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px
   </div>
   <h2>Boxes <span class="hint">daily scan 03:30 · Patch = queue a request → plan + ✅ (chat or Settings) → snapshot → full upgrade → reboot if needed (never Proxmox nodes)</span></h2>
   <div class="wrap"><table id="vt"></table></div>
-  <div id="vdetail"></div>
   <h2>Docker containers <span class="hint">how each is managed decides how it can be updated — automatic only where it's safe (compose), everything else says why</span></h2>
   <div class="wrap"><table id="vimg"></table></div>
   <h2>Must-fix across the estate <span class="hint">known-exploited (CISA KEV) first, then severity, then how many boxes</span></h2>
@@ -237,7 +303,6 @@ pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px
   <div class="kpis" id="ep-kpis"></div>
   <h2>Boxes <span class="hint">agentless integrity sweep hourly (deep daily 04:10) · Lynis hardening weekly (Sun 05:00) — nothing stays installed</span></h2>
   <div class="wrap"><table id="ep"></table></div>
-  <div id="ep-detail"></div>
   <h2>Integrity findings <span class="hint">✅ (chat or Settings) accepts a change into the baseline</span></h2>
   <div class="tbl-tools"><input data-filter="epf" placeholder="filter…"><span class="n" id="epf-n"></span></div>
   <div class="wrap"><table id="epf"></table></div>
@@ -248,7 +313,11 @@ pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px
   <div id="geo-banner"></div>
   <div class="grid g2">
     <div class="card"><h3>Traffic by country · 30 days</h3><div class="wrap" style="border:0"><table id="geo"></table></div></div>
-    <div class="card"><h3>Red list <span class="q" id="rl-src"></span></h3><div id="redlist"></div>
+    <div class="card"><h3>Red list · country block <span class="q" id="rl-src"></span></h3>
+      <div class="geo-ctl"><label class="switch"><input type="checkbox" id="geo-on"><span class="track"></span><span id="geo-on-l">Block at the edge</span></label>
+        <button class="btn sm" id="geo-save" hidden>Apply</button><button class="btn ghost sm" id="geo-undo" hidden>Undo</button><span class="msg" id="geo-msg"></span></div>
+      <div class="note" style="margin:0 0 8px">Click a country to add it to / remove it from the block. Red = blocked when the switch is on.</div>
+      <div id="redlist"></div>
       <div class="note">Source: <a href="https://www.gov.uk/government/collections/uk-sanctions-regimes-under-the-sanctions-act" target="_blank" rel="noopener">UK FCDO geographic sanctions regimes</a> + US OFAC (Cuba).
       A sanctions regime is about trade and named people, not attack traffic — so the red list only <b>flags</b>; the <b>block</b> set is a separate, owner-approved choice applied as one Cloudflare WAF rule.</div></div>
   </div>
@@ -291,14 +360,24 @@ pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px
   <div id="appr"></div>
   <h2>Setup <span class="hint" id="setup-score"></span></h2>
   <div class="wrap"><table id="setup"></table></div>
-  <h2>Connect an agent <span class="hint">read-only REST API + MCP — Hermes, Claude, Cursor, anything that speaks MCP</span></h2>
+  <h2>Settings <span class="hint" id="ovr-note">the ones that are safe to change from a browser — the rest live in warden.yml</span></h2>
+  <div class="card" id="cfg"></div>
+</section>
+
+<section class="tab" id="t-connect">
+  <div class="banner ok" style="margin-bottom:16px"><b>warden is the hub; your tools plug into it.</b> Everything here is read-only for the tool you connect:
+    a token can read what this console shows and nothing more — it can't ban, block, patch or approve.</div>
   <div class="grid g2">
-    <div class="card"><h3>Tokens</h3>
-      <div class="row"><input id="tok-name" placeholder="name, e.g. hermes" maxlength="60"><button class="btn" id="tok-new">New token</button></div>
+    <div class="card"><h3>1 · Make a token</h3>
+      <div class="row"><input id="tok-name" placeholder="who it's for, e.g. home-assistant" maxlength="60"><button class="btn" id="tok-new">New token</button></div>
       <div id="tok-once"></div><div class="wrap" style="border:0"><table id="toks"></table></div></div>
-    <div class="card"><h3>Snippets</h3><div id="snips"></div></div>
+    <div class="card"><h3>2 · Your endpoints</h3><div id="endpoints-info"></div></div>
   </div>
-  <div class="note">Agents can read everything on this console and nothing more: no tool bans, blocks, patches or approves. Your reverse proxy must pass <code>/mcp</code> and <code>/api/v1</code> straight through (no login page) — the token is the auth there.</div>
+  <h2>3 · Plug in a tool <span class="hint">copy, replace $WARDEN_TOKEN with the token from step 1</span></h2>
+  <div class="grid g3 intg" id="intg"></div>
+  <h2>Put warden behind your VPN <span class="hint">the console has no reason to be on the open internet — pick what you already run</span></h2>
+  <div class="grid g3 intg" id="vpn"></div>
+  <div class="note">Whatever sits in front must pass <code>/mcp</code> and <code>/api/v1</code> straight through (no login page) — the bearer token is the auth there. Everything else can sit behind your SSO.</div>
 </section>
 
 <section class="tab" id="t-search">
@@ -307,7 +386,12 @@ pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px
   <div class="wrap" style="margin-top:10px"><table id="sres"></table></div>
 </section>
 </main>
-<footer>warden · read-only console · no control here can ban or block · IP geolocation by <a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP</a> (CC BY 4.0)</footer>
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true" role="dialog" aria-labelledby="dr-title">
+  <div class="dh"><h2 id="dr-title"></h2><button class="btn ghost sm" id="dr-close" title="Close (Esc)">Close ✕</button></div>
+  <div class="db" id="dr-body"></div>
+</aside>
+<footer>warden · homelab security hub · every control that changes something asks first and tells your alerts channel · IP geolocation by <a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP</a> (CC BY 4.0)</footer>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -323,7 +407,7 @@ const selfB = r => r.self ? ' <span class="b acc" title="our own address (self-i
 const ccCell = (cc, red) => cc ? `<span class="flag">${flag(cc)}</span>${esc(cc)}${red ? ' <span class="b red">red list</span>' : ""}` : '<span class="q">—</span>';
 
 const TABS = [["overview","Overview"],["detections","Detections"],["edge","Edge · Cloudflare"],["surface","Attack surface"],["vulns","Vulnerabilities"],["endpoints","Endpoints"],
-              ["geo","Geo & red list"],["network","Network"],["health","Health"],["settings","Settings"],["search","Search"]];
+              ["geo","Geo & red list"],["network","Network"],["health","Health"],["connect","Connect"],["settings","Settings"],["search","Search"]];
 let D = null;
 
 function nav() {
@@ -378,6 +462,38 @@ function table(id, cols, rows, empty) {
     }).join("")}</tr>`).join("") + "</tbody>";
   const n = $("#" + id + "-n"); if (n) n.textContent = rows.length + " rows";
 }
+
+// ── drawer: one place for "tell me more" (box CVEs, one CVE, a Lynis report) ─────
+function openDrawer(title, html) {
+  $("#dr-title").innerHTML = title; $("#dr-body").innerHTML = html; $("#dr-body").scrollTop = 0;
+  $("#drawer").classList.add("on"); $("#scrim").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false");
+  $("#dr-close").focus();
+}
+function closeDrawer() { $("#drawer").classList.remove("on"); $("#scrim").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true"); }
+$("#dr-close").onclick = closeDrawer; $("#scrim").onclick = closeDrawer;
+document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#drawer").classList.contains("on")) closeDrawer(); });
+const cveBtn = id => `<button class="linkbtn mono" data-cve="${esc(id)}" title="What is this, where is it, how to fix">${esc(id)}</button>`;
+async function openCve(id) {
+  openDrawer(esc(id), '<div class="empty">Loading…</div>');
+  let r; try { r = await (await fetch("api/cve?id=" + encodeURIComponent(id))).json(); } catch { $("#dr-body").innerHTML = '<div class="empty">Could not load.</div>'; return; }
+  const fixed = r.rows.filter(x => x.fixed), boxes = [...new Set(r.rows.map(x => x.name))];
+  const links = Object.entries(r.links || {}).concat(r.url ? [["Advisory", r.url]] : []);
+  $("#dr-body").innerHTML = `<p class="lead"><b>${esc(r.title || "No title from the scanner")}</b></p>
+    <dl class="kv"><dt>Severity</dt><dd>${sevB(r.severity)}${r.kev ? ' <span class="b red">known exploited (CISA KEV)</span>' : ""}</dd>
+      <dt>Affects</dt><dd>${boxes.length} box${boxes.length === 1 ? "" : "es"} · ${r.rows.length} package${r.rows.length === 1 ? "" : "s"}</dd>
+      <dt>Fix</dt><dd>${fixed.length ? `a fixed version exists for ${fixed.length} of ${r.rows.length} — patch the box (Vulnerabilities → Patch…) or update the image` : '<span class="q">no fix released upstream yet — nothing to install; watch it</span>'}</dd></dl>
+    ${r.descr ? `<h3>What it is</h3><p style="white-space:pre-wrap;color:var(--dim);font-size:13px;line-height:1.6">${esc(r.descr)}</p>` : '<p class="note">The full description appears after the next nightly scan (03:30) — use the links below meanwhile.</p>'}
+    <h3>Where</h3><div class="wrap"><table><thead><tr><th>Box</th><th>Package</th><th>Installed</th><th>Fixed in</th><th>Image</th></tr></thead><tbody>${r.rows.map(x =>
+      `<tr><td><b>${esc(x.name)}</b> <span class="q mono">${esc(x.target)}</span></td><td class="mono">${esc(x.pkg)}</td><td class="mono q">${esc(x.installed)}</td>
+       <td>${x.fixed ? `<span class="y mono">${esc(x.fixed)}</span>` : `<span class="q">${esc(x.status || "no fix")}</span>`}</td><td class="mono det">${esc(x.image || "")}</td></tr>`).join("")}</tbody></table></div>
+    <h3>Read more</h3><div class="chips">${links.map(([k, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${esc(k)} ↗</a>`).join("")}</div>`;
+}
+function setDensity(d) {
+  document.documentElement.dataset.density = d; $("#density").textContent = d === "compact" ? "Comfortable view" : "Compact view";
+  try { localStorage.setItem("warden-density", d); } catch {}
+}
+$("#density").onclick = () => setDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact");
+setDensity(document.documentElement.dataset.density || "comfortable");
 
 document.addEventListener("click", e => { const td = e.target.closest("td[data-ip]"); if (td && td.dataset.ip) runSearch("ip:" + td.dataset.ip); });
 document.addEventListener("input", e => {
@@ -460,17 +576,18 @@ function render() {
 
   // geo
   const RL = d.redlist, ruleOn = !!RL.rule;
-  $("#geo-banner").innerHTML = ruleOn
-    ? `<div class="banner ok"><b>Country block is live at the edge</b> — ${esc(RL.rule.desc)}</div>`
-    : `<div class="banner">Country block <b>not applied</b>. Proposed set: ${RL.block.map(c => `${flag(c)} ${esc(cname(c))}`).join(", ") || "none"}.
-       Apply with <code>cfsec.py --apply-waf</code> (dry run) then <code>--commit</code> once approved.</div>`;
+  const ap = RL.applied, state = RL.pending ? `<div class="banner">Saved — waiting for Cloudflare (applied within about a minute)…</div>`
+    : ap && !ap.ok ? `<div class="banner bad"><b>Country block not applied:</b> ${esc(ap.msg)}</div>`
+    : ruleOn ? `<div class="banner ok"><b>Country block is live at the edge</b> — ${RL.block.map(c => `${flag(c)} ${esc(c)}`).join(" ")} ${ap ? `<span class="q">· checked ${ago(ap.ts)}</span>` : ""}</div>`
+    : `<div class="banner">Country block is <b>off</b>. Nothing is blocked by country.</div>`;
+  $("#geo-banner").innerHTML = state;
   table("geo", [{h: "Country", f: r => `<span class="flag">${flag(r.cc)}</span>${esc(cname(r.cc))}`}, {h: "Log", k: "log", cls: "num", num: 1},
     {h: "Edge", k: "edge", cls: "num", num: 1}, {h: "IPs", k: "ips", cls: "num", num: 1},
-    {h: "Status", f: r => r.blocked ? (ruleOn ? '<span class="b block">blocked</span>' : '<span class="b red">block proposed</span>') : r.red ? '<span class="b red">red list</span>' : ""}],
+    {h: "Status", f: r => r.blocked ? (ruleOn ? '<span class="b block">blocked</span>' : '<span class="b red">block pending</span>') : r.red ? '<span class="b red">red list</span>' : ""}],
     d.geo, "No located traffic in 30 days.");
-  $("#rl-src").textContent = RL.checked ? "checked " + RL.checked : "";
-  $("#redlist").innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px">${Object.entries(RL.watch).map(([cc, nm]) =>
-    `<span class="b ${RL.block.includes(cc) ? "block" : "acc"}" title="${esc(nm)}">${flag(cc)} ${esc(cc)}${RL.block.includes(cc) ? " · block" : ""}</span>`).join("")}</div>`;
+  $("#rl-src").textContent = RL.checked ? "source checked " + RL.checked : "";
+  if (!GEO || !GEO.dirty) GEO = {on: RL.enabled, set: [...RL.chosen], dirty: false, orig: {on: RL.enabled, set: [...RL.chosen]}, watch: RL.watch};
+  drawGeo();
   badge("geo", k.red_hits_7d, k.red_hits_7d);
 
   // network
@@ -526,7 +643,7 @@ function renderVulns(V) {
     {h: "Action", f: r => `<span class="b ${r.action === "manual" ? "acc" : "ok"}">${esc(r.action)}</span>`}, {h: "Why", k: "why", cls: "wrapd"},
     {h: "", f: r => r.action !== "manual" ? `<button class="btn" data-patch="ctr:${esc(r.host.slice(4))}:${esc(r.container)}" data-name="${esc(r.container)}">Update…</button>` : ""}],
     V.images || [], "No container data yet.");
-  table("vtop", [{h: "CVE", f: r => `<a href="https://nvd.nist.gov/vuln/detail/${esc(r.vid)}" target="_blank" rel="noopener" class="mono">${esc(r.vid)}</a>`},
+  table("vtop", [{h: "CVE", f: r => cveBtn(r.vid)},
     {h: "Severity", f: r => sevB(r.sev)}, {h: "KEV", f: r => r.kev ? '<span class="b red">exploited</span>' : ""},
     {h: "Boxes", k: "n_targets", cls: "num", num: 1}, {h: "Package", k: "pkgs", cls: "mono det"}, {h: "Fixed in", k: "fixed", cls: "mono"},
     {h: "Where", k: "targets", cls: "det mono", title: 1}, {h: "Title", k: "title", cls: "det", title: 1}], V.top, "Nothing known-exploited or fixable. 🎉");
@@ -539,14 +656,17 @@ function renderVulns(V) {
   badge("vulns", (tot.kev || 0) + (tot.crit || 0), !!((tot.kev || 0) + (tot.crit || 0)));
 }
 document.addEventListener("click", async e => {
+  const cv = e.target.closest("[data-cve]");
+  if (cv) { e.preventDefault(); openCve(cv.dataset.cve); return; }
   const c = e.target.closest("[data-cves]");
   if (c) {
     const t = c.dataset.cves;
     document.querySelectorAll("#vt tr").forEach(tr => tr.classList.toggle("sel", tr.contains(c)));
-    $("#vdetail").innerHTML = `<h2>CVEs on <span class="mono">${esc(t)}</span> <span class="hint">KEV and fixable first</span></h2>
-      <div class="tbl-tools"><input data-filter="vdet" placeholder="filter…"><span class="n" id="vdet-n"></span></div><div class="wrap"><table id="vdet"></table></div>`;
+    openDrawer(`CVEs on ${esc(t)}`, '<div class="empty">Loading…</div>');
     const r = await (await fetch("api/vuln?target=" + encodeURIComponent(t))).json();
-    table("vdet", [{h: "CVE", k: "vid", cls: "mono"}, {h: "Severity", f: x => sevB(x.severity)}, {h: "KEV", f: x => x.kev ? '<span class="b red">exploited</span>' : ""},
+    $("#dr-body").innerHTML = `<p class="note" style="margin-top:0">Known-exploited and fixable first. Click a CVE for what it is and how to fix it.</p>
+      <div class="tbl-tools"><input data-filter="vdet" placeholder="filter: CVE, package, severity…"><span class="n" id="vdet-n"></span></div><div class="wrap"><table id="vdet"></table></div>`;
+    table("vdet", [{h: "CVE", f: x => cveBtn(x.vid)}, {h: "Severity", f: x => sevB(x.severity)}, {h: "KEV", f: x => x.kev ? '<span class="b red">exploited</span>' : ""},
       {h: "Package", k: "pkg", cls: "mono"}, {h: "Installed", k: "installed", cls: "mono q"}, {h: "Fixed in", f: x => x.fixed ? `<span class="y mono">${esc(x.fixed)}</span>` : `<span class="q">${esc(x.status || "no fix")}</span>`},
       {h: "Image", k: "image", cls: "mono det"}, {h: "Title", k: "title", cls: "det", title: 1}], r.rows, "No CVEs recorded.");
     return;
@@ -608,11 +728,40 @@ document.addEventListener("click", e => {
   const b = e.target.closest("[data-hard]"); if (!b) return;
   const h = (window._harden || {})[b.dataset.hard]; if (!h) return;
   const w = JSON.parse(h.warnings || "[]"), s = JSON.parse(h.suggestions || "[]");
-  $("#ep-detail").innerHTML = `<h2>Lynis · ${esc(h.name)} <span class="hint">index ${h.idx} · ${h.tests} tests · ${ago(h.ts)}</span></h2>
-    <div class="grid g2"><div class="card"><h3>Warnings (${w.length})</h3>${w.length ? `<table>${w.map(x => `<tr><td class="mono q">${esc(x.id)}</td><td>${esc(x.text)}</td></tr>`).join("")}</table>` : '<div class="empty">None.</div>'}</div>
-    <div class="card"><h3>Suggestions (${s.length})</h3><div style="max-height:360px;overflow:auto"><table>${s.map(x => `<tr><td class="mono q">${esc(x.id)}</td><td>${esc(x.text)}${x.detail ? `<div class="q" style="font-size:11px">${esc(x.detail)}</div>` : ""}</td></tr>`).join("")}</table></div></div></div>`;
+  const lyn = id => `<a href="https://cisofy.com/lynis/controls/${esc(id)}/" target="_blank" rel="noopener" class="mono">${esc(id)}</a>`;
+  openDrawer(`Hardening · ${esc(h.name)}`, `<dl class="kv"><dt>Hardening index</dt><dd><b>${h.idx}</b>${h.prev_idx != null && h.prev_idx !== h.idx ? ` <span class="q">(was ${h.prev_idx})</span>` : ""} / 100</dd>
+      <dt>Tests run</dt><dd>${h.tests}</dd><dt>Audited</dt><dd>${ago(h.ts)} · Lynis, removed afterwards</dd></dl>
+    <h3>Warnings (${w.length})</h3>${w.length ? `<div class="wrap"><table>${w.map(x => `<tr><td>${lyn(x.id)}</td><td class="wrapd">${esc(x.text)}</td></tr>`).join("")}</table></div>` : '<div class="empty">None. 🎉</div>'}
+    <h3>Suggestions (${s.length})</h3><div class="wrap"><table>${s.map(x => `<tr><td>${lyn(x.id)}</td><td class="wrapd">${esc(x.text)}${x.detail ? `<div class="q" style="font-size:11px">${esc(x.detail)}</div>` : ""}</td></tr>`).join("")}</table></div>
+    <p class="note">Each ID links to Lynis's explanation of the control and how to fix it. The index is Lynis's own score, not a CIS benchmark.</p>`);
 });
 
+
+// ── Geo: the country-block switch ───────────────────────────────────────────
+let GEO = null;
+function drawGeo() {
+  $("#geo-on").checked = GEO.on; $("#geo-on-l").textContent = GEO.on ? "Blocking at the edge" : "Block at the edge (off)";
+  $("#redlist").innerHTML = `<div class="chips">${Object.entries(GEO.watch).map(([cc, nm]) =>
+    `<button class="chip ${GEO.set.includes(cc) ? "on" : ""}" data-cc="${esc(cc)}" title="${esc(nm)} — click to ${GEO.set.includes(cc) ? "stop blocking" : "block"}">${flag(cc)} ${esc(cc)}</button>`).join("")}</div>`;
+  $("#geo-save").hidden = $("#geo-undo").hidden = !GEO.dirty;
+}
+function geoDirty() { GEO.dirty = GEO.on !== GEO.orig.on || GEO.set.slice().sort().join() !== GEO.orig.set.slice().sort().join(); drawGeo(); }
+document.addEventListener("click", async e => {
+  const c = e.target.closest("[data-cc]");
+  if (c && GEO) { const i = GEO.set.indexOf(c.dataset.cc); i < 0 ? GEO.set.push(c.dataset.cc) : GEO.set.splice(i, 1); geoDirty(); return; }
+  if (e.target.id === "geo-undo") { GEO = null; $("#geo-msg").textContent = ""; load(); return; }
+  if (e.target.id === "geo-save") {
+    const names = GEO.set.map(cname).join(", ") || "none";
+    if (!confirm(GEO.on ? `Block ALL traffic from: ${names}?\n\nApplied as one Cloudflare WAF rule within about a minute. Anyone in those countries — including you, if you travel there — gets a Cloudflare block page.`
+                        : "Turn the country block OFF?\n\nThe Cloudflare rule is removed within about a minute.")) return;
+    e.target.disabled = true;
+    const r = await post("api/geo", "geo", {enabled: GEO.on, block: GEO.set});
+    e.target.disabled = false;
+    $("#geo-msg").innerHTML = r.ok ? `<span class="y">${esc(r.msg)}</span>` : `<span class="n">${esc(r.error || "failed")}</span>`;
+    if (r.ok) { GEO = null; load(); setTimeout(load, 75000); }
+  }
+});
+document.addEventListener("change", e => { if (e.target.id === "geo-on" && GEO) { GEO.on = e.target.checked; geoDirty(); } });
 
 // ── Overview: driven by the saved layout (Customise) ─────────────────────────
 const pick = (o, path) => path.split(".").reduce((x, k) => x == null ? x : x[k], o);
@@ -714,6 +863,109 @@ async function post(url, hdr, body) {
         return await r.json(); } catch (e) { return {ok: false, error: String(e)}; }
 }
 
+// ── Connect: tokens, endpoints, integrations, VPN recipes ───────────────────
+const snip = (title, body, note) => `<div class="snip-h"><span>${title}</span><button class="btn ghost sm" data-copy>copy</button></div><pre class="snip">${esc(body)}</pre>${note ? `<div class="note" style="margin-top:-4px">${note}</div>` : ""}`;
+function renderConnect() {
+  const mcp = SET.mcp_url || location.origin + location.pathname.replace(/\/$/, "") + "/mcp", api = SET.api_url || mcp.replace(/\/mcp$/, "/api/v1");
+  const host = new URL(api).host;
+  $("#endpoints-info").innerHTML = `<dl class="kv"><dt>MCP</dt><dd class="mono">${esc(mcp)}</dd><dt>REST</dt><dd class="mono">${esc(api)}</dd>
+    <dt>OpenAPI</dt><dd><a class="mono" href="${esc(api)}/openapi.json" target="_blank" rel="noopener">${esc(api)}/openapi.json</a></dd></dl>
+    <div class="note">Views: summary, detections, top-ips, ip/&lt;addr&gt;, search, bans, vulns, cve/&lt;id&gt;, attack-surface, network, ids, integrity, health, setup, approvals.
+    ${SET.mcp_url ? "" : " Set <b>api.public_url</b> under Settings if tools reach warden at a different address."}</div>`;
+  const I = [
+    ["Home Assistant", "sensors + automations", snip("configuration.yaml", `rest:
+  - resource: ${api}/summary
+    headers:
+      Authorization: !secret warden_bearer   # "Bearer wdn_…" in secrets.yaml
+    scan_interval: 300
+    sensor:
+      - name: warden mode
+        value_template: "{{ value_json.mode }}"
+      - name: warden detections 24h
+        value_template: "{{ value_json.kpi.events_24h }}"
+        state_class: measurement
+      - name: warden known-exploited CVEs
+        value_template: "{{ value_json.kpi.vuln_kev }}"
+      - name: warden IDS alerts 24h
+        value_template: "{{ value_json.kpi.ids_24h }}"
+      - name: warden waiting for you
+        value_template: "{{ value_json.kpi.approvals }}"`, "Then alert on it like any sensor, e.g. notify your phone when <i>known-exploited CVEs</i> goes above 0.")],
+    ["Hermes", "agent · MCP", snip("~/.hermes/config.yaml → mcp_servers", `warden:
+  url: ${mcp}
+  headers:
+    Authorization: "Bearer \${WARDEN_TOKEN}"`)],
+    ["Claude Code", "agent · MCP", snip("terminal", `claude mcp add --transport http warden ${mcp} \\
+  --header "Authorization: Bearer $WARDEN_TOKEN"`)],
+    ["Claude Desktop / Cursor / VS Code", "agent · MCP", snip("mcp.json", `{"mcpServers": {"warden": {"type": "http", "url": "${mcp}",
+  "headers": {"Authorization": "Bearer \${WARDEN_TOKEN}"}}}}`)],
+    ["n8n / Node-RED / scripts", "REST", snip("HTTP request", `GET ${api}/summary
+Authorization: Bearer $WARDEN_TOKEN`)],
+    ["Grafana / Homepage / Uptime Kuma", "dashboards · REST", snip("JSON API data source", `URL:    ${api}/summary
+Header: Authorization: Bearer $WARDEN_TOKEN
+Fields: kpi.events_24h · kpi.vuln_kev · kpi.ids_24h · mode`, "Uptime Kuma: an HTTP(s)-Json Query monitor on <code>kpi.vuln_kev == 0</code> turns red when a known-exploited CVE appears.")],
+  ];
+  $("#intg").innerHTML = I.map(([t, tag, body]) => `<div class="card"><h3>${t} <span class="b">${tag}</span></h3>${body}</div>`).join("");
+  const V = [
+    ["Tailscale", `tailscale serve --bg --https=443 http://127.0.0.1:8792
+# tailnet-only: https://<this-machine>.<tailnet>.ts.net
+# never "tailscale funnel" — that publishes it`],
+    ["NetBird", `# dashboard → Networks → add resource <warden-ip>/32
+# Access control → policy: group "admins" → that resource, TCP 443
+# warden's own reverse proxy listens on the LAN IP; nothing public`],
+    ["WireGuard / wg-easy / Firezone", `# bind warden's reverse proxy to the LAN (or wg0) address only
+# peers reach it through the tunnel: AllowedIPs = <lan>/24
+# no port-forward on the router for 443`],
+    ["Cloudflare Tunnel + Access", `# Zero Trust → Access → Applications → self-hosted: ${host}
+# policy: emails = you · bypass paths /api/v1* and /mcp* (token auth)
+# tunnel ingress: ${host} → http://localhost:8792`],
+    ["Authelia / Authentik / Pangolin", `# forward-auth everything EXCEPT the agent paths:
+@agent path /mcp /mcp/* /api/v1 /api/v1/*
+handle @agent { reverse_proxy 127.0.0.1:8792 }
+handle { forward_auth <your-sso> … ; reverse_proxy 127.0.0.1:8792 }`],
+    ["Headscale / ZeroTier", `# same as Tailscale/NetBird: give warden's host a mesh IP,
+# allow only your admin devices to it (ACL / flow rules),
+# and leave it off every public DNS record`],
+  ];
+  $("#vpn").innerHTML = V.map(([t, body]) => `<div class="card"><h3>${t}</h3>${snip("recipe", body)}</div>`).join("");
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-copy]"); if (!b) return;
+  const pre = b.closest(".snip-h").nextElementSibling;
+  navigator.clipboard?.writeText(pre.textContent).then(() => { b.textContent = "copied ✓"; setTimeout(() => b.textContent = "copy", 1500); });
+});
+
+// ── Settings: editable config + write-only secrets ──────────────────────────
+let FID = 0;
+function field(f) {
+  const id = "cfg-" + (++FID), v = f.value ?? "";
+  const input = Array.isArray(f.type) ? `<select id="${id}">${f.type.map(o => `<option${o === v ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`
+    : f.type === "bool" ? `<select id="${id}"><option value="true"${v ? " selected" : ""}>on</option><option value="false"${v ? "" : " selected"}>off</option></select>`
+    : `<input id="${id}" value="${esc(v)}" ${f.type === "int" ? 'inputmode="numeric"' : ""} placeholder="not set">`;
+  return `<div class="fld"><label for="${id}">${esc(f.key)}</label>${input}<button class="btn sm" data-save-key="${esc(f.key)}">Save</button></div>`;
+}
+function renderCfg() {
+  $("#cfg").innerHTML = (SET.editable || []).map(field).join("") + '<div class="msg" id="cfg-msg"></div>';
+}
+document.addEventListener("click", async e => {
+  const k = e.target.closest("[data-save-key]");
+  if (k) {
+    const el = k.parentElement.querySelector("input,select");   // ids repeat between Setup and Settings
+    const r = await post("api/config", "config", {key: k.dataset.saveKey, value: el.value});
+    const m = k.closest(".setup-fix")?.querySelector(".msg") || $("#cfg-msg");
+    m.innerHTML = r.ok ? `<span class="y">${esc(k.dataset.saveKey)} saved ✓</span>` : `<span class="n">${esc(r.error || "failed")}</span>`;
+    if (r.ok) setTimeout(loadSettings, 400);
+    return;
+  }
+  const sb = e.target.closest("[data-set-secret]");
+  if (sb) {
+    const inp = sb.previousElementSibling, m = sb.closest(".setup-fix").querySelector(".msg");
+    if (!inp.value) { m.innerHTML = '<span class="n">paste the value first</span>'; return; }
+    const r = await post("api/secret", "secret", {name: sb.dataset.setSecret, value: inp.value});
+    inp.value = ""; m.innerHTML = r.ok ? `<span class="y">${esc(r.msg)}</span>` : `<span class="n">${esc(r.error || "failed")}</span>`;
+    if (r.ok) setTimeout(loadSettings, 400);
+  }
+});
+
 // ── Settings: approvals, setup checks, tokens, snippets ──────────────────────
 let SET = null;
 async function loadSettings() {
@@ -726,21 +978,17 @@ async function loadSettings() {
     : '<div class="empty">Nothing waiting for a decision.</div>';
   const sc = SET.score; $("#setup-score").textContent = `${sc.required_ok}/${sc.required} required · ${sc.optional_ok}/${sc.optional} optional`;
   table("setup", [{h: "", f: r => r.ok ? '<span class="y">✓</span>' : r.optional ? '<span class="q">○</span>' : '<span class="n">✗</span>'},
-    {h: "Check", f: r => esc(r.title) + (r.optional ? ' <span class="q">optional</span>' : "")}, {h: "Detail", k: "detail", cls: "det mono", title: 1},
-    {h: "Fix", f: r => r.ok ? "" : esc(r.fix), cls: "wrapd"}], SET.checks);
+    {h: "Check", f: r => esc(r.title) + (r.optional ? ' <span class="q">optional</span>' : "")}, {h: "Detail", k: "detail", cls: "wrapd mono"},
+    {h: "Fix", cls: "wrapd", f: r => {
+      const ed = (r.edit || []).map(field).join(""), sec = r.secret ? `<div class="row" style="margin:6px 0 0"><input type="password" autocomplete="off" placeholder="set ${esc(r.secret)} (write-only)"><button class="btn sm" data-set-secret="${esc(r.secret)}">Set secret</button></div>` : "";
+      if (r.ok && !ed && !sec) return "";
+      return `<div class="setup-fix">${r.ok ? "" : `<div>${esc(r.fix)}</div>`}${ed || sec ? `<details${r.ok ? "" : " open"}><summary class="q" style="cursor:pointer">${r.ok ? "change" : "fix it here"}</summary>${ed}${sec}</details>` : ""}<div class="msg"></div></div>`; }}],
+    SET.checks);
   table("toks", [{h: "Name", k: "name"}, {h: "Token", k: "hint", cls: "mono"}, {h: "Uses", k: "uses", cls: "num", num: 1},
     {h: "Last used", f: r => ago(r.last_used), cls: "ts"},
     {h: "", f: r => r.revoked ? '<span class="q">revoked</span>' : `<button class="btn ghost sm" data-revoke="${r.id}">revoke</button>`}],
     SET.tokens, "No tokens yet.");
-  const mcp = SET.mcp_url || location.origin + location.pathname.replace(/\/$/, "") + "/mcp", api = SET.api_url || mcp.replace(/\/mcp$/, "/api/v1");
-  $("#snips").innerHTML = `<div class="q">Hermes (config.yaml → mcp_servers)</div><pre class="snip">warden:
-  url: ${esc(mcp)}
-  headers:
-    Authorization: "Bearer \${WARDEN_TOKEN}"</pre>
-  <div class="q">Claude Code</div><pre class="snip">claude mcp add --transport http warden ${esc(mcp)} \\
-  --header "Authorization: Bearer $WARDEN_TOKEN"</pre>
-  <div class="q">Any HTTP client</div><pre class="snip">curl -H "Authorization: Bearer $WARDEN_TOKEN" ${esc(api)}/summary</pre>
-  ${SET.mcp_url ? "" : '<div class="note">Set <code>api.public_url</code> in warden.yml if agents reach warden at a different address.</div>'}`;
+  renderConnect(); renderCfg();
 }
 document.addEventListener("click", async e => {
   const a = e.target.closest("[data-appr]");
@@ -756,7 +1004,9 @@ document.addEventListener("click", async e => {
 });
 
 async function load() {
-  try { D = await (await fetch("api", {cache: "no-store"})).json(); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); loadSettings(); }
+  try { D = await (await fetch("api", {cache: "no-store"})).json(); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec);
+        const a = document.activeElement;   // don't wipe a half-typed setting/token on the 60-s refresh
+        if (!(a && /INPUT|SELECT/.test(a.tagName) && a.closest("#t-settings,#t-connect"))) loadSettings(); }
   catch (e) { console.error("warden render:", e); $("#updated").textContent = "⚠ refresh failed"; }
 }
 

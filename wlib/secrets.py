@@ -79,3 +79,25 @@ def get(name, default=None):
 
 def have(name):
     return bool(get(name))
+
+
+SETTABLE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
+
+
+def put(name, value):
+    """Console 'set secret': write KEY=value into data/secrets.env (0600). Never read back to the browser."""
+    key = _envname(name)
+    if not SETTABLE.match(key) or not value or "\n" in value or len(value) > 4096:
+        raise ValueError("bad secret name or value")
+    path = config.DATA / "secrets.env"
+    lines = []
+    try:
+        lines = [l for l in path.read_text().splitlines() if not l.split("=", 1)[0].strip() == key]
+    except OSError:
+        pass
+    lines.append(f"{key}={value}")
+    config.DATA.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    os.chmod(path, 0o600)

@@ -74,6 +74,10 @@ def db():
         kev integer, status text, image text, primary key(target, vid, pkg, image));
       create index if not exists vu_vid on vulns(vid);
     """)
+    have = {r[1] for r in con.execute("pragma table_info(vulns)")}
+    for col in ("descr", "url"):                 # added 2026-10-09: the CVE drawer shows what the CVE actually is
+        if col not in have:
+            con.execute(f"alter table vulns add column {col} text")
     return con
 
 
@@ -242,15 +246,15 @@ def rows_from(d, kev, image=""):
             key = (v["VulnerabilityID"], v["PkgName"], image)
             out[key] = (v["VulnerabilityID"], v["PkgName"], v.get("InstalledVersion", ""), v.get("FixedVersion", ""),
                         v.get("Severity", "UNKNOWN"), (v.get("Title") or "")[:200], int(v["VulnerabilityID"] in kev),
-                        v.get("Status", ""), image)
+                        v.get("Status", ""), image, (v.get("Description") or "")[:1200], v.get("PrimaryURL") or "")
     return list(out.values())
 
 
 def store(con, t, os_, rows, status, note, extra=None, pkgs=None):
     extra = extra or {}
     con.execute("delete from vulns where target=?", (t["target"],))
-    con.executemany("insert or replace into vulns(target,vid,pkg,installed,fixed,severity,title,kev,status,image) "
-                    "values(?,?,?,?,?,?,?,?,?,?)", [(t["target"],) + r for r in rows])
+    con.executemany("insert or replace into vulns(target,vid,pkg,installed,fixed,severity,title,kev,status,image,"
+                    "descr,url) values(?,?,?,?,?,?,?,?,?,?,?,?)", [(t["target"],) + r for r in rows])
     fix = [r for r in rows if r[3]]
     con.execute("""insert or replace into vuln_targets(target,kind,name,node,vmid,os,last_scan,status,note,pkgs,
                    upgradable,reboot_required,kernel,newest_kernel,patchable,n_total,n_fixable,n_crit_fix,n_high_fix,n_kev)
@@ -293,6 +297,10 @@ def scan_one(con, t, kev):
                   (f"latest {latest} — UPDATE AVAILABLE ({hint})" if behind else
                    f"latest {latest} — up to date" if latest else note) +
                   " · no package DB, so no per-CVE view; firmware version is the only lever")
+        elif t["kind"] in ("host", "local") and t.get("os_scan") is False:
+            store(con, t, "appliance OS", [], "skipped",
+                  "no package DB on this OS — covered by its firmware check and Docker image scan")
+            return "skipped"
         elif t["kind"] in ("host", "local"):
             ok, err = hosts.check(t)
             if not ok:
