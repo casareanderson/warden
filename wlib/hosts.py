@@ -136,8 +136,12 @@ def remote(t, cmd, timeout=300, binary=False, root=False):
         if root and t.get("root_via") == "docker":
             # No sudo on the box (ZimaOS), but its user is in the docker group = root in all but name.
             # A throwaway container chrooted into the host's / runs the command as real root, nothing installed.
-            img = config.get("estate.root_image") or "alpine:latest"
-            cmd = (f"docker run --rm -i --privileged --pid=host --net=host -v /:/host {img} "
+            # pinned by digest: this container runs privileged with the host's / mounted (review 2026-10-09)
+            img = config.get("estate.root_image") or ""
+            if "@sha256:" not in img:
+                raise RuntimeError(f"{t['target']}: root_via docker needs estate.root_image pinned by digest "
+                                   "(e.g. alpine@sha256:…) — refusing to run an unpinned image privileged")
+            cmd = (f"docker run --rm -i --pull=never --privileged --pid=host --net=host -v /:/host {img} "
                    f"chroot /host sh -c {sh_quote(cmd)}")
         elif root and t.get("sudo_secret"):
             pw = secrets.get(t["sudo_secret"])

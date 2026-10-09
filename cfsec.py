@@ -352,7 +352,11 @@ def apply_geo(tok, commit, record=False):
     want = geo_rule()
     if want:
         mine = own_countries()
-        hit = sorted(set(geo_desired()[1]) & (mine or set()))
+        if not mine:      # fail CLOSED: no geo DB, or only private/unlocatable own addresses → can't prove it's safe
+            msg = ("refused: can't tell which country your own addresses are in (needs the geo DB and at least one "
+                   "PUBLIC address in self-ips.txt or warden.yml allow) — not blocking blind")
+            print(msg); record and _geo_record(False, msg, None); return 2
+        hit = sorted(set(geo_desired()[1]) & mine)
         if hit:
             msg = f"refused: {', '.join(hit)} is where your own addresses are — that would lock you out"
             print(msg); record and _geo_record(False, msg, None); return 2

@@ -56,7 +56,8 @@ def DOMAIN():  # noqa: N802
 
 
 def accepted():
-    return dict(config.get("cloudflare.sso_exempt") or {})
+    from wlib import views  # noqa: PLC0415
+    return views.accepted_exposure()
 
 
 SECURITY_HEADERS = ("strict-transport-security", "content-security-policy", "x-frame-options",

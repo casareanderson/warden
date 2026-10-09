@@ -18,6 +18,7 @@ THE FEW WRITES (browser only, same-origin + an X-Warden header, so a cross-site 
   POST /api/geo         the country-block switch + which red-list countries it blocks (applied by
                         warden-geo-apply within a minute, read back from Cloudflare)
   POST /api/config      change one of config.EDITABLE (→ data/overrides.yml; warden.yml is never written)
+  POST /api/accept      keep a public exposure on purpose, with the reason (data/accepted-exposure.json)
   POST /api/secret      set a secret (→ data/secrets.env, 0600). Write-only: no route ever returns one
 
   GET /api/v1/          index of views          GET /api/v1/openapi.json
@@ -79,7 +80,7 @@ def settings_payload():
             "approvals": notify.pending(), "notify": config.get("notify.backend"),
             "mcp_url": (base + "/mcp") if base else "", "api_url": (base + "/api/v1") if base else "",
             "layout": views.layout(), "widgets": views.WIDGETS, "kpis": views.KPIS,
-            "editable": [{"key": k, "type": t, "value": config.get(k)} for k, t in config.EDITABLE.items()],
+            "editable": [{"key": k, "type": t[0], "value": config.get(k)} for k, t in config.EDITABLE.items()],
             "overrides": config.OVERRIDES.exists()}
 
 
@@ -215,7 +216,7 @@ class H(BaseHTTPRequestHandler):
         routes = {"/api/patch": ("patch", self.post_patch), "/api/layout": ("layout", self.post_layout),
                   "/api/tokens": ("tokens", self.post_tokens), "/api/approvals": ("approvals", self.post_approval),
                   "/api/geo": ("geo", self.post_geo), "/api/config": ("config", self.post_config),
-                  "/api/secret": ("secret", self.post_secret)}
+                  "/api/secret": ("secret", self.post_secret), "/api/accept": ("accept", self.post_accept)}
         if u.path not in routes:
             return self.send({"error": "not found"}, status=404)
         header, fn = routes[u.path]
@@ -282,6 +283,25 @@ class H(BaseHTTPRequestHandler):
         self.send({"ok": True, "state": state,
                    "msg": "Saved. Cloudflare is updated within about a minute and read back — this card shows "
                           "the result."})
+
+    def post_accept(self, body):
+        """Keep a public exposure on purpose, with a reason (or un-accept it). It stays listed, marked accepted."""
+        host, reason = str(body.get("host", "")).strip().lower()[:253], str(body.get("reason", "")).strip()[:300]
+        if not host or not all(c.isalnum() or c in ".-*" for c in host):
+            return self.send({"error": "bad host"}, status=400)
+        path = config.DATA / "accepted-exposure.json"
+        try:
+            cur = json.loads(path.read_text())
+        except (OSError, ValueError):
+            cur = {}
+        if body.get("undo"):
+            cur.pop(host, None)
+        elif len(reason) < 8:
+            return self.send({"ok": False, "error": "say why (a sentence) — future you will want to know"})
+        else:
+            cur[host] = f"{reason} (accepted by {self.who()} {time.strftime('%Y-%m-%d')})"
+        path.write_text(json.dumps(cur, indent=1))
+        self.send({"ok": True})
 
     def post_config(self, body):
         try:

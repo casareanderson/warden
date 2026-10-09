@@ -222,16 +222,16 @@ def cmd_poll():
         no = td.reactors(b["message_id"], td.REJECT, channel=CHANNEL) or []
         if OWNER() in no:
             con.execute("update edge_bans set status='rejected', decided=? where id=?", (iso(), b["id"]))
-            td.post(f"❌ `{b['target']}` left alone (not proposed again for {REJECT_DAYS} days).",
-                    channel=CHANNEL, reply_to=b["message_id"])
+            con.commit()                 # commit BEFORE notify: it writes warden.db on its own connection
+            td.resolve(b["message_id"], f"❌ left alone — not proposed again for {REJECT_DAYS} days")
         elif OWNER() in yes:
             con.execute("update edge_bans set status='active', decided=?, expires=? where id=?",
                         (iso(), iso(now() + timedelta(days=BAN_DAYS)), b["id"]))
             changed.append(("add", b))
         elif b["created"] < iso(now() - timedelta(days=PENDING_DAYS)):
             con.execute("update edge_bans set status='expired', decided=? where id=?", (iso(), b["id"]))
-            td.post(f"⌛ `{b['target']}` proposal expired unanswered — nothing blocked.", channel=CHANNEL,
-                    reply_to=b["message_id"])
+            con.commit()
+            td.resolve(b["message_id"], "⌛ expired unanswered — nothing blocked")
     for b in con.execute("select * from edge_bans where status='active' and expires < ?", (iso(),)).fetchall():
         con.execute("update edge_bans set status='lapsed', note='ban period ended' where id=?", (b["id"],))
         changed.append(("lapse", b))
@@ -249,8 +249,7 @@ def cmd_poll():
         return 1
     for kind, b in changed:
         if kind == "add":
-            td.post(f"🚫 `{b['target']}` blocked at Cloudflare until {iso(now() + timedelta(days=BAN_DAYS))[:10]} — {summary}.",
-                    channel=CHANNEL, reply_to=b["message_id"])
+            td.resolve(b["message_id"], f"🚫 blocked at Cloudflare until {iso(now() + timedelta(days=BAN_DAYS))[:10]} — {summary}")
         else:
             td.post(f"🕊️ `{b['target']}` ban period ended, removed — {summary}.", channel=CHANNEL)
     print(summary)

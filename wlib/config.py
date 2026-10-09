@@ -58,13 +58,24 @@ DEFAULTS = {
 
 OVERRIDES = DATA / "overrides.yml"   # what the console's Settings editor changed (the UI can't write warden.yml)
 
-# The only keys the console may change. Anything that reaches a machine, a credential path or the scoring
-# that decides bans stays in warden.yml, edited by hand.
+# The only keys the console may change, each with its validator. Anything that reaches a machine (ssh targets,
+# hosts, IDS host), grants authority (notify.owner_id), or decides bans stays in warden.yml, edited by hand.
+# (review 2026-10-09: ids.suricata_host reached ssh argv → -oProxyCommand as root; owner_id = approval authority.)
+import re as _re  # noqa: E402
+
+_URL = _re.compile(r"^https?://[A-Za-z0-9.\-]+(:\d{1,5})?(/[^\s\"'<>`]*)?$")
 EDITABLE = {
-    "estate.name": "text", "estate.domain": "text", "estate.timezone": "text",
-    "notify.backend": ["none", "discord", "webhook", "ntfy"], "notify.channel": "text", "notify.owner_id": "text",
-    "notify.ntfy_url": "text", "api.enabled": "bool", "api.public_url": "text", "cloudflare.zone_id": "text",
-    "patch.night": "text", "patch.expire_hours": "int", "ids.suricata_host": "text",
+    "estate.name": ("text", _re.compile(r"^[\w .\-]{1,40}$")),
+    "estate.domain": ("text", _re.compile(r"^$|^[a-z0-9.\-]{1,253}$")),
+    "estate.timezone": ("text", "tz"),
+    "notify.backend": (["none", "discord", "webhook", "ntfy"], None),
+    "notify.channel": ("text", _re.compile(r"^$|^\d{5,25}$")),
+    "notify.ntfy_url": ("text", _re.compile(r"^$|^https://[^\s\"'<>`]+$")),
+    "api.enabled": ("bool", None),
+    "api.public_url": ("text", _re.compile(r"^$|" + _URL.pattern[1:])),
+    "cloudflare.zone_id": ("text", _re.compile(r"^$|^[0-9a-f]{32}$")),
+    "patch.night": ("text", _re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")),
+    "patch.expire_hours": ("int", (1, 168)),
 }
 
 _cache = {"mtime": None, "cfg": None}
@@ -127,18 +138,30 @@ def raw():
 
 def set_override(key, value):
     """Console edit of one EDITABLE key → data/overrides.yml (warden.yml is never touched by the UI)."""
-    kind = EDITABLE.get(key)
-    if kind is None:
+    if key not in EDITABLE:
         raise KeyError(key)
+    kind, rule = EDITABLE[key]
+    if value is None:
+        raise ValueError("no value given")
     if kind == "bool":
         value = value in (True, "true", "1", 1, "on")
     elif kind == "int":
         value = int(value)
+        if not rule[0] <= value <= rule[1]:
+            raise ValueError(f"{key} must be between {rule[0]} and {rule[1]}")
     elif isinstance(kind, list):
         if value not in kind:
             raise ValueError(f"{key} must be one of {', '.join(kind)}")
     else:
-        value = str(value).strip()[:300]
+        value = str(value).strip()
+        if rule == "tz":
+            from zoneinfo import ZoneInfo  # noqa: PLC0415
+            try:
+                ZoneInfo(value)
+            except Exception:  # noqa: BLE001
+                raise ValueError(f"unknown time zone {value!r} (e.g. Europe/London)") from None
+        elif not rule.match(value):
+            raise ValueError(f"{key}: not a valid value")
     over = {}
     if OVERRIDES.exists():
         over = yaml.safe_load(OVERRIDES.read_text()) or {}

@@ -69,8 +69,12 @@ def _add_choice(mid, emoji):
 
 
 def decide(mid, emoji, who="dashboard"):
-    """Record a decision made outside the chat channel (dashboard button, API)."""
+    """Record a decision made outside the chat channel (dashboard button, API).
+    Proposals posted before the ledger existed have no row yet — create it so the console can still decide."""
     with _db() as con:
+        con.execute("insert or ignore into approvals(id, created, text, choices) values(?,?,?,?)",
+                    (str(mid), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "(decided from the console)",
+                     json.dumps([APPROVE, REJECT])))
         n = con.execute("update approvals set decision=?, decided_by=?, decided_at=? "
                         "where id=? and decision is null",
                         (emoji, who, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), str(mid))).rowcount
@@ -181,6 +185,8 @@ def resolve(mid, line):
                     _discord("DELETE", f"/channels/{ch}/messages/{mid}/reactions")   # needs Manage Messages; harmless if not
                     return True
             post(line, reply_to=mid)
+        else:
+            send(line)                # webhook / ntfy / log: there's no message to edit, so say it plainly
         return True
     except Exception as e:  # noqa: BLE001
         print(f"notify: resolve failed: {e}", file=sys.stderr)
