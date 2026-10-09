@@ -171,3 +171,37 @@ def test_modules_import_without_estate_paths():
         src = open(os.path.join(ROOT, m + ".py")).read()
         for bad in ("/opt/warden", "/opt/hermes-agent", "/root/.hermes", "toolsmith_discord", "hermes_secrets"):
             assert bad not in src, (m, bad)
+
+
+def test_appliance_root_via_docker(estate, monkeypatch, tmp_path):
+    """ZimaOS-style box: no sudo, docker group = root. Read-only stays plain; root goes through a throwaway container."""
+    conf = tmp_path / "warden.yml"
+    text = SAMPLE.replace("  - name: box\n", "  - name: zima\n    kind: linux\n    ssh: admin@10.0.0.7\n    docker: true\n"
+                          "    firmware: zimaos\n    root_via: docker\n    os_scan: false\n  - name: box\n")
+    conf.write_text(text)
+    config.cfg(reload=True)
+    ts = {t["target"]: t for t in hosts.targets()}
+    assert {"host:10.0.0.7", "img:zima", "fw:zima"} <= set(ts)
+    assert ts["host:10.0.0.7"]["os_scan"] is False
+    estate.clear()
+    hosts.remote(ts["host:10.0.0.7"], "id -u")
+    assert estate[-1]["cmd"] == hosts.SSH + ["admin@10.0.0.7", "id -u"]
+    hosts.remote(ts["host:10.0.0.7"], "id -u", root=True)
+    cmd = estate[-1]["cmd"][-1]
+    assert cmd.startswith("docker run --rm -i --privileged --pid=host --net=host -v /:/host alpine:latest chroot /host sh -c ")
+    assert "sudo" not in cmd
+
+
+def test_cfsec_geo_never_blocks_own_country(estate, monkeypatch, tmp_path):
+    import json as _j
+    import cfsec
+    monkeypatch.setattr(cfsec, "GEO_WANT", tmp_path / "geo-block.json")
+    monkeypatch.setattr(cfsec, "GEO_DONE", tmp_path / "geo-applied.json")
+    (tmp_path / "geo-block.json").write_text(_j.dumps({"enabled": True, "block": ["GB", "RU"]}))
+    monkeypatch.setattr(cfsec, "own_countries", lambda: {"GB"})
+    called = []
+    monkeypatch.setattr(cfsec, "call", lambda *a, **k: called.append(a) or (True, {"result": {"id": "r", "rules": []}}))
+    assert cfsec.apply_geo("tok", True, record=True) == 2 and not called          # refused before any API call
+    assert "GB" in _j.loads((tmp_path / "geo-applied.json").read_text())["msg"]
+    (tmp_path / "geo-block.json").write_text(_j.dumps({"enabled": False, "block": ["RU"]}))
+    assert cfsec.geo_rule() is None and cfsec.geo_desired() == (False, ["RU"])

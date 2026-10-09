@@ -63,6 +63,10 @@ TOOLS = [
                     "img:nas): every finding on that box.",
      "inputSchema": _obj({"target": {"type": "string"}}),
      "fn": lambda a: views.vulns(a.get("target", ""))},
+    {"name": "warden_cve",
+     "description": "One CVE across the estate: description, severity, known-exploited flag, every box/image/package "
+                    "it affects with installed and fixed versions, and reference links.",
+     "inputSchema": _obj({"id": {"type": "string"}}, ["id"]), "fn": lambda a: views.cve(a["id"])},
     {"name": "warden_attack_surface",
      "description": "Internet-facing surface: open findings, public names as the internet resolves them, WAF rules, "
                     "zone settings, and LAN listening services.",

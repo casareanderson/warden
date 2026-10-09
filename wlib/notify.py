@@ -163,6 +163,30 @@ def send(text, channel_id=None):
 send_discord = send          # drop-in name for code written against the old helper
 
 
+def resolve(mid, line):
+    """Write an outcome INTO the original message ("— ✅ accepted by owner") instead of posting a reply.
+    One message per decision instead of three keeps the alerts channel readable. Falls back to a reply."""
+    try:
+        with _db() as con:
+            con.execute("update approvals set text = text || ? where id=?", (f"\n— {line}", str(mid)))
+        if _backend() == "discord" and not str(mid).startswith("local-"):
+            ch = channel()
+            r = _discord("GET", f"/channels/{ch}/messages/{mid}")
+            if r.status_code == 200:
+                body = (r.json().get("content") or "")
+                body = body.split("\n✅ = ")[0].split("\n✅ =")[0]      # drop the reaction legend: it's decided
+                new = (body[:1900 - len(line)] + f"\n— {line}")[:2000]
+                if _discord("PATCH", f"/channels/{ch}/messages/{mid}",
+                            json={"content": new, "allowed_mentions": {"parse": []}}).status_code == 200:
+                    _discord("DELETE", f"/channels/{ch}/messages/{mid}/reactions")   # needs Manage Messages; harmless if not
+                    return True
+            post(line, reply_to=mid)
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"notify: resolve failed: {e}", file=sys.stderr)
+        return False
+
+
 def post(text, channel=None, reply_to=None):
     """A message that may become an approval. Returns its id (Discord id, or local-<ms>)."""
     if _backend() == "discord":
