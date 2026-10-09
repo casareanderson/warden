@@ -36,7 +36,7 @@ def checks(probe_hosts=False):
     def add(cid, title, ok, detail="", fix="", optional=False, edit=(), secret=None):
         # edit: config keys the console can change in place; secret: a secret name it can set (write-only)
         out.append({"id": cid, "title": title, "ok": bool(ok), "detail": detail, "fix": fix, "optional": optional,
-                    "edit": [{"key": k, "value": config.get(k), "type": config.EDITABLE[k]} for k in edit],
+                    "edit": [{"key": k, "value": config.get(k), "type": config.EDITABLE[k][0]} for k in edit],
                     "secret": secret})
 
     add("config", "Config file", config.CONF.exists(), str(config.CONF),
@@ -75,7 +75,7 @@ def checks(probe_hosts=False):
             " — also set notify.channel and notify.owner_id"
         add("notify", f"Alerts via {b}", secrets.have(need) and not extra, f"secret {need}{extra}",
             f"set {need} in the environment or data/secrets.env", secret=need,
-            edit=["notify.backend"] + (["notify.channel", "notify.owner_id"] if b == "discord" else []))
+            edit=["notify.backend"] + (["notify.channel"] if b == "discord" else []))
     else:
         add("notify", f"Alerts via {b}", bool(config.get("notify.ntfy_url")), config.get("notify.ntfy_url") or "",
             "set notify.ntfy_url", edit=["notify.backend", "notify.ntfy_url"])

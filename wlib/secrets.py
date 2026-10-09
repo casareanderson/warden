@@ -87,12 +87,13 @@ SETTABLE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 def put(name, value):
     """Console 'set secret': write KEY=value into data/secrets.env (0600). Never read back to the browser."""
     key = _envname(name)
-    if not SETTABLE.match(key) or not value or "\n" in value or len(value) > 4096:
-        raise ValueError("bad secret name or value")
+    if not SETTABLE.match(key) or not value or len(value) > 4096 or not all(c.isprintable() for c in value):
+        raise ValueError("bad secret name or value")      # isprintable() rejects \r \n \x0b \x85 … (splitlines splits on all)
     path = config.DATA / "secrets.env"
     lines = []
     try:
-        lines = [l for l in path.read_text().splitlines() if not l.split("=", 1)[0].strip() == key]
+        lines = [l for l in path.read_text().splitlines()
+                 if l.split("=", 1)[0].strip().removeprefix("export ").strip() != key]
     except OSError:
         pass
     lines.append(f"{key}={value}")

@@ -19,6 +19,7 @@ checksum mismatches on non-config package files.
 Changes made by an approved patch job (patch_jobs, same target, finished since the last sweep) are tagged
 "expected (patch #N)" in the message so they are easy to accept.
 """
+import re
 import os
 import sqlite3
 import sys
@@ -66,6 +67,9 @@ true
 
 # kinds diffed against the baseline (drift) vs judged on sight (bad)
 DIFFED = ("file", "uid0", "login", "listen", "suid", "module")
+# never auto-accepted, patch or not: where persistence and privilege live
+SENSITIVE = re.compile(r"/\.ssh/|authorized_keys|sudoers|/cron|crontab|ld\.so\.preload|/pam\.|/pam\.d/|/etc/systemd/|"
+                       r"/lib/systemd/system/|/etc/shadow|/etc/passwd|/etc/group|/etc/profile|bashrc|/etc/rc\.local")
 # listeners that legitimately churn (ephemeral client ports, DHCP) — keep noise out
 # Proxmox's LXC setup rewrites these inside every container — a dpkg --verify mismatch there is expected
 KNOWN_LXC_MODIFIED = ("/container-getty@.service", "/getty@.service", "/console-getty.service")
@@ -184,27 +188,29 @@ def sweep(deep=False, only=None):
                                                          if stale_n != "0" else "")))
         con.commit()
         if lines:
-            patch = con.execute("select id from patch_jobs where target=? and status='done' and finished > "
-                                "datetime('now','-1 day') order by id desc limit 1", (t["target"],)).fetchone() \
+            patch = con.execute("select id, decided, finished from patch_jobs where target=? and status='done' and "
+                                "finished > datetime('now','-1 day') order by id desc limit 1", (t["target"],)).fetchone() \
                 if con.execute("select name from sqlite_master where name='patch_jobs'").fetchone() else None
             msgs.append((t, lines, patch))
     for t, lines, patch in msgs:
         if patch:
-            # warden's own patch run changed these files/listeners: accept them into the baseline quietly.
-            # Only 🚨 (bad) and login/uid0 changes still need a human after a patch.
-            n = con.execute("select count(*) from integ_find where target=? and status='open' and message_id is null "
-                            "and kind in ('file','suid','module','listen')", (t["target"],)).fetchone()[0]
-            for r in con.execute("select * from integ_find where target=? and status='open' and message_id is null "
-                                 "and kind in ('file','suid','module','listen')", (t["target"],)).fetchall():
-                if r["change"] == "removed":
-                    con.execute("delete from integ_base where target=? and kind=? and item=?", (r["target"], r["kind"], r["item"]))
-                else:
-                    con.execute("insert or replace into integ_base values(?,?,?,?)", (r["target"], r["kind"], r["item"], r["new"]))
+            # warden's own patch run changed these: accept quietly, but ONLY what a package upgrade explains —
+            # a CHANGED (never new) file/binary/listener, first seen between the job starting and two hours after
+            # it finished, outside the places an attacker plants persistence. Everything else still asks.
+            # (review 2026-10-09: a blanket 24-h window would have hidden an added SSH key or backdoor listener.)
+            rows = [r for r in con.execute(
+                "select * from integ_find where target=? and status='open' and message_id is null and change='changed' "
+                "and kind in ('file','suid','listen') and ts >= ? and ts <= datetime(?, '+2 hours')",
+                (t["target"], patch[1] or patch[2], patch[2])).fetchall() if not SENSITIVE.search(r["item"] or "")]
+            for r in rows:
+                con.execute("insert or replace into integ_base values(?,?,?,?)", (r["target"], r["kind"], r["item"], r["new"]))
                 con.execute("update integ_find set status='accepted', note=? where id=?",
                             (f"auto: changed by warden patch #{patch[0]}", r["id"]))
             con.commit()
-            lines = [l for l in lines if l.startswith("🚨") or " login " in l or " uid0 " in l]
-            print(f"{t['target']}: {n} change(s) auto-accepted (patch #{patch[0]})")
+            done = {f"{r['kind']} {r['item']}" for r in rows}
+            lines = [l for l in lines if not any(l.endswith(d) or (d + " →") in l for d in done)]
+            if rows:
+                print(f"{t['target']}: {len(rows)} change(s) auto-accepted (patch #{patch[0]})")
             if not lines:
                 continue
         head = f"🧬 **Integrity drift: {t['name']}** (`{t['target']}`)"

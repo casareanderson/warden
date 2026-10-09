@@ -4,7 +4,7 @@
 <title>warden · security console</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2.5 4.5 6.8v8.4c0 6.9 4.8 12.4 11.5 14.3 6.7-1.9 11.5-7.4 11.5-14.3V6.8Z' fill='%230f1a28' stroke='%2358a6ff' stroke-width='2.4'/%3E%3Ccircle cx='16' cy='16.4' r='4' fill='%2339c5cf'/%3E%3C/svg%3E">
-<script>try{document.documentElement.dataset.density=localStorage.getItem("warden-density")||"comfortable"}catch(e){}</script>
+<script>try{const d=document.documentElement;d.dataset.density=localStorage.getItem("warden-density")||"comfortable";d.dataset.nav=localStorage.getItem("warden-nav")||"side"}catch(e){}</script>
 <style>
 /* ═══ warden console stylesheet ══════════════════════════════════════════════
    Laid out like a Sass 7-1 project, in one file because warden ships with no build step:
@@ -181,6 +181,22 @@ pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px
 .appr{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:10px;margin-bottom:8px}
 .appr pre{flex:1;margin:0;white-space:pre-wrap;font:12.5px/1.45 inherit}
 
+/* sidebar navigation (html[data-nav=side], wide screens) */
+nav .grp{display:none}
+@media(min-width:1000px){
+  html[data-nav=side] nav{position:fixed;top:var(--hdr,58px);left:0;bottom:0;width:206px;flex-direction:column;gap:1px;padding:10px 8px 20px;
+    overflow-y:auto;border-right:1px solid var(--line);background:var(--bg);z-index:4}
+  html[data-nav=side] nav .grp{display:block;color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;padding:12px 10px 4px}
+  html[data-nav=side] nav .grp:first-child{padding-top:2px}
+  html[data-nav=side] nav button{text-align:left;border-bottom:0;border-left:2px solid transparent;border-radius:0 6px 6px 0;padding:7px 10px;display:flex;align-items:center}
+  html[data-nav=side] nav button .count{margin-left:auto}
+  html[data-nav=side] nav button:hover{background:var(--panel)}
+  html[data-nav=side] nav button.on{border-left-color:var(--acc);background:var(--panel2)}
+  html[data-nav=side] main,html[data-nav=side] footer{margin-left:206px}
+  html[data-nav=side] main{max-width:none}
+}
+html[data-nav=top] nav{position:sticky;top:var(--hdr,58px);z-index:4;background:rgba(11,14,19,.94);border-bottom:1px solid var(--line)}
+
 /* ── 5 · tabs ──────────────────────────────────────────────────────────────── */
 .ov-head{display:flex;align-items:center;justify-content:space-between;margin:2px 0 10px}
 #t-overview .kpis{margin-bottom:12px}
@@ -221,10 +237,11 @@ html[data-density=compact] nav button{padding:7px 10px}
       <kbd>/</kbd>
     </label>
     <span class="updated" id="updated"></span>
+    <button class="btn ghost sm" id="navpos" title="Tabs on the left or along the top">Tabs on top</button>
     <button class="btn ghost sm" id="density" title="Switch between comfortable and compact layout">Compact view</button>
   </div>
-  <nav id="nav"></nav>
 </header>
+<nav id="nav"></nav>
 
 <main>
 <!-- OVERVIEW -->
@@ -406,12 +423,16 @@ const ago = ts => { if (!ts) return "—"; const d = (Date.now() - new Date(ts.r
 const selfB = r => r.self ? ' <span class="b acc" title="our own address (self-ips.txt / warden.yml allow) — excluded from counts">self</span>' : "";
 const ccCell = (cc, red) => cc ? `<span class="flag">${flag(cc)}</span>${esc(cc)}${red ? ' <span class="b red">red list</span>' : ""}` : '<span class="q">—</span>';
 
-const TABS = [["overview","Overview"],["detections","Detections"],["edge","Edge · Cloudflare"],["surface","Attack surface"],["vulns","Vulnerabilities"],["endpoints","Endpoints"],
-              ["geo","Geo & red list"],["network","Network"],["health","Health"],["connect","Connect"],["settings","Settings"],["search","Search"]];
+const GROUPS = [["Monitor", [["overview","Overview"],["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["search","Search"]]],
+                ["Exposure", [["surface","Attack surface"],["geo","Geo & red list"]]],
+                ["Assets", [["vulns","Vulnerabilities"],["endpoints","Endpoints"]]],
+                ["Hub", [["health","Health"],["connect","Connect"],["settings","Settings"]]]];
+const TABS = GROUPS.flatMap(g => g[1]);
 let D = null;
 
 function nav() {
-  $("#nav").innerHTML = TABS.map(([id, label]) => `<button data-tab="${id}">${label}<span class="count" id="c-${id}" hidden></span></button>`).join("");
+  $("#nav").innerHTML = GROUPS.map(([g, tabs]) => `<div class="grp">${g}</div>` +
+    tabs.map(([id, label]) => `<button data-tab="${id}">${label}<span class="count" id="c-${id}" hidden></span></button>`).join("")).join("");
   $("#nav").onclick = e => { const b = e.target.closest("button"); if (b) show(b.dataset.tab); };
 }
 function show(id) {
@@ -477,7 +498,8 @@ async function openCve(id) {
   openDrawer(esc(id), '<div class="empty">Loading…</div>');
   let r; try { r = await (await fetch("api/cve?id=" + encodeURIComponent(id))).json(); } catch { $("#dr-body").innerHTML = '<div class="empty">Could not load.</div>'; return; }
   const fixed = r.rows.filter(x => x.fixed), boxes = [...new Set(r.rows.map(x => x.name))];
-  const links = Object.entries(r.links || {}).concat(r.url ? [["Advisory", r.url]] : []);
+  const safe = u => /^https?:\/\//i.test(u || "");               // scanner-supplied URL: never javascript:/data:
+  const links = Object.entries(r.links || {}).concat(safe(r.url) ? [["Advisory", r.url]] : []).filter(([, u]) => safe(u));
   $("#dr-body").innerHTML = `<p class="lead"><b>${esc(r.title || "No title from the scanner")}</b></p>
     <dl class="kv"><dt>Severity</dt><dd>${sevB(r.severity)}${r.kev ? ' <span class="b red">known exploited (CISA KEV)</span>' : ""}</dd>
       <dt>Affects</dt><dd>${boxes.length} box${boxes.length === 1 ? "" : "es"} · ${r.rows.length} package${r.rows.length === 1 ? "" : "s"}</dd>
@@ -488,12 +510,22 @@ async function openCve(id) {
        <td>${x.fixed ? `<span class="y mono">${esc(x.fixed)}</span>` : `<span class="q">${esc(x.status || "no fix")}</span>`}</td><td class="mono det">${esc(x.image || "")}</td></tr>`).join("")}</tbody></table></div>
     <h3>Read more</h3><div class="chips">${links.map(([k, u]) => `<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">${esc(k)} ↗</a>`).join("")}</div>`;
 }
+function setNav(n) {
+  document.documentElement.dataset.nav = n; $("#navpos").textContent = n === "side" ? "Tabs on top" : "Tabs on the left";
+  try { localStorage.setItem("warden-nav", n); } catch {}
+  fitHeader();
+}
+function fitHeader() { document.documentElement.style.setProperty("--hdr", document.querySelector("header").offsetHeight + "px"); }
+$("#navpos").onclick = () => setNav(document.documentElement.dataset.nav === "side" ? "top" : "side");
+window.addEventListener("resize", fitHeader);
 function setDensity(d) {
   document.documentElement.dataset.density = d; $("#density").textContent = d === "compact" ? "Comfortable view" : "Compact view";
   try { localStorage.setItem("warden-density", d); } catch {}
+  if (typeof fitHeader === "function") fitHeader();
 }
 $("#density").onclick = () => setDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact");
 setDensity(document.documentElement.dataset.density || "comfortable");
+setNav(document.documentElement.dataset.nav || "side");
 
 document.addEventListener("click", e => { const td = e.target.closest("td[data-ip]"); if (td && td.dataset.ip) runSearch("ip:" + td.dataset.ip); });
 document.addEventListener("input", e => {
@@ -521,7 +553,8 @@ function render() {
     {h: "Reasons", k: "reasons", cls: "det", title: 1}], d.bans, "No ban proposals. That is normal: the threshold is deliberately high.");
   table("ebans", [{h: "Target", k: "target", cls: "ip mono", ip: 1}, {h: "Country", f: r => ccCell(r.cc, false)},
     {h: "Status", f: r => `<span class="b ${{active: "block", pending: "amb", rejected: "acc", lapsed: "acc", failed: "red"}[r.status] || ""}">${esc(r.status)}</span>`},
-    {h: "Why", k: "reason", cls: "wrapd"}, {h: "Proposed", k: "created", cls: "ts"}, {h: "Until", f: r => esc((r.expires || "—").slice(0, 10)), cls: "ts"}],
+    {h: "Why", k: "reason", cls: "wrapd"}, {h: "Proposed", k: "created", cls: "ts"}, {h: "Until", f: r => esc((r.expires || "—").slice(0, 10)), cls: "ts"},
+    {h: "", f: r => r.status === "pending" && r.message_id ? `<button class="btn" data-ban="${esc(r.message_id)}" data-c="✅" data-t="${esc(r.target)}">Block</button> <button class="btn ghost" data-ban="${esc(r.message_id)}" data-c="❌" data-t="${esc(r.target)}">Leave</button>` : ""}],
     d.edge_bans || [], "No proposals yet.");
   badge("detections", (d.edge_bans || []).filter(b => b.status === "pending").length, false);
   table("recent", [{h: "When", k: "ts", cls: "ts"}, {h: "Source", f: r => `<span class="b">${esc(r.source)}</span>`},
@@ -553,7 +586,8 @@ function render() {
   ].map(([t, v, s]) => `<div class="kpi"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join("");
   $("#sf-ts").textContent = d.surface ? "snapshot " + ago(d.surface.snap_ts) + (S.errors && S.errors.length ? " · ⚠ " + S.errors.join("; ") : "") : "no snapshot yet";
   table("findings", [{h: "Severity", f: r => r.accepted ? '<span class="b acc">accepted</span>' : `<span class="b ${r.sev}">${r.sev}</span>`},
-    {h: "Asset", k: "host", cls: "mono"}, {h: "Finding", k: "issue"}, {h: "Why it matters / decision", f: r => esc(r.accepted ? "✓ " + r.accepted : r.why), cls: "wrapd"}],
+    {h: "Asset", k: "host", cls: "mono"}, {h: "Finding", k: "issue"}, {h: "Why it matters / decision", f: r => esc(r.accepted ? "✓ " + r.accepted : r.why), cls: "wrapd"},
+    {h: "", f: r => r.host && r.sev !== "low" && !r.accepted ? `<button class="btn ghost" data-accept="${esc(r.host)}">Accept…</button>` : ""}],
     S.findings, "No findings.");
   const hd = h => { const p = h.probe || {}; if (!p.headers) return '<span class="q">—</span>';
     return ["strict-transport-security","content-security-policy","x-frame-options","x-content-type-options"].map(x =>
@@ -737,6 +771,27 @@ document.addEventListener("click", e => {
 });
 
 
+// ── Attack surface: accept an exposure on purpose, with a reason ─────────────
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-accept]"); if (!b) return;
+  const why = prompt(`Keep ${b.dataset.accept} exposed on purpose?\n\nSay why in a sentence — it's shown next to the finding from now on, and the hourly exposure check stops treating it as new.`);
+  if (!why) return;
+  const r = await post("api/accept", "accept", {host: b.dataset.accept, reason: why});
+  if (!r.ok) { alert(r.error || "failed"); return; }
+  load();
+});
+
+// ── Edge ban proposals: decide here, same as reacting in chat ────────────────
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-ban]"); if (!b) return;
+  const block = b.dataset.c === "✅";
+  if (!confirm(block ? `Block ${b.dataset.t} at the Cloudflare edge for 30 days?\n\nApplied within ~10 minutes and read back. It never blocks your own addresses or Cloudflare's.`
+                     : `Leave ${b.dataset.t} alone?\n\nIt won't be proposed again for 90 days.`)) return;
+  b.disabled = true;
+  const r = await post("api/approvals", "approvals", {id: b.dataset.ban, choice: b.dataset.c});
+  b.closest("td").innerHTML = r.ok ? `<span class="${block ? "y" : "q"}">${block ? "blocking — within ~10 min" : "left alone"}</span>` : '<span class="n">could not record — already decided?</span>';
+});
+
 // ── Geo: the country-block switch ───────────────────────────────────────────
 let GEO = null;
 function drawGeo() {
@@ -866,8 +921,9 @@ async function post(url, hdr, body) {
 // ── Connect: tokens, endpoints, integrations, VPN recipes ───────────────────
 const snip = (title, body, note) => `<div class="snip-h"><span>${title}</span><button class="btn ghost sm" data-copy>copy</button></div><pre class="snip">${esc(body)}</pre>${note ? `<div class="note" style="margin-top:-4px">${note}</div>` : ""}`;
 function renderConnect() {
-  const mcp = SET.mcp_url || location.origin + location.pathname.replace(/\/$/, "") + "/mcp", api = SET.api_url || mcp.replace(/\/mcp$/, "/api/v1");
-  const host = new URL(api).host;
+  const here = location.origin + location.pathname.replace(/\/$/, "") + "/mcp";
+  let mcp = /^https?:\/\//i.test(SET.mcp_url || "") ? SET.mcp_url : here, api = mcp.replace(/\/mcp$/, "/api/v1"), host;
+  try { host = new URL(api).host; } catch { mcp = here; api = here.replace(/\/mcp$/, "/api/v1"); host = location.host; }
   $("#endpoints-info").innerHTML = `<dl class="kv"><dt>MCP</dt><dd class="mono">${esc(mcp)}</dd><dt>REST</dt><dd class="mono">${esc(api)}</dd>
     <dt>OpenAPI</dt><dd><a class="mono" href="${esc(api)}/openapi.json" target="_blank" rel="noopener">${esc(api)}/openapi.json</a></dd></dl>
     <div class="note">Views: summary, detections, top-ips, ip/&lt;addr&gt;, search, bans, vulns, cve/&lt;id&gt;, attack-surface, network, ids, integrity, health, setup, approvals.

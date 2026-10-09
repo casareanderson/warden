@@ -225,3 +225,32 @@ def test_cve_view_and_tool(env, tmp_path):
     st, body = call(env["url"] + "/api/v1/cve/CVE-2099-0001", headers={"Authorization": "Bearer " + tok})
     assert st == 200 and body["severity"] == "CRITICAL"
     assert "warden_cve" in env["mcp"].BY_NAME
+
+
+def test_review_20261009_config_and_secret_hardening(env, tmp_path):
+    h = {"X-Warden": "config"}
+    for bad in ({"key": "ids.suricata_host", "value": "-oProxyCommand=id #@x"},      # reached ssh argv as root
+                {"key": "notify.owner_id", "value": "123"},                           # approval authority
+                {"key": "cloudflare.zone_id", "value": "../../accounts"},
+                {"key": "api.public_url", "value": "javascript:alert(1)"},
+                {"key": "notify.ntfy_url", "value": "http://169.254.169.254/x"},
+                {"key": "patch.night", "value": "x"}, {"key": "patch.expire_hours", "value": 0},
+                {"key": "estate.timezone", "value": "Mars/Base"}, {"key": "estate.name"}):
+        assert call(env["url"] + "/api/config", bad, headers=h)[0] == 400, bad
+    assert call(env["url"] + "/api/config", {"key": "estate.timezone", "value": "Europe/London"}, headers=h)[0] == 200
+    hs = {"X-Warden": "secret"}
+    (tmp_path / "secrets.env").write_text("export DISCORD_BOT_TOKEN=old\n")
+    assert call(env["url"] + "/api/secret", {"name": "DISCORD_BOT_TOKEN", "value": "a\rOTHER=x"}, headers=hs)[0] == 400
+    assert call(env["url"] + "/api/secret", {"name": "DISCORD_BOT_TOKEN", "value": "new"}, headers=hs)[0] == 200
+    text = (tmp_path / "secrets.env").read_text()
+    assert "old" not in text and "DISCORD_BOT_TOKEN=new" in text and "OTHER" not in text
+
+
+def test_review_20261009_integrity_never_autoaccepts_persistence():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("integrity", ROOT / "integrity.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    for p in ("/root/.ssh/authorized_keys", "/etc/sudoers.d/x", "/etc/cron.d/job", "/etc/ld.so.preload",
+              "/etc/pam.d/sshd", "/etc/systemd/system/evil.service", "/etc/shadow"):
+        assert m.SENSITIVE.search(p), p
+    assert not m.SENSITIVE.search("/usr/bin/curl")
