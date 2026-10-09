@@ -63,13 +63,28 @@ def q(sql, args=()):
 
 
 def redlist():
+    """watch = flagged red; block = what the edge rule drops. The console switch (data/geo-block.json) wins over
+    redlist.yml `block:`; geo-applied.json is what cfsec last pushed (fresher than the hourly snapshot)."""
     try:
         import yaml
         d = yaml.safe_load(REDLIST.read_text()) or {}
     except Exception:  # noqa: BLE001
         d = {}
-    return {"watch": d.get("watch") or {}, "block": d.get("block") or [],
-            "checked": d.get("source_checked", "")}
+    block, enabled, want = d.get("block") or [], bool(d.get("block")), None
+    try:
+        want = json.loads((config.DATA / "geo-block.json").read_text())
+        block, enabled = want.get("block") or [], bool(want.get("enabled"))
+    except (OSError, ValueError):
+        pass
+    try:
+        done = json.loads((config.DATA / "geo-applied.json").read_text())
+    except (OSError, ValueError):
+        done = None
+    pend = bool(want) and (not done or (config.DATA / "geo-block.json").stat().st_mtime >
+                           (config.DATA / "geo-applied.json").stat().st_mtime)
+    return {"watch": d.get("watch") or {}, "block": [str(c).upper() for c in block] if enabled else [],
+            "chosen": [str(c).upper() for c in block], "enabled": enabled,
+            "pending": pend, "applied": done, "checked": d.get("source_checked", "")}
 
 
 def enforce_mode():
@@ -120,6 +135,11 @@ def payload():
 
     waf = (surface or {}).get("waf", [])
     country_rule = next((w for w in waf if "country" in (w.get("expr") or "")), None)
+    done = red.get("applied")
+    snap = ((surface or {}).get("ts") or "").replace("T", " ")[:19]      # both UTC, compared as text
+    if done and done.get("ok") and done.get("ts", "") > snap:
+        # the switch was applied after the last hourly snapshot: trust the read-back, not the stale snapshot
+        country_rule = {"desc": "warden: block red-list countries", "expr": done["expression"]} if done["expression"] else None
     findings = (surface or {}).get("findings", [])
 
     top = tag(q("select ip, sum(score) score, count(*) n, group_concat(distinct kind) kinds, "
@@ -436,6 +456,24 @@ def vulns(target=""):
         return {"enabled": False}
     return {"enabled": True, "totals": v["totals"], "targets": v["targets"], "top": v["top"][:100],
             "images": v["images"], "patch_jobs": v["jobs"]}
+
+
+def cve(vid):
+    """One CVE across the estate: what it is, where it is, what fixes it — the drawer behind every CVE id."""
+    vid = (vid or "").strip()[:40]
+    if not vid or not has("vulns"):
+        return {"vid": vid, "rows": []}
+    cols = {r["name"] for r in q("pragma table_info(vulns)")}
+    extra = "".join(f", v.{c}" for c in ("descr", "url") if c in cols)   # absent until vulnscan migrates
+    rows = q(f"select v.target, coalesce(t.name, v.target) name, v.pkg, v.installed, v.fixed, v.severity, v.title, "
+             f"v.kev, v.status, v.image{extra} "
+             f"from vulns v left join vuln_targets t on t.target=v.target where v.vid=? order by v.target", (vid,))
+    first = rows[0] if rows else {}
+    return {"vid": vid, "severity": first.get("severity"), "title": first.get("title"), "kev": any(r["kev"] for r in rows),
+            "descr": next((r.get("descr") for r in rows if r.get("descr")), ""),
+            "url": next((r.get("url") for r in rows if r.get("url")), ""), "rows": rows,
+            "links": {"NVD": f"https://nvd.nist.gov/vuln/detail/{vid}", "OSV": f"https://osv.dev/vulnerability/{vid}",
+                      "CISA KEV": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog?search_api_fulltext=" + vid}}
 
 
 def attack_surface():

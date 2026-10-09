@@ -56,6 +56,17 @@ DEFAULTS = {
     "dashboard": {"widgets": None},
 }
 
+OVERRIDES = DATA / "overrides.yml"   # what the console's Settings editor changed (the UI can't write warden.yml)
+
+# The only keys the console may change. Anything that reaches a machine, a credential path or the scoring
+# that decides bans stays in warden.yml, edited by hand.
+EDITABLE = {
+    "estate.name": "text", "estate.domain": "text", "estate.timezone": "text",
+    "notify.backend": ["none", "discord", "webhook", "ntfy"], "notify.channel": "text", "notify.owner_id": "text",
+    "notify.ntfy_url": "text", "api.enabled": "bool", "api.public_url": "text", "cloudflare.zone_id": "text",
+    "patch.night": "text", "patch.expire_hours": "int", "ids.suricata_host": "text",
+}
+
 _cache = {"mtime": None, "cfg": None}
 
 
@@ -68,17 +79,24 @@ def _merge(base, over):
 
 def cfg(reload=False):
     """The merged config. Re-read when the file changes, so a running UI sees edits."""
-    try:
-        mt = CONF.stat().st_mtime
-    except OSError:
-        mt = None
+    def _mt(p):
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return None
+    mt = (_mt(CONF), _mt(OVERRIDES))
     if reload or _cache["cfg"] is None or mt != _cache["mtime"]:
-        raw = {}
-        if mt is not None:
+        raw, over = {}, {}
+        if mt[0] is not None:
             if yaml is None:
                 raise RuntimeError("PyYAML is required: apt install python3-yaml (or pip install pyyaml)")
             raw = yaml.safe_load(CONF.read_text()) or {}
-        _cache.update(mtime=mt, cfg=_merge(DEFAULTS, raw))
+        if mt[1] is not None and yaml is not None:
+            try:
+                over = yaml.safe_load(OVERRIDES.read_text()) or {}
+            except (OSError, yaml.YAMLError):
+                over = {}
+        _cache.update(mtime=mt, cfg=_merge(_merge(DEFAULTS, raw), over))
     return _cache["cfg"]
 
 
@@ -105,3 +123,31 @@ def raw():
     if not CONF.exists():
         return {}
     return yaml.safe_load(CONF.read_text()) or {}
+
+
+def set_override(key, value):
+    """Console edit of one EDITABLE key → data/overrides.yml (warden.yml is never touched by the UI)."""
+    kind = EDITABLE.get(key)
+    if kind is None:
+        raise KeyError(key)
+    if kind == "bool":
+        value = value in (True, "true", "1", 1, "on")
+    elif kind == "int":
+        value = int(value)
+    elif isinstance(kind, list):
+        if value not in kind:
+            raise ValueError(f"{key} must be one of {', '.join(kind)}")
+    else:
+        value = str(value).strip()[:300]
+    over = {}
+    if OVERRIDES.exists():
+        over = yaml.safe_load(OVERRIDES.read_text()) or {}
+    cur = over
+    parts = key.split(".")
+    for part in parts[:-1]:
+        cur = cur.setdefault(part, {})
+    cur[parts[-1]] = value
+    DATA.mkdir(parents=True, exist_ok=True)
+    OVERRIDES.write_text(yaml.safe_dump(over, sort_keys=False, allow_unicode=True))
+    cfg(reload=True)
+    return value

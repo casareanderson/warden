@@ -33,8 +33,11 @@ def _last_runs():
 def checks(probe_hosts=False):
     out = []
 
-    def add(cid, title, ok, detail="", fix="", optional=False):
-        out.append({"id": cid, "title": title, "ok": bool(ok), "detail": detail, "fix": fix, "optional": optional})
+    def add(cid, title, ok, detail="", fix="", optional=False, edit=(), secret=None):
+        # edit: config keys the console can change in place; secret: a secret name it can set (write-only)
+        out.append({"id": cid, "title": title, "ok": bool(ok), "detail": detail, "fix": fix, "optional": optional,
+                    "edit": [{"key": k, "value": config.get(k), "type": config.EDITABLE[k]} for k in edit],
+                    "secret": secret})
 
     add("config", "Config file", config.CONF.exists(), str(config.CONF),
         "run `warden-setup init` (or copy warden.yml.example to warden.yml)")
@@ -66,15 +69,16 @@ def checks(probe_hosts=False):
             "webhook": config.get("notify.webhook_secret") or "ALERT_WEBHOOK"}.get(b)
     if b == "none":
         add("notify", "Alerts go somewhere", False, "notify.backend is none — alerts only reach the log",
-            "set notify.backend to discord, webhook or ntfy", optional=True)
+            "set notify.backend to discord, webhook or ntfy", optional=True, edit=["notify.backend"])
     elif need:
         extra = "" if b != "discord" or (config.get("notify.channel") and config.get("notify.owner_id")) else \
             " — also set notify.channel and notify.owner_id"
         add("notify", f"Alerts via {b}", secrets.have(need) and not extra, f"secret {need}{extra}",
-            f"set {need} in the environment or data/secrets.env")
+            f"set {need} in the environment or data/secrets.env", secret=need,
+            edit=["notify.backend"] + (["notify.channel", "notify.owner_id"] if b == "discord" else []))
     else:
         add("notify", f"Alerts via {b}", bool(config.get("notify.ntfy_url")), config.get("notify.ntfy_url") or "",
-            "set notify.ntfy_url")
+            "set notify.ntfy_url", edit=["notify.backend", "notify.ntfy_url"])
 
     declared = hosts.declared()
     add("hosts", "Machines declared", bool(declared), f"{len(declared)} in warden.yml",
@@ -95,7 +99,8 @@ def checks(probe_hosts=False):
     if config.get("cloudflare.zone_id"):
         tok = config.get("cloudflare.token_secret") or "CF_API_TOKEN"
         add("cloudflare", "Cloudflare token", secrets.have(tok), f"secret {tok}",
-            "create a token with Zone WAF:Edit + Analytics:Read", optional=True)
+            "create a token with Zone WAF:Edit + Analytics:Read", optional=True, secret=tok,
+            edit=["cloudflare.zone_id"])
     if config.get("ids.suricata_host"):
         add("ids", "Network IDS source", True, config.get("ids.suricata_host"), optional=True)
 
@@ -103,7 +108,7 @@ def checks(probe_hosts=False):
         from . import tokens  # noqa: PLC0415
         live = [t for t in tokens.listing() if not t["revoked"]]
         add("api", "API / MCP token issued", bool(live), f"{len(live)} active",
-            "Settings → Connect an agent → New token (or `warden-setup token <name>`)", optional=True)
+            "Connect → New token (or `warden-setup token <name>`)", optional=True, edit=["api.public_url"])
     except sqlite3.Error:
         pass
     return out

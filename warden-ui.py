@@ -15,6 +15,10 @@ THE FEW WRITES (browser only, same-origin + an X-Warden header, so a cross-site 
   POST /api/layout      save / reset the Overview layout
   POST /api/tokens      mint (shown once) / revoke an API token
   POST /api/approvals   approve / reject something warden proposed (same as reacting in chat)
+  POST /api/geo         the country-block switch + which red-list countries it blocks (applied by
+                        warden-geo-apply within a minute, read back from Cloudflare)
+  POST /api/config      change one of config.EDITABLE (→ data/overrides.yml; warden.yml is never written)
+  POST /api/secret      set a secret (→ data/secrets.env, 0600). Write-only: no route ever returns one
 
   GET /api/v1/          index of views          GET /api/v1/openapi.json
   /api/v1/summary  detections?hours=&limit=&min_score=&ip=  top-ips?days=&limit=  ip/<addr>  search?q=
@@ -49,6 +53,7 @@ V1 = {
     "search":         lambda qs, rest: views.search(_a(qs, "q")[:200]),
     "bans":           lambda qs, rest: views.bans(),
     "vulns":          lambda qs, rest: views.vulns(_a(qs, "target")[:64]),
+    "cve":            lambda qs, rest: views.cve(rest or _a(qs, "id")),
     "attack-surface": lambda qs, rest: views.attack_surface(),
     "network":        lambda qs, rest: views.network(),
     "ids":            lambda qs, rest: views.ids(),
@@ -60,7 +65,7 @@ V1 = {
 
 
 def openapi():
-    paths = {f"/api/v1/{k}" + ("/{ip}" if k == "ip" else ""): {"get": {
+    paths = {f"/api/v1/{k}" + {"ip": "/{ip}", "cve": "/{id}"}.get(k, ""): {"get": {
         "summary": k, "security": [{"bearer": []}], "responses": {"200": {"description": "JSON"}}}} for k in V1}
     return {"openapi": "3.1.0", "info": {"title": "warden", "version": mcp.SERVER["version"],
                                          "description": "Read-only security views. Bearer token: wdn_…"},
@@ -73,7 +78,9 @@ def settings_payload():
     return {"checks": rows, "score": setup.score(rows), "tokens": tokens.listing(),
             "approvals": notify.pending(), "notify": config.get("notify.backend"),
             "mcp_url": (base + "/mcp") if base else "", "api_url": (base + "/api/v1") if base else "",
-            "layout": views.layout(), "widgets": views.WIDGETS, "kpis": views.KPIS}
+            "layout": views.layout(), "widgets": views.WIDGETS, "kpis": views.KPIS,
+            "editable": [{"key": k, "type": t, "value": config.get(k)} for k, t in config.EDITABLE.items()],
+            "overrides": config.OVERRIDES.exists()}
 
 
 class H(BaseHTTPRequestHandler):
@@ -158,6 +165,8 @@ class H(BaseHTTPRequestHandler):
             self.send(p)
         elif u.path == "/api/vuln":
             self.send(views.vulns(_a(qs, "target")[:64]))
+        elif u.path == "/api/cve":
+            self.send(views.cve(_a(qs, "id")))
         elif u.path == "/api/search":
             self.send(views.search(_a(qs, "q")[:200]))
         elif u.path == "/api/settings":
@@ -204,7 +213,9 @@ class H(BaseHTTPRequestHandler):
         if not self.browser_ok():
             return self.deny_browser()
         routes = {"/api/patch": ("patch", self.post_patch), "/api/layout": ("layout", self.post_layout),
-                  "/api/tokens": ("tokens", self.post_tokens), "/api/approvals": ("approvals", self.post_approval)}
+                  "/api/tokens": ("tokens", self.post_tokens), "/api/approvals": ("approvals", self.post_approval),
+                  "/api/geo": ("geo", self.post_geo), "/api/config": ("config", self.post_config),
+                  "/api/secret": ("secret", self.post_secret)}
         if u.path not in routes:
             return self.send({"error": "not found"}, status=404)
         header, fn = routes[u.path]
@@ -256,6 +267,37 @@ class H(BaseHTTPRequestHandler):
         if choice not in (notify.APPROVE, notify.REJECT, notify.NOW):
             return self.send({"error": "choice must be ✅, ❌ or ⚡"}, status=400)
         self.send({"ok": notify.decide(mid, choice, who=self.who())})
+
+
+    def post_geo(self, body):
+        if not config.get("cloudflare.zone_id"):
+            return self.send({"ok": False, "error": "no Cloudflare zone configured (cloudflare.zone_id)"})
+        ccs = body.get("block")
+        if not isinstance(ccs, list) or not all(isinstance(c, str) and len(c) == 2 and c.isalpha() for c in ccs):
+            return self.send({"error": "block must be a list of 2-letter country codes"}, status=400)
+        state = {"enabled": bool(body.get("enabled")), "block": sorted({c.upper() for c in ccs})[:60],
+                 "by": self.who(), "ts": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())}
+        config.DATA.mkdir(parents=True, exist_ok=True)
+        (config.DATA / "geo-block.json").write_text(json.dumps(state))
+        self.send({"ok": True, "state": state,
+                   "msg": "Saved. Cloudflare is updated within about a minute and read back — this card shows "
+                          "the result."})
+
+    def post_config(self, body):
+        try:
+            v = config.set_override(str(body.get("key", "")), body.get("value"))
+        except KeyError:
+            return self.send({"ok": False, "error": "that setting can only be changed in warden.yml"}, status=400)
+        except (ValueError, TypeError) as e:
+            return self.send({"ok": False, "error": str(e)[:200]}, status=400)
+        self.send({"ok": True, "value": v})
+
+    def post_secret(self, body):
+        try:
+            secrets.put(str(body.get("name", "")), str(body.get("value", "")))
+        except ValueError as e:
+            return self.send({"ok": False, "error": str(e)}, status=400)
+        self.send({"ok": True, "msg": "Stored in data/secrets.env (0600). It is never shown again."})
 
 
 def main():

@@ -13,6 +13,13 @@ warden.yml:
         kind: docker             # any box running Docker (user needs the docker group, not root)
         ssh: admin@10.0.0.5
         firmware: zimaos         # optional vendor-firmware check → fw:nas
+      - name: appliance          # a Docker appliance OS with no sudo (ZimaOS, Unraid…) that should ALSO get
+        kind: linux              #   integrity + hardening sweeps: host:<ip>, plus img:<name> and fw:<name>
+        ssh: admin@10.0.0.7
+        docker: true
+        firmware: zimaos
+        root_via: docker         # root = a throwaway `docker run --privileged … chroot /host` (estate.root_image)
+        os_scan: false           # no dpkg/apk DB to scan; the firmware check covers the OS
       - name: llm
         kind: linux              # plain Debian/Ubuntu/Alpine box
         ssh: me@10.0.0.6
@@ -95,7 +102,8 @@ def targets(discover=True):
         elif kind in ("linux", "local"):
             tid = "host:local" if kind == "local" else f"host:{_addr(ssh)}"
             out.append({"target": tid, "kind": "host" if kind == "linux" else "local", "name": name, "node": None,
-                        "ssh": ssh, "vmid": None, "patchable": patch, "sudo_secret": h.get("sudo_secret")})
+                        "ssh": ssh, "vmid": None, "patchable": patch, "sudo_secret": h.get("sudo_secret"),
+                        "root_via": h.get("root_via"), "os_scan": h.get("os_scan", True)})
             if h.get("docker"):
                 out.append({"target": f"img:{name}", "kind": "images", "name": f"{name} Docker images",
                             "node": None, "ssh": ssh, "vmid": None, "patchable": 0, "local": kind == "local"})
@@ -125,7 +133,13 @@ def remote(t, cmd, timeout=300, binary=False, root=False):
             return run(SSH + [t["ssh"], f"pct exec {t['vmid']} -- sh -c {sh_quote(cmd)}"],
                        timeout=timeout, binary=binary)
         inp = None
-        if root and t.get("sudo_secret"):
+        if root and t.get("root_via") == "docker":
+            # No sudo on the box (ZimaOS), but its user is in the docker group = root in all but name.
+            # A throwaway container chrooted into the host's / runs the command as real root, nothing installed.
+            img = config.get("estate.root_image") or "alpine:latest"
+            cmd = (f"docker run --rm -i --privileged --pid=host --net=host -v /:/host {img} "
+                   f"chroot /host sh -c {sh_quote(cmd)}")
+        elif root and t.get("sudo_secret"):
             pw = secrets.get(t["sudo_secret"])
             if not pw:
                 raise RuntimeError(f"{t['target']}: sudo password secret {t['sudo_secret']} is not set")

@@ -40,6 +40,8 @@ UNITS = {
                                ["harden.py"], ("calendar", "Sun *-*-* 05:00"), ["TimeoutStartSec=7200"]),
     "warden-intel":           ("cloudflare", "warden intel — Cloudflare edge events + external attack surface",
                                ["intel.py", "all"], ("calendar", "hourly"), ["TimeoutStartSec=900"]),
+    "warden-geo-apply":       ("cloudflare", "warden — apply the console's country-block switch at the Cloudflare edge",
+                               ["cfsec.py", "--apply-geo", "--commit", "--if-pending"], ("every", "1min", "2min"), []),
     "warden-edgeban-propose": ("cloudflare", "warden edge blocklist — hourly proposals",
                                ["edgeban.py", "propose"], ("calendar", "*-*-* *:20"), []),
     "warden-edgeban-poll":    ("cloudflare", "warden edge blocklist — apply owner decisions",

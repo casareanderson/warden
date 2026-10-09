@@ -33,6 +33,7 @@ and nothing here touches /.well-known/ (ACME + OIDC discovery) or /api/ and
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -301,24 +302,64 @@ def apply_waf(tok, commit):
 GEO_DESC = "warden: block red-list countries (redlist.yml)"
 
 
-def geo_rule():
+GEO_WANT = config.DATA / "geo-block.json"      # written by the console's on/off switch (owner's choice)
+GEO_DONE = config.DATA / "geo-applied.json"    # what this script last pushed to Cloudflare, for the console
+
+
+def geo_desired():
+    """(enabled, [cc]) the owner wants. The console's switch wins; redlist.yml `block:` is the starting set."""
     import yaml
+    try:
+        w = json.loads(GEO_WANT.read_text())
+        return bool(w.get("enabled")), sorted({str(c).upper() for c in w.get("block") or [] if len(str(c)) == 2})
+    except (OSError, ValueError):
+        pass
     path = config.HOME / "redlist.yml"           # deliberately NOT the .example: blocking is the owner's own list
     if not path.exists():
-        return None
+        return False, []
     cfg = yaml.safe_load(open(path)) or {}
     ccs = sorted({str(c).upper() for c in (cfg.get("block") or []) if len(str(c)) == 2})
-    if not ccs:
+    return bool(ccs), ccs
+
+
+def own_countries():
+    """Countries our own addresses (self-ips.txt + warden.yml allow) locate to — never block those."""
+    try:
+        from geo import Geo  # noqa: PLC0415
+        from wlib import views  # noqa: PLC0415
+        g = Geo()
+        return {c for c in (g.cc(str(n.network_address)) for n in views.self_nets()) if c}
+    except Exception:  # noqa: BLE001 — no geo DB: the guard can't run, say so in the result
+        return None
+
+
+def geo_rule():
+    enabled, ccs = geo_desired()
+    if not enabled or not ccs:
         return None
     return {"description": GEO_DESC, "action": "block",
             "expression": "(ip.src.country in {" + " ".join(f'"{c}"' for c in ccs) + "})"}
 
 
-def apply_geo(tok, commit):
+def _geo_record(ok, msg, want):
+    try:
+        GEO_DONE.write_text(json.dumps({"ts": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()), "ok": ok, "msg": msg, "expression": want["expression"] if want else None}))
+    except OSError:
+        pass
+
+
+def apply_geo(tok, commit, record=False):
     want = geo_rule()
+    if want:
+        mine = own_countries()
+        hit = sorted(set(geo_desired()[1]) & (mine or set()))
+        if hit:
+            msg = f"refused: {', '.join(hit)} is where your own addresses are — that would lock you out"
+            print(msg); record and _geo_record(False, msg, None); return 2
     ok, d = call(f"/zones/{ZONE}/rulesets/phases/http_request_firewall_custom/entrypoint", tok=tok)
     if not ok:
-        print(f"cannot read custom rules: {d}"); return 2
+        print(f"cannot read custom rules: {d}"); record and _geo_record(False, f"cannot read WAF rules: {str(d)[:160]}", None)
+        return 2
     rsid, existing = d["result"]["id"], d["result"].get("rules", [])
     keep = [r for r in existing if (r.get("description") or "") != GEO_DESC]
     cur = next((r for r in existing if (r.get("description") or "") == GEO_DESC), None)
@@ -326,16 +367,20 @@ def apply_geo(tok, commit):
     for r in keep:
         print(f"  keep  [{r.get('action')}] {r.get('description','')[:60]}")
     if want is None:
-        print("  redlist.yml block: is EMPTY" + (" → REMOVE the geo rule" if cur else " → nothing to do"))
+        print("  country block is OFF / empty" + (" → REMOVE the geo rule" if cur else " → nothing to do"))
         if not cur:
+            record and _geo_record(True, "off — no country rule at the edge", None)
             return 0
     elif cur and cur.get("expression") == want["expression"]:
         print(f"  same  [{cur['action']}] {want['expression']}  — already live, nothing to do")
+        record and _geo_record(True, "live at the edge", want)
         return 0
     else:
         print(f"  {'CHANGE' if cur else 'ADD   '} [block] {want['expression']}")
         if not cur and len(keep) >= 5:
-            print("refusing: would exceed the free plan's 5 custom rules"); return 2
+            print("refusing: would exceed the free plan's 5 custom rules")
+            record and _geo_record(False, "refused: the free plan allows 5 custom rules and all 5 are in use", None)
+            return 2
     if not commit:
         print("\nDRY RUN — nothing written. Re-run with --commit to apply.")
         return 0
@@ -344,11 +389,33 @@ def apply_geo(tok, commit):
     if want:
         rules.append({**want, "enabled": True})
     ok, d = call(f"/zones/{ZONE}/rulesets/{rsid}", "PUT", {"rules": rules}, tok)
-    print("applied" if ok else f"FAILED: {json.dumps(d)[:200]}")
-    return 0 if ok else 1
+    # read back: Cloudflare's 200 is not proof the rule is there
+    ok2, d2 = call(f"/zones/{ZONE}/rulesets/phases/http_request_firewall_custom/entrypoint", tok=tok)
+    live = next((r for r in (d2.get("result", {}).get("rules", []) if ok2 else [])
+                 if (r.get("description") or "") == GEO_DESC), None)
+    good = ok and ok2 and ((live or {}).get("expression") == (want or {}).get("expression") if want else live is None)
+    print("applied" if good else f"FAILED: {json.dumps(d)[:200]}")
+    if record:
+        from wlib import notify  # noqa: PLC0415
+        notify.send(("🌍 **Country block ON** at the Cloudflare edge: " + want["expression"].split("{")[1].rstrip("})")
+                     if want else "🌍 **Country block OFF** — the Cloudflare rule is removed") if good else
+                    f"🛑 Country block change FAILED to apply — {json.dumps(d)[:200]}")
+    record and _geo_record(good, ("live at the edge" if want else "off — rule removed") if good else
+                           f"apply failed: {json.dumps(d)[:160]}", want if good else None)
+    return 0 if good else 1
+
+
+def geo_pending():
+    """True when the console's switch changed after the last apply."""
+    try:
+        return GEO_WANT.stat().st_mtime > (GEO_DONE.stat().st_mtime if GEO_DONE.exists() else 0)
+    except OSError:
+        return False
 
 
 def main():
+    if "--if-pending" in sys.argv and not geo_pending():
+        return 0                          # the 1-minute applier: the console switch hasn't moved — no secret, no API call
     if not ZONE:
         print("no zone: set CF_ZONE_ID or cloudflare.zone_id in warden.yml", file=sys.stderr)
         return 2
@@ -357,7 +424,7 @@ def main():
         print("no CF_API_TOKEN secret and no readable caddy env file", file=sys.stderr)
         return 2
     if "--apply-geo" in sys.argv:
-        return apply_geo(tok, "--commit" in sys.argv)
+        return apply_geo(tok, "--commit" in sys.argv, record="--commit" in sys.argv)
     if "--apply-waf" in sys.argv:
         return apply_waf(tok, "--commit" in sys.argv)
     # The WAF token cannot read DNS and the Caddy token can. Hand the DNS
