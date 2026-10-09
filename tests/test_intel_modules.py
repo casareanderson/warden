@@ -164,6 +164,10 @@ class FakeNotify:
         self.posts.append((text, reply_to))
         return f"m{len(self.posts)}"
 
+    def resolve(self, mid, line):          # outcome written into the original message (recorded like a reply)
+        self.posts.append((line, mid))
+        return True
+
     def react(self, mid, emoji, channel=None):
         self.reacts.append((mid, emoji))
 

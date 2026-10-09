@@ -62,6 +62,16 @@ def q(sql, args=()):
         con.close()
 
 
+def accepted_exposure():
+    """Exposure the owner decided to keep, with the reason: warden.yml cloudflare.sso_exempt + console accepts."""
+    out = dict(config.get("cloudflare.sso_exempt") or {})
+    try:
+        out.update(json.loads((config.DATA / "accepted-exposure.json").read_text()))
+    except (OSError, ValueError):
+        pass
+    return out
+
+
 def redlist():
     """watch = flagged red; block = what the edge rule drops. The console switch (data/geo-block.json) wins over
     redlist.yml `block:`; geo-applied.json is what cfsec last pushed (fresher than the hourly snapshot)."""
@@ -141,6 +151,10 @@ def payload():
         # the switch was applied after the last hourly snapshot: trust the read-back, not the stale snapshot
         country_rule = {"desc": "warden: block red-list countries", "expr": done["expression"]} if done["expression"] else None
     findings = (surface or {}).get("findings", [])
+    acc = accepted_exposure()
+    for f in findings:                        # an accept made since the hourly snapshot shows straight away
+        if not f.get("accepted") and f.get("host") in acc:
+            f["accepted"] = acc[f["host"]]
 
     top = tag(q("select ip, sum(score) score, count(*) n, group_concat(distinct kind) kinds, "
                 "max(ts) last from events where ip!='' and ts > datetime('now','-30 days') "
@@ -179,7 +193,8 @@ def payload():
         "bans": tag(q("select ts,ip,score,reasons,state,note from bans order by id desc limit 50"), watch),
         # edge blocklist (edgeban.py): owner ✅ in Discord → one Cloudflare WAF rule
         "edge_bans": [dict(r, cc=GEO.cc(r["target"].split("/")[0])) for r in
-                      q("select target,reason,status,created,decided,expires,note from edge_bans order by id desc limit 100")],
+                      q("select target,reason,status,created,decided,expires,note,message_id from edge_bans "
+                        "order by id desc limit 100")],
         "top": top,
         "recent": tag(q("select ts,source,ip,kind,detail,score from events order by id desc limit 100"), watch),
         "edge": tag(q("select ts,ip,cc,action,source,host,path,ua,rule from edge_events order by id desc limit 200"),

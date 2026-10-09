@@ -186,9 +186,15 @@ def test_appliance_root_via_docker(estate, monkeypatch, tmp_path):
     estate.clear()
     hosts.remote(ts["host:10.0.0.7"], "id -u")
     assert estate[-1]["cmd"] == hosts.SSH + ["admin@10.0.0.7", "id -u"]
+    with pytest.raises(RuntimeError):                                   # unpinned image is refused
+        hosts.remote(ts["host:10.0.0.7"], "id -u", root=True)
+    conf.write_text(text.replace('estate: {timezone: Europe/London, self_target: "ct:100"}',
+                                 'estate: {timezone: Europe/London, self_target: "ct:100", root_image: "alpine@sha256:abc"}'))
+    config.cfg(reload=True)
     hosts.remote(ts["host:10.0.0.7"], "id -u", root=True)
     cmd = estate[-1]["cmd"][-1]
-    assert cmd.startswith("docker run --rm -i --privileged --pid=host --net=host -v /:/host alpine:latest chroot /host sh -c ")
+    assert cmd.startswith("docker run --rm -i --pull=never --privileged --pid=host --net=host -v /:/host alpine@sha256:abc "
+                          "chroot /host sh -c ")
     assert "sudo" not in cmd
 
 
@@ -205,3 +211,16 @@ def test_cfsec_geo_never_blocks_own_country(estate, monkeypatch, tmp_path):
     assert "GB" in _j.loads((tmp_path / "geo-applied.json").read_text())["msg"]
     (tmp_path / "geo-block.json").write_text(_j.dumps({"enabled": False, "block": ["RU"]}))
     assert cfsec.geo_rule() is None and cfsec.geo_desired() == (False, ["RU"])
+
+
+def test_cfsec_geo_guard_fails_closed(estate, monkeypatch, tmp_path):
+    import json as _j
+    import cfsec
+    monkeypatch.setattr(cfsec, "GEO_WANT", tmp_path / "geo-block.json")
+    monkeypatch.setattr(cfsec, "GEO_DONE", tmp_path / "geo-applied.json")
+    (tmp_path / "geo-block.json").write_text(_j.dumps({"enabled": True, "block": ["RU"]}))
+    called = []
+    monkeypatch.setattr(cfsec, "call", lambda *a, **k: called.append(a) or (True, {"result": {"id": "r", "rules": []}}))
+    for unknown in (set(), None):                  # no geo DB / only private own IPs → refuse, don't guess
+        monkeypatch.setattr(cfsec, "own_countries", lambda u=unknown: u)
+        assert cfsec.apply_geo("tok", True, record=True) == 2 and not called
