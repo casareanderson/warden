@@ -217,6 +217,19 @@ def match_domain(host, domains):
 
 def main():
     con = db()
+    if "--backfill" in sys.argv:                 # step 2: learn from the router's existing week of DNS history
+        from wlib import behaviour
+        st = subprocess.run(ROUTER() + [f"stat -c %i:%s {QLOG()}"], capture_output=True, stdin=subprocess.DEVNULL,
+                            text=True, timeout=30).stdout.strip()
+        inode, size = st.split(":")
+        for f, cmd in ((QLOG() + ".1", f"cat {QLOG()}.1 2>/dev/null"), (QLOG(), f"head -c {size} {QLOG()}")):
+            p = subprocess.Popen(ROUTER() + [cmd], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+            n, pairs = behaviour.backfill(con, (l.decode("utf-8", "replace") for l in p.stdout))
+            p.wait(); print(f"backfill {f}: {n} lookups, {pairs} new device-domain pairs")
+        # the live file was read up to `size`: point the regular run's bookmark there so nothing is counted twice
+        con.execute("insert or replace into watermarks(source,pos) values('adguard',?)", (f"{inode}:{size}",))
+        con.commit()
+        return 0
     if "--test" in sys.argv:
         for r in con.execute("select ts,device,device_name,kind,indicator,feed,detail from intel_hits order by id desc limit 15"):
             print(r)
@@ -253,7 +266,13 @@ def main():
             if n >= NXDOMAIN_BURST:
                 hits.append((client, "nxdomain-burst", f"{n} NXDOMAIN", "heuristic",
                              f"{n} failed lookups in one run — DGA malware or a broken app"))
-        dns_note = f"ok, {len(dns)} queries, {len(domains)} bad domains loaded"
+        try:                                   # step 2: per-device baselines from the same lookups (wlib/behaviour.py)
+            from wlib import behaviour
+            nd, nn = behaviour.record(con, dns)
+            beh = f", {nd} devices, {nn} new device-domain pairs"
+        except Exception as e:  # noqa: BLE001 — never let the baseline cost us the threat matching
+            beh = f", behaviour not recorded ({type(e).__name__}: {str(e)[:60]})"
+        dns_note = f"ok, {len(dns)} queries, {len(domains)} bad domains loaded{beh}"
         con.execute("insert into runs(ts,source,lines,parsed,note) values(datetime('now'),'adguard',?,?,?)",
                     (len(dns), sum(1 for h in hits if h[1] == "dns"), "ok"))
     except Exception as e:  # noqa: BLE001

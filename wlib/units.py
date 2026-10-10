@@ -50,6 +50,10 @@ UNITS = {
                                ["netids.py"], ("every", "5min", "4min"), []),
     "warden-netintel":        ("router", "warden — router DNS log + conntrack vs threat feeds",
                                ["netintel.py"], ("every", "10min", "5min"), []),
+    "warden-devices":         ("lan", "warden — one inventory of every device (sweep + router leases + Home Assistant)",
+                               ["devices.py"], ("every", "15min", "6min"), []),
+    "warden-devicewatch":     ("router", "warden — score fixed-function devices doing something new; ask the owner on odd ones",
+                               ["devicewatch.py"], ("every", "10min", "9min"), ["TimeoutStartSec=1200"]),
 }
 
 GROUPS = {

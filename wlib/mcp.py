@@ -74,6 +74,19 @@ TOOLS = [
     {"name": "warden_network",
      "description": "LAN inventory: known hosts (MAC, IP, vendor, first/last seen, approved) and LAN alerts.",
      "inputSchema": _obj(), "fn": lambda a: views.network()},
+    {"name": "warden_devices",
+     "description": "Every device in the house, one row each: name, kind (bulb, plug, tv, speaker, camera, phone, "
+                    "server…), why it got that kind, room, maker, addresses, which sources saw it, first/last seen.",
+     "inputSchema": _obj(), "fn": lambda a: {"devices": views.devices_list()}},
+    {"name": "warden_device",
+     "description": "One device and its normal behaviour: the domains it looks up (most-used first, with hit counts and "
+                    "how many days), and whether warden is still learning it. key = identity, IP, MAC or part of its name.",
+     "inputSchema": _obj({"key": {"type": "string"}}, ["key"]), "fn": lambda a: views.device(a["key"])},
+    {"name": "warden_device_changes",
+     "description": "Fixed-function devices (bulbs, plugs, TVs, cameras…) that looked up something new: the score, "
+                    "why, the decision (learned / logged / review), the advisory read and the owner's verdict.",
+     "inputSchema": _obj({"limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}}),
+     "fn": lambda a: {"changes": views.device_changes(a.get("limit", 100))}},
     {"name": "warden_ids",
      "description": "Network IDS (Suricata) alerts and threat-intel hits by device.",
      "inputSchema": _obj(), "fn": lambda a: views.ids()},

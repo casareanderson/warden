@@ -270,6 +270,8 @@ def payload():
                     "from runs where ts > datetime('now','-24 hours') group by source"),
         "unattributed": q("select count(*) n from events where ip=''")[0]["n"],
         "net_alerts": q("select ts,kind,mac,ip,detail from net_alerts order by id desc limit 200"),
+        "devices": devices_list(),
+        "device_changes": device_changes(50),
         "net_hosts": q("select mac,ip,hostname,vendor,first_seen,last_seen,approved from net_hosts "
                        "order by cast(replace(ip,'.','') as integer)"),
         "net_runs": q("select ts last_run, hosts from net_runs order by id desc limit 1"),  # latest sweep (summing an hour gave 4,689)
@@ -566,8 +568,49 @@ def attack_surface():
             "lan_ports": payload()["net_ports"]}
 
 
+def devices_list():
+    """One row per real device (devices.py groups a phone's rotating private addresses into one)."""
+    if not has("devices"):
+        return []
+    return q("select identity, max(last_seen) last_seen, name, kind, kind_why, room, fixed, maker, model, sources, "
+             "group_concat(distinct ip) ips, count(*) addresses, min(first_seen) first_seen from devices "
+             "group by identity order by kind, name")
+
+
+def device(key):
+    """One device: its inventory row(s) and what it normally talks to. key = identity, IP, MAC or a name fragment."""
+    if not has("devices"):
+        return {"error": "devices.py has not run yet"}
+    key = (key or "").strip()[:80]
+    rows = q("select * from devices where identity=? or ip=? or mac=? order by last_seen desc", (key, key, key.lower())) \
+        or q("select * from devices where name like ? order by last_seen desc limit 5", (f"%{key}%",))
+    if not rows:
+        return {"error": f"no device matches {key!r}"}
+    import sqlite3 as _s
+    from . import behaviour
+    con = _s.connect(f"file:{config.DB}?mode=ro", uri=True, timeout=10)
+    try:
+        prof = behaviour.profile(con, rows[0]["identity"]) if has("dev_dns") else {"domains": [], "learning": True}
+    finally:
+        con.close()
+    return {"device": {k: rows[0][k] for k in ("name", "kind", "kind_why", "room", "maker", "model", "ip", "identity",
+                                                "first_seen", "last_seen", "sources")},
+            "addresses": len(rows), "behaviour": prof}
+
+
+def device_changes(limit=100):
+    """devicewatch.py decisions: a fixed-function device doing something new, scored, with the owner's verdict."""
+    if not has("dev_findings"):
+        return []
+    return q("select f.ts, f.domain, f.score, f.decision, f.reasons, f.explain, f.verdict, f.decided_at, "
+             "coalesce(d.name, f.identity) device, d.kind from dev_findings f left join "
+             "(select identity, name, kind, max(last_seen) from devices group by identity) d on d.identity=f.identity "
+             "order by f.ts desc limit ?", (limit,))
+
+
 def network():
-    return {"hosts": q("select mac,ip,hostname,vendor,first_seen,last_seen,approved from net_hosts"),
+    return {"devices": devices_list(), "device_changes": device_changes(),
+            "hosts": q("select mac,ip,hostname,vendor,first_seen,last_seen,approved from net_hosts"),
             "alerts": q("select ts,kind,mac,ip,detail from net_alerts order by id desc limit 200"),
             "last_sweep": q("select ts last_run, hosts from net_runs order by id desc limit 1")}
 
