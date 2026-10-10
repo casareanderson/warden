@@ -61,7 +61,7 @@ UNITS = {
 GROUPS = {
     "core": "always",
     "lan": "nmap installed",
-    "vuln": "trivy installed and at least one host declared",
+    "vuln": "at least one host declared (advisories come from api.osv.dev)",
     "patch": "a host with `patch: true`",
     "integrity": "at least one host declared",
     "cloudflare": "cloudflare.zone_id set",
@@ -77,7 +77,7 @@ def enabled_groups():
     return {
         "core": True,
         "lan": bool(shutil.which("nmap")),
-        "vuln": have_hosts and os.path.exists(config.get("vuln.trivy") or ""),
+        "vuln": have_hosts,
         "patch": any(h.get("patch") for h in hosts.declared()),
         "integrity": have_hosts,
         "cloudflare": bool(config.get("cloudflare.zone_id")),

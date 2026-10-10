@@ -19,7 +19,7 @@ DB = config.DB
 TIMERS = ["warden", "warden-netids", "warden-netintel", "warden-harden", "warden-intel", "warden-vulnscan", "warden-integrity-sweep", "warden-integrity-deep",
           "warden-integrity-poll", "warden-patcher", "warden-patch-auto", "warden-edgeban-propose",
           "warden-edgeban-poll", "warden-geo"]
-SERVICES = ["warden-ui", "trivy-server"]
+SERVICES = ["warden-ui"]
 
 
 def sh(*a):
@@ -65,11 +65,13 @@ def main():
 
     # freshness — a component that runs but produces stale data is the classic silent failure
     try:
-        meta = json.load(open(os.path.join(config.get("vuln.cache") or "/var/cache/trivy", "db", "metadata.json")))
-        a = age_h(meta.get("UpdatedAt", "")[:19])
-        print(f"  trivy vuln DB age: {a:.0f}h" + ("   <-- stale (>72h): vulnscan DB update failing" if a and a > 72 else ""))
+        c0 = sqlite3.connect(config.DB, timeout=30)
+        last = c0.execute("select max(fetched) from osv_vulns where modified!='missing'").fetchone()[0]
+        a = age_h(last) if last else None
+        print(f"  OSV advisories last fetched: {a:.0f}h ago" if a is not None else "  OSV advisory cache: empty",
+              "   <-- stale (>72h): vulnscan can't reach api.osv.dev" if a and a > 72 else "")
     except Exception:  # noqa: BLE001
-        print("  trivy vuln DB: unreadable   <-- check the trivy cache (vuln.cache)")
+        print("  OSV advisory cache: unreadable   <-- has vulnscan run since the OSV switch?")
     for src, maxh, what in (("cf-edge", 3, "Cloudflare edge events"), ("surface", 3, "attack-surface snapshot"),
                             ("suricata", 1, "Suricata IDS"),
                             ("adguard", 1, "router DNS log (AdGuard)"), ("conntrack", 1, "router connection table")):
