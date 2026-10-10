@@ -6,6 +6,8 @@ live in their own modules and touch only their own tables.
 import json
 import sqlite3
 import sys
+import threading
+import time
 
 from . import config
 
@@ -111,6 +113,65 @@ def tag(rows, red, nets=None):
     return rows
 
 
+def _not_self(sql, args, limit, red, page=500, max_rows=50000):
+    """Newest-first rows of `sql` (must end `order by id desc limit ? offset ?`) with our own addresses dropped.
+    Pages instead of over-fetching once: a monitoring flood can be thousands of rows newer than the real ones.
+    Returns (rows, how many own-address rows were skipped)."""
+    nets, out, skipped, off = self_nets(), [], 0, 0
+    while len(out) < limit and off < max_rows:
+        chunk = tag(q(sql, list(args) + [page, off]), red, nets)
+        for r in chunk:
+            if r["self"]:
+                skipped += 1
+            elif len(out) < limit:
+                out.append(r)
+        if len(chunk) < page:
+            break
+        off += page
+    return out, skipped
+
+
+def _daily(rows):
+    out = {}
+    for r in rows:
+        d = out.setdefault(r["ts"][:10], {"d": r["ts"][:10], "n": 0, "s": 0})
+        d["n"] += 1
+        d["s"] += r["score"] or 0
+    return [out[k] for k in sorted(out)]
+
+
+_CACHE = {"at": 0.0, "data": None}
+_CACHE_LOCK = threading.Lock()
+CACHE_SECONDS = 45
+
+
+def payload_cached(max_age=CACHE_SECONDS):
+    """payload(), at most `max_age` s old. A cold build measured 8.9 s (100 MB db on a busy HDD), warm 0.3 s —
+    so the console keeps one warm copy (see warm_cache) and drops it on every write (invalidate)."""
+    with _CACHE_LOCK:
+        if _CACHE["data"] is None or time.time() - _CACHE["at"] > max_age:
+            _CACHE["data"], _CACHE["at"] = payload(), time.time()
+        return _CACHE["data"]
+
+
+def invalidate():
+    with _CACHE_LOCK:
+        _CACHE["data"] = None
+
+
+def warm_cache(every=CACHE_SECONDS - 15):
+    """Background loop: rebuild before the copy expires, so a browser never waits on a cold build."""
+    def loop():
+        while True:
+            try:
+                with _CACHE_LOCK:
+                    _CACHE["data"], _CACHE["at"] = payload(), time.time()
+            except Exception as e:  # noqa: BLE001 — a failed warm-up must not kill the console
+                print("warden-ui: cache warm failed:", e, flush=True)
+            time.sleep(every)
+    threading.Thread(target=loop, daemon=True, name="payload-warm").start()
+
+
 def payload():
     red = redlist()
     watch = red["watch"]
@@ -119,10 +180,11 @@ def payload():
     if surface:
         surface["snap_ts"] = surf[0]["ts"]
 
-    ev7 = tag(q("select ip, source, kind, score from events where ts > datetime('now','-30 days')"), watch)
+    ev_all = tag(q("select ts, ip, source, kind, score from events where ts > datetime('now','-30 days')"), watch)
     edge_all = tag(q("select ip, cc, action, source, host from edge_events where ts > datetime('now','-30 days')"), watch)
     edge7 = [r for r in edge_all if not r["self"]]                      # our own monitoring is not an attack
-    ev7 = [r for r in ev7 if not r["self"]]
+    ev7 = [r for r in ev_all if not r["self"]]                          # measured 10-10: 97% of a day was our WAN IP
+    day_ago = q("select datetime('now','-24 hours') t")[0]["t"]
 
     def count(rows, key, split=False):
         out = {}
@@ -156,14 +218,15 @@ def payload():
         if not f.get("accepted") and f.get("host") in acc:
             f["accepted"] = acc[f["host"]]
 
-    top = tag(q("select ip, sum(score) score, count(*) n, group_concat(distinct kind) kinds, "
-                "max(ts) last from events where ip!='' and ts > datetime('now','-30 days') "
-                "group by ip order by score desc limit 25"), watch)
+    top = [r for r in tag(q("select ip, sum(score) score, count(*) n, group_concat(distinct kind) kinds, "
+                            "max(ts) last from events where ip!='' and ts > datetime('now','-30 days') "
+                            "group by ip order by score desc limit 100"), watch) if not r["self"]][:25]
 
     return {
         "mode": enforce_mode(),
         "kpi": {
-            "events_24h": q("select count(*) n from events where ts > datetime('now','-24 hours')")[0]["n"],
+            "events_24h": sum(1 for r in ev7 if r["ts"] > day_ago),
+            "events_self_24h": sum(1 for r in ev_all if r["self"] and r["ts"] > day_ago),
             "events_7d": len(ev7),
             "ips_7d": len({r["ip"] for r in ev7 if r["ip"]}),
             "edge_24h": sum(1 for r in tag(q("select ip, action from edge_events where ts > datetime('now','-24 hours')"), watch)
@@ -185,8 +248,7 @@ def payload():
                             "group by kind order by n desc"),
             "surface_kind": count((surface or {}).get("hosts", []), "kind"),
         },
-        "timeline": q("select strftime('%Y-%m-%d', ts) d, count(*) n, sum(score) s from events "
-                      "where ts > datetime('now','-30 days') group by d order by d"),
+        "timeline": _daily(ev7),
         "edge_timeline": q("select strftime('%Y-%m-%d %H:00', ts) d, count(*) n from edge_events "
                            "where ts > datetime('now','-48 hours') group by d order by d")
         if q("select name from sqlite_master where name='edge_events'") else [],
@@ -196,7 +258,8 @@ def payload():
                       q("select target,reason,status,created,decided,expires,note,message_id from edge_bans "
                         "order by id desc limit 100")],
         "top": top,
-        "recent": tag(q("select ts,source,ip,kind,detail,score from events order by id desc limit 100"), watch),
+        "recent": _not_self("select ts,source,ip,kind,detail,score from events order by id desc limit ? offset ?",
+                            (), 100, watch)[0],
         "edge": tag(q("select ts,ip,cc,action,source,host,path,ua,rule from edge_events order by id desc limit 200"),
                     watch) if q("select name from sqlite_master where name='edge_events'") else [],
         "geo": geo,
@@ -440,20 +503,24 @@ def summary():
     return {"estate": config.get("estate.name"), "mode": p["mode"], "kpi": k, "health": p["health"]}
 
 
-def detections(hours=24, limit=100, min_score=0, ip=""):
+def detections(hours=24, limit=100, min_score=0, ip="", include_self=False):
+    """Our own addresses are left out unless asked for by IP or include_self — they are monitoring, not attacks."""
     hours, limit, min_score = _clamp(hours, 1, 24 * 90, 24), _clamp(limit, 1, 1000, 100), _clamp(min_score, 0, 1000, 0)
     sql = ("select ts, source, ip, kind, detail, score from events where ts > datetime('now', ?) and score >= ?"
            + (" and ip = ?" if ip else "") + " order by id desc limit ?")
-    args = [f"-{hours} hours", min_score] + ([ip] if ip else []) + [limit]
-    return {"hours": hours, "rows": tag(q(sql, args), redlist()["watch"])}
+    args = [f"-{hours} hours", min_score] + ([ip] if ip else [])
+    if include_self or ip:
+        return {"hours": hours, "rows": tag(q(sql, args + [limit]), redlist()["watch"]), "self_hidden": 0}
+    rows, hidden = _not_self(sql + " offset ?", args, limit, redlist()["watch"])
+    return {"hours": hours, "rows": rows, "self_hidden": hidden}
 
 
 def top_ips(days=30, limit=25):
     days, limit = _clamp(days, 1, 365, 30), _clamp(limit, 1, 200, 25)
-    return {"days": days, "rows": tag(q(
+    return {"days": days, "rows": [r for r in tag(q(
         "select ip, sum(score) score, count(*) n, group_concat(distinct kind) kinds, max(ts) last from events "
         "where ip!='' and ts > datetime('now', ?) group by ip order by score desc limit ?",
-        (f"-{days} days", limit)), redlist()["watch"])}
+        (f"-{days} days", limit + 50)), redlist()["watch"]) if not r["self"]][:limit]}
 
 
 def bans():

@@ -161,7 +161,7 @@ class H(BaseHTTPRequestHandler):
         if u.path in ("/", "/index.html"):
             self.send(PAGE.read_bytes(), "text/html; charset=utf-8")
         elif u.path == "/api":
-            p = views.payload()
+            p = dict(views.payload_cached())        # shallow copy: the cached dict is shared between requests
             p["layout"], p["widgets"], p["approvals"] = views.layout(), views.WIDGETS, notify.pending()
             self.send(p)
         elif u.path == "/api/vuln":
@@ -228,7 +228,10 @@ class H(BaseHTTPRequestHandler):
                 raise ValueError
         except ValueError:
             return self.send({"error": "bad request"}, status=400)
-        fn(data)
+        try:
+            fn(data)
+        finally:
+            views.invalidate()                      # the next refresh must show what this write changed
 
     def post_patch(self, body):
         """Queue a patch REQUEST. It runs nothing: patcher.py turns it into a plan the owner must approve."""
@@ -325,6 +328,7 @@ def main():
     import os  # noqa: PLC0415
     host = os.environ.get("WARDEN_UI_HOST", host)
     port = int(os.environ.get("WARDEN_UI_PORT", port))
+    views.warm_cache()
     ThreadingHTTPServer((host, port), H).serve_forever()
 
 
