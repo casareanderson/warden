@@ -52,7 +52,9 @@ HOST_KIND = [(r"appletv|apple-tv|webos|lgwebos|bravia|roku|firetv|chromecast|and
              (r"iphone|ipad|galaxy|pixel|android|oneplus|redmi|huawei|phone", "phone"),
              (r"macbook|laptop|desktop|-pc\b|^pc-|windows|imac|thinkpad|surface", "computer"),
              (r"wled|wiz|bulb|light|lamp", "bulb"), (r"sonos|echo|nest|homepod|speaker", "speaker"),
-             (r"printer|^hp|epson|brother|canon", "printer"), (r"cam|doorbell|eufy", "camera"),
+             (r"printer|^hp|epson|brother|canon", "printer"),
+             (r"robovac|vacuum|roomba|roborock|dreame|deebot", "iot"),      # before "eufy": the RoboVac is not a camera
+             (r"cam|doorbell|eufy", "camera"),
              (r"^esp|esp32|esp8266|tasmota|shelly", "iot"), (r"xbox|playstation|ps5|ps4|switch-|nintendo", "console"),
              (r"proxmox|pve|server|nas|zima|raspberrypi|^pi\b", "server"), (r"router|ap-|eap\d|switch\b|mesh", "network")]
 VENDOR_KIND = [(r"wiz", "bulb"), (r"broadlink", "plug"), (r"sonos", "speaker"), (r"espressif", "iot"),
