@@ -824,7 +824,7 @@ function kpiDefs(d, edgeBlind) {
   const k = d.kpi, V = (d.vuln || {}).totals || {}, N = d.netsec || {}, E = d.endpoints || {integrity: []};
   const blind = edgeBlind.startsWith("BLIND"), integ = E.integrity.reduce((a, r) => a + (r.open || 0), 0), ap = (d.approvals || []).length;
   return {
-    events_24h: ["Detections 24 h", k.events_24h, `${k.events_7d} in 30 days`, "", "detections"],
+    events_24h: ["Detections 24 h", k.events_24h, `${k.events_7d} in 30 days · ${k.events_self_24h || 0} own-IP ignored`, "", "detections"],
     ips_7d: ["Scored IPs 30 d", k.ips_7d, `${d.unattributed} unattributed`, "", "detections"],
     edge_24h: ["Edge blocks 24 h", blind ? "—" : k.edge_24h, blind ? "needs CF Analytics:Read" : `blocked/challenged · ${k.edge_self_30d} own-IP rows ignored`, blind ? "amb" : "", "edge"],
     red_hits_7d: ["Red-list hits 30 d", k.red_hits_7d, "red-listed country traffic", k.red_hits_7d ? "red" : "grn", "geo"],

@@ -188,8 +188,8 @@ def scan_images(t):
     tok = open(config.get("vuln.token_file")).read().strip()
     want = run([TRIVY, "--version"])[1].split()[1]
 
-    def rsh(cmd, timeout=900):
-        return hosts.remote(t, cmd, timeout=timeout)
+    def rsh(cmd, timeout=900, stdin=None):
+        return hosts.remote(t, cmd, timeout=timeout, stdin=stdin)
     rc, so, _ = rsh(f"{TRIVY_REMOTE} --version 2>/dev/null | head -1")
     if want not in (so or ""):
         ok, err = hosts.push(t, TRIVY, TRIVY_REMOTE)
@@ -202,9 +202,11 @@ def scan_images(t):
     results, errs = [], []
     server = config.get("vuln.server")
     for img in images:
-        cmd = (f"chmod 755 {TRIVY_REMOTE}; TRIVY_TOKEN={tok} {TRIVY_REMOTE} image --server {server} "
-               f"--token-header Trivy-Token --scanners vuln --quiet --format json --timeout 10m {sh_quote(img)}")
-        rc, so, se = rsh(cmd, timeout=900)
+        # token goes in on stdin, never argv: an argv token is readable by any user via ps on the target
+        cmd = (f"chmod 755 {TRIVY_REMOTE}; IFS= read -r TRIVY_TOKEN; export TRIVY_TOKEN; exec {TRIVY_REMOTE} image "
+               f"--server {server} --token-header Trivy-Token --scanners vuln --quiet --format json --timeout 10m "
+               f"{sh_quote(img)}")
+        rc, so, se = rsh(cmd, timeout=900, stdin=tok + "\n")
         if rc != 0 or not so.strip().startswith("{"):
             errs.append(f"{img}: {(se or 'no output').strip().splitlines()[-1][:80] if (se or '').strip() else 'failed'}")
             continue

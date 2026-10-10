@@ -254,3 +254,37 @@ def test_review_20261009_integrity_never_autoaccepts_persistence():
               "/etc/pam.d/sshd", "/etc/systemd/system/evil.service", "/etc/shadow"):
         assert m.SENSITIVE.search(p), p
     assert not m.SENSITIVE.search("/usr/bin/curl")
+
+
+def test_own_ip_left_out_of_counts(env, tmp_path):
+    # 10-10: our WAN IP (Uptime Kuma 404s) was 97% of a day's detections and pushed real rows off the lists
+    (tmp_path / "warden.yml").write_text("estate: {name: test}\nnotify: {backend: none}\nallow: [192.0.2.7]\n")
+    con = sqlite3.connect(tmp_path / "warden.db")
+    con.executemany("insert into events(ts,source,ip,kind,detail,score) values (datetime('now','-10 minutes'),"
+                    "'proxy','192.0.2.7','4xx','/',1)", [()] * 150)
+    con.commit(); con.close()
+    import wlib.config as c
+    importlib.reload(c); importlib.reload(env["views"])
+    v = env["views"]
+    p = v.payload()
+    assert p["kpi"]["events_24h"] == 3 and p["kpi"]["events_self_24h"] == 150
+    assert all(not r["self"] for r in p["recent"]) and len(p["recent"]) == 3
+    assert [r["ip"] for r in p["top"]] == ["203.0.113.9", "198.51.100.4"]
+    assert sum(d["n"] for d in p["timeline"]) == 3
+    d = v.detections(limit=2)
+    assert len(d["rows"]) == 2 and d["self_hidden"] == 150 and all(not r["self"] for r in d["rows"])
+    assert len(v.detections(ip="192.0.2.7")["rows"]) == 100        # asked for by IP → shown
+    assert all(not r["self"] for r in v.top_ips()["rows"])
+
+
+def test_console_payload_cache_drops_on_write(env, tmp_path):
+    v = env["views"]
+    v.invalidate()
+    a = v.payload_cached()
+    con = sqlite3.connect(tmp_path / "warden.db")
+    con.execute("insert into events(ts,source,ip,kind,detail,score) values (datetime('now'),'proxy','203.0.113.50','sqli','x',8)")
+    con.commit(); con.close()
+    assert v.payload_cached() is a                       # within max_age: same warm copy
+    v.invalidate()
+    assert v.payload_cached()["kpi"]["events_24h"] == a["kpi"]["events_24h"] + 1
+    assert v.payload_cached(max_age=0) is not a

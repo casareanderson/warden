@@ -120,19 +120,21 @@ def find(target_id, discover=False):
     return None
 
 
-def remote(t, cmd, timeout=300, binary=False, root=False):
+def remote(t, cmd, timeout=300, binary=False, root=False, stdin=None):
     """Run `cmd` on a target. Returns (rc, stdout, stderr).
-    root=True on a plain linux host uses sudo -S with the host's `sudo_secret`."""
+    root=True on a plain linux host uses sudo -S with the host's `sudo_secret`.
+    stdin: text fed to the command — the way to hand it a secret without putting it in argv (ps-visible)."""
     kind = t["kind"]
     if kind == "node":
-        return run(SSH + [t["ssh"], cmd], timeout=timeout, binary=binary)
+        return run(SSH + [t["ssh"], cmd], timeout=timeout, binary=binary, inp=stdin)
     if kind == "ct":
-        return run(SSH + [t["ssh"], f"pct exec {t['vmid']} -- sh -c {sh_quote(cmd)}"], timeout=timeout, binary=binary)
+        return run(SSH + [t["ssh"], f"pct exec {t['vmid']} -- sh -c {sh_quote(cmd)}"], timeout=timeout, binary=binary,
+                   inp=stdin)
     if kind in ("host", "local", "images", "firmware"):
         if t.get("vmid"):          # docker inside an LXC
             return run(SSH + [t["ssh"], f"pct exec {t['vmid']} -- sh -c {sh_quote(cmd)}"],
-                       timeout=timeout, binary=binary)
-        inp = None
+                       timeout=timeout, binary=binary, inp=stdin)
+        inp = stdin
         if root and t.get("root_via") == "docker":
             # No sudo on the box (ZimaOS), but its user is in the docker group = root in all but name.
             # A throwaway container chrooted into the host's / runs the command as real root, nothing installed.
@@ -144,6 +146,8 @@ def remote(t, cmd, timeout=300, binary=False, root=False):
             cmd = (f"docker run --rm -i --pull=never --privileged --pid=host --net=host -v /:/host {img} "
                    f"chroot /host sh -c {sh_quote(cmd)}")
         elif root and t.get("sudo_secret"):
+            if stdin is not None:
+                raise RuntimeError(f"{t['target']}: stdin is taken by the sudo password on this host")
             pw = secrets.get(t["sudo_secret"])
             if not pw:
                 raise RuntimeError(f"{t['target']}: sudo password secret {t['sudo_secret']} is not set")
