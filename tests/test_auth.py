@@ -231,3 +231,11 @@ def test_proxy_and_basic_modes_unchanged(env, tmp_path):
     assert call(env["url"] + "/api/me", hdr={"Remote-User": "chris"})[1]["username"] == "chris"
     st, _, h = call(env["url"] + "/login")
     assert st == 302                                                             # no login page in proxy mode
+
+
+def test_one_time_passwords_are_typeable(env):
+    a = env["auth"]
+    for _ in range(200):
+        pw = a.generate_password()
+        assert len(pw) == 24 and pw.count("-") == 4 and not set(pw) & set("0Oo1lIiSZB5u8v")
+        assert a.check_password_policy(pw) is None
