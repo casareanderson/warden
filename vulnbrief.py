@@ -35,7 +35,8 @@ SYSTEM = """You write the "fix first" briefing for a homelab's vulnerability sca
 Use ONLY the facts JSON you are given. Never add CVE ids, versions, boxes, images, packages or numbers that are not in it,
 and never do arithmetic: every number you write must be copied from the facts.
 Write at most 6 numbered actions, most urgent first, in plain UK English, under 1100 characters in total.
-Order: anything known-exploited (kev true) first, then high exploit chance (epss_pct_str), then critical with a fix.
+Order: anything known-exploited (kev true) first, then high exploit chance (epss_pct_str), then critical with a fix;
+within each, anything internet_facing "yes" comes first, and say which public hostname reaches it.
 Group the same fix together (one image update can clear several CVEs). For each action say WHAT to do (patch which box,
 or update which image and how: use the container's `update` field), and WHY in one short clause (cite the CVE ids and
 kev/epss exactly as written). Write package, image and box names exactly as they appear, never shortened or joined
@@ -74,10 +75,12 @@ def facts(con):
     out = []
     for r in rows:
         where = []
-        for w in con.execute("select target, pkg, installed, fixed, image from vulns where vid=? "
+        ex = ", exposed" if "exposed" in cols else ", null exposed"
+        for w in con.execute(f"select target, pkg, installed, fixed, image{ex} from vulns where vid=? "
                              "order by target, image, pkg", (r["vid"],)):
             item = {"box": names.get(w["target"], w["target"]), "package": w["pkg"], "installed": w["installed"],
-                    "fixed_in": w["fixed"] or "no fix yet"}
+                    "fixed_in": w["fixed"] or "no fix yet",
+                    "internet_facing": f"yes, via {w['exposed']}" if w["exposed"] else "no"}
             if w["image"]:
                 item["image"] = w["image"]
                 adv = advice.get(w["image"]) or []
