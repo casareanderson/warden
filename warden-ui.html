@@ -307,12 +307,13 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="wrap"><table id="vt"></table></div>
   <h2>Docker containers <span class="hint">how each is managed decides how it can be updated — automatic only where it's safe (compose), everything else says why</span></h2>
   <div class="wrap"><table id="vimg"></table></div>
-  <h2>Must-fix across the estate <span class="hint">known-exploited (CISA KEV) first, then severity, then how many boxes</span></h2>
+  <div id="vbrief"></div>
+  <h2>Must-fix across the estate <span class="hint">known-exploited (CISA KEV) first, then likely to be exploited (EPSS ≥ 10% with a fix), then severity</span></h2>
   <div class="tbl-tools"><input data-filter="vtop" placeholder="filter: CVE, package, box…"><span class="n" id="vtop-n"></span></div>
   <div class="wrap"><table id="vtop"></table></div>
   <h2>Patch jobs</h2>
   <div class="wrap"><table id="vjobs"></table></div>
-  <div class="note">Scanner: Trivy 0.74.0 (checksum + Sigstore verified — v0.69.4 and the v0.69.5/6 images were the 2026 supply-chain compromise). Nothing is installed on scanned boxes: only their package database is read. Raw CVE totals are mostly "affected, no fix released yet" — fixable and KEV are what you can act on.</div>
+  <div class="note">Advisories: <a href="https://osv.dev" target="_blank" rel="noopener">OSV.dev</a> (Debian, Ubuntu, Alpine, GitHub, PyPA, Go) + Alpine secdb; exploit data: CISA KEV and FIRST EPSS (chance of exploitation in the next 30 days). No scanner binary or database: warden reads each box's package list, and each running container's own files, and nothing is installed on them. Raw CVE totals are mostly "affected, no fix released yet"; KEV, high EPSS and fixable are what you can act on.</div>
 </section>
 
 <!-- ENDPOINTS -->
@@ -532,6 +533,7 @@ async function openCve(id) {
   const links = Object.entries(r.links || {}).concat(safe(r.url) ? [["Advisory", r.url]] : []).filter(([, u]) => safe(u));
   $("#dr-body").innerHTML = `<p class="lead"><b>${esc(r.title || "No title from the scanner")}</b></p>
     <dl class="kv"><dt>Severity</dt><dd>${sevB(r.severity)}${r.kev ? ' <span class="b red">known exploited (CISA KEV)</span>' : ""}</dd>
+      <dt>Exploit chance</dt><dd>${epssB(r.epss, r.epss_pct)} <span class="q">EPSS, next 30 days</span></dd>
       <dt>Affects</dt><dd>${boxes.length} box${boxes.length === 1 ? "" : "es"} · ${r.rows.length} package${r.rows.length === 1 ? "" : "s"}</dd>
       <dt>Fix</dt><dd>${fixed.length ? `a fixed version exists for ${fixed.length} of ${r.rows.length} — patch the box (Vulnerabilities → Patch…) or update the image` : '<span class="q">no fix released upstream yet — nothing to install; watch it</span>'}</dd></dl>
     ${r.descr ? `<h3>What it is</h3><p style="white-space:pre-wrap;color:var(--dim);font-size:13px;line-height:1.6">${esc(r.descr)}</p>` : '<p class="note">The full description appears after the next nightly scan (03:30) — use the links below meanwhile.</p>'}
@@ -687,6 +689,8 @@ function render() {
 
 
 const SEVN = {4: "CRITICAL", 3: "HIGH", 2: "MEDIUM", 1: "LOW", 0: "UNKNOWN"};
+const epssB = (e, p) => e == null ? '<span class="q">–</span>' :
+  `<span class="b ${e >= 0.1 ? "red" : e >= 0.01 ? "amb" : "q"}" title="EPSS: chance of exploitation in the next 30 days${p != null ? ` · higher than ${(p * 100).toFixed(0)}% of all CVEs` : ""}">${(e * 100).toFixed(e < 0.01 ? 2 : 1)}%</span>`;
 const sevB = v => { const n = typeof v === "number" ? SEVN[v] : v; return `<span class="b ${{CRITICAL: "high", HIGH: "med", MEDIUM: "low"}[n] || ""}">${esc(n)}</span>`; };
 function renderVulns(V) {
   if (!V) { $("#v-kpis").innerHTML = '<div class="empty">No scan yet — vulnscan.py runs daily at 03:30.</div>'; return; }
@@ -719,8 +723,13 @@ function renderVulns(V) {
     {h: "Action", f: r => `<span class="b ${r.action === "manual" ? "acc" : "ok"}">${esc(r.action)}</span>`}, {h: "Why", k: "why", cls: "wrapd"},
     {h: "", f: r => r.action !== "manual" ? `<button class="btn" data-patch="ctr:${esc(r.host.slice(4))}:${esc(r.container)}" data-name="${esc(r.container)}">Update…</button>` : ""}],
     V.images || [], "No container data yet.");
+  const B = V.brief;
+  $("#vbrief").innerHTML = !B ? "" : B.status === "ok"
+    ? `<h2>Fix first <span class="hint">AI-written from the scan facts only, then checked: every CVE, box and version it names must be in the data · ${esc(B.model || "")} · ${ago(B.ts)}</span></h2><div class="note" style="white-space:pre-wrap">${esc(B.text)}</div>`
+    : `<div class="note q">AI briefing withheld (${esc(B.reason || "failed the fact check")}) · ${ago(B.ts)}. The tables below are unaffected.</div>`;
   table("vtop", [{h: "CVE", f: r => cveBtn(r.vid)},
     {h: "Severity", f: r => sevB(r.sev)}, {h: "KEV", f: r => r.kev ? '<span class="b red">exploited</span>' : ""},
+    {h: "EPSS", f: r => epssB(r.epss, r.epss_pct), cls: "num"},
     {h: "Boxes", k: "n_targets", cls: "num", num: 1}, {h: "Package", k: "pkgs", cls: "mono det"}, {h: "Fixed in", k: "fixed", cls: "mono"},
     {h: "Where", k: "targets", cls: "det mono", title: 1}, {h: "Title", k: "title", cls: "det", title: 1}], V.top, "Nothing known-exploited or fixable. 🎉");
   table("vjobs", [{h: "#", k: "id", cls: "num"}, {h: "Box", f: r => esc(r.name || r.target)},
@@ -743,6 +752,7 @@ document.addEventListener("click", async e => {
     $("#dr-body").innerHTML = `<p class="note" style="margin-top:0">Known-exploited and fixable first. Click a CVE for what it is and how to fix it.</p>
       <div class="tbl-tools"><input data-filter="vdet" placeholder="filter: CVE, package, severity…"><span class="n" id="vdet-n"></span></div><div class="wrap"><table id="vdet"></table></div>`;
     table("vdet", [{h: "CVE", f: x => cveBtn(x.vid)}, {h: "Severity", f: x => sevB(x.severity)}, {h: "KEV", f: x => x.kev ? '<span class="b red">exploited</span>' : ""},
+      {h: "EPSS", f: x => epssB(x.epss, x.epss_pct), cls: "num"},
       {h: "Package", k: "pkg", cls: "mono"}, {h: "Installed", k: "installed", cls: "mono q"}, {h: "Fixed in", f: x => x.fixed ? `<span class="y mono">${esc(x.fixed)}</span>` : `<span class="q">${esc(x.status || "no fix")}</span>`},
       {h: "Image", k: "image", cls: "mono det"}, {h: "Title", k: "title", cls: "det", title: 1}], r.rows, "No CVEs recorded.");
     return;
