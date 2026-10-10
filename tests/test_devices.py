@@ -26,6 +26,7 @@ def test_kinds(tmp_path, monkeypatch):
     assert k(ha={"domains": ["media_player"], "maker": "Sonos", "model": "One"}) == "speaker"
     assert k(ha={"domains": ["media_player"], "maker": "LG", "model": "webOS TV OLED55"}) == "tv"
     assert k(ha={"domains": ["switch"], "maker": "Espressif", "model": "ESP32"}, host="esp32-x") == "iot"   # a switch ≠ a plug
+    assert k(host="eufyRoboVac") == "iot" and k(host="eufyCam-Front") == "camera"
     assert k(host="15AA01AC511808MK") == "unknown"                          # honest unknown, not a guess
 
 
