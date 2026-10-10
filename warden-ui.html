@@ -353,9 +353,11 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="wrap"><table id="ids"></table></div>
   <h2>Threat intel · whole LAN <span class="hint">router DNS log + connection table vs URLhaus, ThreatFox, OpenPhish, Feodo, FireHOL L1, red list</span></h2>
   <div class="wrap"><table id="intel"></table></div>
-  <h2>Hosts</h2>
-  <div class="tbl-tools"><input data-filter="hosts" placeholder="filter: ip, name, vendor, mac…"><span class="n" id="hosts-n"></span></div>
+  <h2>Devices <span class="hint">everything on the network, one row per device; hover a kind to see why</span></h2>
+  <div class="tbl-tools"><input data-filter="hosts" placeholder="filter: name, kind, room, address…"><span class="n" id="hosts-n"></span></div>
   <div class="wrap"><table id="hosts"></table></div>
+  <h2>Device changes <span class="hint">a bulb, plug, TV or camera looking up something new; scored, and only the odd ones ask you</span></h2>
+  <div class="wrap"><table id="devchanges"></table></div>
   <h2>Network alerts</h2>
   <div class="tbl-tools"><input data-filter="netalerts" placeholder="filter these rows…"><span class="n" id="netalerts-n"></span></div>
   <div class="wrap"><table id="netalerts"></table></div>
@@ -656,8 +658,20 @@ function render() {
   donut($("#ch-net"), d.charts.net_alerts, {unit: "alerts", q: x => "type:net-alert kind:" + x.k});
   const nr = (d.net_runs || [])[0] || {};
   $("#netrun").innerHTML = `<div class="kpi" style="border:0;padding:0"><div class="v">${nr.hosts ?? "—"}</div><div class="s">hosts answered in the last hour · ${ago(nr.last_run)}</div></div>`;
+  if ((d.devices || []).length)        // devices.py: every device in the house, one row each, with its kind
+    table("hosts", [{h: "Device", f: r => esc(r.name) + (r.addresses > 1 ? ` <span class="q" title="private Wi-Fi addresses, grouped by name">×${r.addresses}</span>` : "")},
+      {h: "Kind", f: r => `<span class="b${r.fixed ? "" : " acc"}" title="${esc(r.kind_why)}">${esc(r.kind)}</span>`}, {h: "Room", k: "room"},
+      {h: "Address", f: r => esc((r.ips || "").split(",").slice(-1)[0]), cls: "ip mono"}, {h: "Make", k: "maker", cls: "det"},
+      {h: "Seen by", k: "sources", cls: "q"}, {h: "Last seen", f: r => ago(r.last_seen), cls: "ts"}], d.devices);
+  else
   table("hosts", [{h: "Address", k: "ip", cls: "ip mono", ip: 1}, {h: "Name", k: "hostname"}, {h: "Vendor", k: "vendor", cls: "det"},
     {h: "MAC", k: "mac", cls: "mono q"}, {h: "First seen", k: "first_seen", cls: "ts"}, {h: "Last seen", f: r => ago(r.last_seen), cls: "ts"}], d.net_hosts);
+  table("devchanges", [{h: "When", f: r => ago(r.ts), cls: "ts"}, {h: "Device", f: r => esc(r.device) + ` <span class="q">${esc(r.kind || "")}</span>`},
+    {h: "Looked up", k: "domain", cls: "mono"}, {h: "Score", k: "score", cls: "num", num: 1},
+    {h: "Decision", f: r => `<span class="b ${r.decision === "review" ? "amb" : r.decision === "logged" ? "" : "acc"}">${esc(r.decision)}</span>`
+      + (r.verdict ? ` <span class="${r.verdict === "suspicious" ? "n" : "y"}">${r.verdict === "suspicious" ? "❌ suspicious" : r.verdict === "normal" ? "✅ normal" : esc(r.verdict)}</span>` : "")},
+    {h: "Why", f: r => esc((JSON.parse(r.reasons || "[]")).slice(1).join("; ")), cls: "det", title: 1}],
+    d.device_changes || [], "Nothing new from any fixed-function device yet.");
   table("netalerts", [{h: "When", k: "ts", cls: "ts"}, {h: "Kind", f: r => `<span class="b ${r.kind === "NEW_DEVICE" || r.kind === "NEW_PORT" ? "amb" : ""}">${esc(r.kind)}</span>`},
     {h: "Address", k: "ip", cls: "ip mono", ip: 1}, {h: "MAC", k: "mac", cls: "mono q"}, {h: "Detail", k: "detail", cls: "det", title: 1}], d.net_alerts);
 
