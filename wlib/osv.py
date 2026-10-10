@@ -332,6 +332,7 @@ def slim(v):
                        else {})})
     out = {"id": v["id"], "modified": v.get("modified", ""), "summary": (v.get("summary") or "")[:200],
            "details": (v.get("details") or "")[:1200], "aliases": v.get("aliases") or [],
+           "upstream": [u for u in v.get("upstream") or [] if u.startswith("CVE-")],
            "severity": v.get("severity") or [], "references": refs, "affected": aff}
     if sev_db:
         out["database_specific"] = {"severity": sev_db}
@@ -340,11 +341,32 @@ def slim(v):
     return out
 
 
+NOTICE = ("USN-", "DSA-", "DLA-", "DTSA-")
+# Bump when slim() keeps more fields, so bodies cached before the change are refetched. 2 = notices keep `upstream`
+# (their CVE list) for the Debian 10/11 expansion below. Kept in osv_meta, not pragma user_version: osv_vulns lives
+# in the shared warden DB and the whole-DB version number is not this module's to claim.
+CACHE_SCHEMA = 2
+
+
+def _notice_cves(b):
+    return sorted({c for c in (b.get("upstream") or []) + (b.get("aliases") or []) if c.startswith("CVE-")})
+
+
 class OSV:
     def __init__(self, db_path, session=None):
         self.con = sqlite3.connect(db_path, timeout=60, check_same_thread=False)
         self.con.execute("create table if not exists osv_vulns(id text primary key, modified text, body text, "
                          "fetched text)")
+        self.con.execute("create table if not exists osv_meta(k text primary key, v text)")
+        row = self.con.execute("select v from osv_meta where k='cache_schema'").fetchone()
+        try:
+            ver = int(row[0]) if row else 0
+        except (TypeError, ValueError):
+            ver = 0
+        if ver < CACHE_SCHEMA:
+            # an old cache (no osv_meta row) is emptied, not dropped: the next scan refetches every advisory it hits
+            self.con.execute("delete from osv_vulns")
+            self.con.execute("insert or replace into osv_meta values('cache_schema',?)", (str(CACHE_SCHEMA),))
         self.con.commit()
         self.s = session or requests.Session()
         self.s.headers.update(UA)
@@ -562,6 +584,12 @@ def match(osv, pkgs, kev, image="", alias_sev=True):
                 for a in chain(c):
                     if a not in bodies:
                         extra[a] = ""
+        for b in list(bodies.values()):
+            if b["id"].startswith(NOTICE):
+                for c in _notice_cves(b):
+                    for a in chain(c):
+                        if a not in bodies:
+                            extra[a] = ""
         if extra:
             bodies.update(osv.get(extra))
 
@@ -579,8 +607,9 @@ def match(osv, pkgs, kev, image="", alias_sev=True):
     for e, n, v, rn, rv in pkgs:
         for b in by_q.get((e, n, v), []):
             # USN/DSA/DLA notices bundle CVEs that UBUNTU-CVE-*/DEBIAN-CVE-* records already carry one by one;
-            # counted again they double the fixable list with UNKNOWN severity (research review 2026-10-10)
-            if b.get("withdrawn") or b["id"].startswith(("USN-", "DSA-", "DLA-", "DTSA-")):
+            # counted again they double the fixable list with UNKNOWN severity (research review 2026-10-10).
+            # They are only used below, for CVEs no per-CVE record covered.
+            if b.get("withdrawn") or b["id"].startswith(NOTICE):
                 continue
             vid = _cve(b) or b["id"]
             sev = severity(b)
@@ -600,6 +629,25 @@ def match(osv, pkgs, kev, image="", alias_sev=True):
             # keep the most useful copy when GHSA + PYSEC (etc.) describe the same CVE
             if not old or (row[3] and not old[3]) or SEV_RANK[row[4]] > SEV_RANK[old[4]]:
                 out[key] = row
+    # Older releases (Debian 10/11 on 2026-10-10) get no per-CVE records in OSV at all, only DSA/DLA notices:
+    # skipping notices outright made a bullseye image with PwnKit and Baron Samedit look clean. Expand a notice
+    # into its CVEs, for any CVE a per-CVE record has not already reported for this package (ported from sieve).
+    for e, n, v, rn, rv in pkgs:
+        for b in by_q.get((e, n, v), []):
+            if b.get("withdrawn") or not b["id"].startswith(NOTICE):
+                continue
+            fixed = _fixed(b, e, n, v)
+            status = "fixed" if fixed else "affected"
+            if fixed and e.startswith("Ubuntu") and "esm" in fixed:
+                fixed, status = "", "fix needs Ubuntu Pro (ESM)"
+            for c in _notice_cves(b):
+                key = (c, rn, image)
+                if key in out:
+                    continue
+                cb = bodies.get(c) or {}
+                out[key] = (c, rn, rv, fixed, borrowed(c), (cb.get("summary") or b.get("summary") or "")[:200],
+                            int(c in kev), status, image, (cb.get("details") or b.get("details") or "")[:1200],
+                            _url(b))
     for e, n, v, rn, rv in pkgs:
         for c, fv in sec.get((e, n, v), {}).items():
             key = (c, rn, image)
