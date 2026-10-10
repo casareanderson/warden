@@ -1,4 +1,4 @@
-# warden
+<h1><img src="docs/logo.svg" alt="" height="48" align="absmiddle"> warden</h1>
 
 A lightweight, self-hosted security console for a homelab or small estate. warden reads the logs your WAF can't see, sweeps your LAN, scans your machines and containers for vulnerabilities, watches files for drift, and lets your AI agent ask it questions over MCP. Detect-only by default: anything that changes something waits for your approval.
 
@@ -12,6 +12,7 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 
 - [What's new in v2](#whats-new-in-v2)
 - [What it does](#what-it-does)
+- [How it compares](#how-it-compares)
 - [Minimum spec](#minimum-spec)
 - [Quick start](#quick-start)
 - [Connect your agent (MCP and REST)](#connect-your-agent-mcp-and-rest)
@@ -26,6 +27,7 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 
 ## What's new in v2
 
+- **Its own sign-in.** Users with viewer, approver and admin roles, optional 2FA from any authenticator app, lockout after repeated failures, and a sign-in log. No web sign-up: the first admin is made on the command line. Prefer your SSO? `ui.auth: proxy` keeps it.
 - **Runs on your estate, not the author's.** Machines, log sources, alerts and secrets are all in `warden.yml`. `warden-setup init` writes it for you.
 - **An MCP connector and a REST API**, both read-only and token-protected, so Hermes, Claude, Cursor or a script can ask "what's attacking me?" and get real data back.
 - **A home page you can arrange**: pick which numbers, pies, timelines and tables appear, and in what order.
@@ -45,10 +47,26 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 | Network IDS | `netids.py`, `netintel.py` | Pulls Suricata alerts; checks router DNS and connection logs against threat feeds. Both optional. |
 | Edge | `intel.py`, `edgeban.py`, `cfsec.py`, `edge-sentry/` | Cloudflare edge events, an attack-surface snapshot (public names, WAF rules, zone settings, SSO coverage), a proposed edge blocklist, a zone audit, and a report-only Worker. All optional. |
 | Alerts | `siemalert.py`, `wlib/notify.py` | New findings to Discord, a webhook or ntfy, with self-report suppression. |
-| Console | `warden-ui.py` | Eleven tabs, unified search (`ip:` `cc:` `kind:` `type:`), per-collector health, a customisable home page, settings and approvals. |
-| Agents | `wlib/mcp.py`, `/api/v1` | Twelve read-only MCP tools and the same views over REST. |
+| Console | `warden-ui.py`, `wlib/auth.py` | Thirteen tabs, sign-in with roles and 2FA, unified search (`ip:` `cc:` `kind:` `type:`), per-collector health, a customisable home page, settings and approvals. |
+| Agents | `wlib/mcp.py`, `/api/v1` | Thirteen read-only MCP tools and the same views over REST. |
 
 Every optional feature switches itself off when it isn't configured. A box with no Cloudflare zone never runs the Cloudflare jobs.
+
+## How it compares
+
+Every piece of warden exists somewhere else, often done better. What warden adds is the combination: no agents on your machines, one small box (1 vCPU, 512 MB), Cloudflare edge bans worked out from the logs you already have, and nothing banned or patched until a person says yes. It's meant to sit next to these tools, not replace them.
+
+| Tool | What it does well | How warden differs | Licence |
+|---|---|---|---|
+| [Wazuh](https://github.com/wazuh/wazuh) | Full SIEM/XDR: vulnerability detection, file integrity, config checks, active response | Wazuh puts an agent on every host, and its all-in-one install asks for [4 vCPU and 8 GB](https://documentation.wazuh.com/current/quickstart.html). warden is agentless and much smaller, and does much less. | GPL-2.0 |
+| [CrowdSec](https://github.com/crowdsecurity/crowdsec) | Log parsing, community blocklists, bouncers that block automatically | CrowdSec's bouncers act on their own. warden asks first, and was built for a Cloudflare tunnel, where a local firewall ban never matches the attacker's packets. warden runs happily alongside it. | MIT |
+| [PatchMon](https://github.com/PatchMon/PatchMon) | Patch management with approvals and Proxmox LXC auto-enrolment | PatchMon needs an agent per host plus Postgres and Redis. warden patches over SSH and also does detection, IDS and edge bans. | AGPL-3.0 |
+| [Vuls](https://github.com/future-architect/vuls) | Agentless vulnerability scanning over SSH | Vuls is a scanner. warden uses trivy for the same job and adds patch plans, detection and approvals around it. | GPL-3.0 |
+| [Security Onion](https://github.com/Security-Onion-Solutions/securityonion) | Network security monitoring, Suricata, hunting | Security Onion is a full platform with [much bigger hardware needs](https://docs.securityonion.net/en/2.4/hardware.html). warden just reads alerts from a Suricata you already run. | Elastic License 2.0 |
+| [BunkerWeb](https://github.com/bunkerity/bunkerweb) | A reverse proxy + WAF with bad-IP blocklists | BunkerWeb *is* your proxy. warden reads the logs of the proxy you already have. | AGPL-3.0 |
+| [Fail2ban](https://github.com/fail2ban/fail2ban) | Bans from log patterns | Single-purpose, bans automatically, and behind a tunnel its firewall bans hit the tunnel, not the attacker. | GPL-2.0 |
+
+The scanning itself is done by [trivy](https://github.com/aquasecurity/trivy), [Lynis](https://cisofy.com/lynis/) and [Suricata](https://suricata.io/); warden joins their results up. Compared from each project's own docs in October 2026. If something here is out of date or unfair, open an issue and I'll fix it.
 
 ## Minimum spec
 
@@ -77,13 +95,20 @@ sudo apt install python3-yaml python3-requests nmap
 sudo ./warden-setup units --install # writes + enables only the timers for features you use
 ```
 
-Then open the console (it binds to `127.0.0.1:8792`; put your reverse proxy with auth in front, or set `ui.basic_user` and the `WARDEN_UI_PASSWORD` secret).
+Then make yourself an admin and open the console:
+
+```sh
+./warden-setup user add YOUR-NAME --role admin   # prints a one-time password; you pick your own at first sign-in
+```
+
+The console binds to `127.0.0.1:8792`; put HTTPS (a reverse proxy) in front of it. It has its own sign-in page with roles and optional 2FA. If your proxy already signs people in (Authelia, Authentik, oauth2-proxy), set `ui.auth: proxy` instead.
 
 Want to look before you wire anything up?
 
 ```sh
 WARDEN_DATA=/tmp/warden-demo python3 tools/demo.py
-WARDEN_DATA=/tmp/warden-demo python3 warden-ui.py   # http://127.0.0.1:8792
+WARDEN_DATA=/tmp/warden-demo ./warden-setup user add demo --role admin
+WARDEN_DATA=/tmp/warden-demo python3 warden-ui.py   # http://127.0.0.1:8792, sign in as demo
 ```
 
 ## Connect your agent (MCP and REST)
@@ -191,6 +216,7 @@ warden/
 
 ## Security model
 
+- **The console has its own sign-in** (`ui.auth: local`): scrypt-hashed passwords, session cookies stored only as hashes (HttpOnly, SameSite=Strict, Secure behind HTTPS), idle and absolute timeouts, lockout after 5 misses plus a per-address limit, one error message whether the name or the password was wrong, optional TOTP 2FA, and roles checked on the server for every change. There is no web sign-up. Disabling or demoting someone ends their sessions immediately.
 - **Detect-only by default.** `enforce: false` records what warden would ban and changes nothing.
 - **Nothing acts without you.** Patching, edge blocks and baseline changes each need an explicit ✅, expire if ignored, and are logged with who decided.
 - **Agents read; people decide.** MCP and REST are read-only, and a test fails if any tool name contains a write verb.
