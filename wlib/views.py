@@ -336,9 +336,12 @@ def vuln_payload():
         # what matters: known-exploited, then likely-to-be-exploited (EPSS ≥ 10% with a fix), then severity
         "top": q(f"select vid, max({SEV}) sev, max(kev) kev, count(distinct target) n_targets, "
                  "group_concat(distinct target) targets, group_concat(distinct pkg) pkgs, max(fixed) fixed, "
-                 f"max(title) title{', max(epss) epss, max(epss_pct) epss_pct' if _epss() else ''} "
+                 f"max(title) title{', max(epss) epss, max(epss_pct) epss_pct, max(exposed) exposed' if _epss() else ''} "
                  "from vulns where fixed!='' or kev=1 group by vid "
-                 f"order by kev desc, {'(max(epss)>=0.1) desc, ' if _epss() else ''}sev desc, n_targets desc limit 400"),
+                 f"order by kev desc, {'(max(epss)>=0.1) desc, (max(exposed) is not null) desc, ' if _epss() else ''}"
+                 "sev desc, n_targets desc limit 400"),
+        "exposure": q("select host, upstream, target, image, container, sso, via from exposure order by sso, host")
+        if has("exposure") else [],
         "brief": (q("select ts, model, status, text, reason from vuln_brief order by id desc limit 1") or [None])[0]
         if has("vuln_brief") else None,
         "sev_fixable": q("select severity k, count(*) n from vulns where fixed!='' group by severity order by n desc"),
@@ -535,12 +538,13 @@ def bans():
 
 
 def _epss():
-    return has("vulns") and "epss" in {r["name"] for r in q("pragma table_info(vulns)")}
+    # epss and exposed arrived together (2026-10-10)
+    return has("vulns") and {"epss", "exposed"} <= {r["name"] for r in q("pragma table_info(vulns)")}
 
 
 def vulns(target=""):
     if target:
-        e = ",epss,epss_pct" if _epss() else ""
+        e = ",epss,epss_pct,exposed" if _epss() else ""
         return {"target": target, "rows": q(
             f"select vid,pkg,installed,fixed,severity,title,kev,status,image{e} from vulns where target=? "
             f"order by kev desc, (fixed!='') desc, {'coalesce(epss,0)>=0.1 desc, ' if e else ''}{SEV} desc limit 3000",
@@ -558,7 +562,7 @@ def cve(vid):
     if not vid or not has("vulns"):
         return {"vid": vid, "rows": []}
     cols = {r["name"] for r in q("pragma table_info(vulns)")}
-    extra = "".join(f", v.{c}" for c in ("descr", "url", "epss", "epss_pct") if c in cols)  # absent until migrated
+    extra = "".join(f", v.{c}" for c in ("descr", "url", "epss", "epss_pct", "exposed") if c in cols)  # until migrated
     rows = q(f"select v.target, coalesce(t.name, v.target) name, v.pkg, v.installed, v.fixed, v.severity, v.title, "
              f"v.kev, v.status, v.image{extra} "
              f"from vulns v left join vuln_targets t on t.target=v.target where v.vid=? order by v.target", (vid,))
