@@ -43,9 +43,8 @@ DEFAULTS = {
               "log": "/var/log/warden-patcher.log",
               "advisor": "", "advisor_path": "",     # optional python module with choose(); rule-based without it
               "busy_probe": None},                  # optional {target, json_file, key}: "who is busy" fact for timing
-    # vulnerability scanning (vulnscan.py, images.py): trivy in server mode for docker images
-    "vuln": {"trivy": "/usr/local/bin/trivy", "cache": "/var/cache/trivy",
-             "server": "http://127.0.0.1:4954", "token_file": "/etc/trivy/token"},
+    # vulnerability scanning (vulnscan.py, images.py): advisories from api.osv.dev, nothing to configure
+    "vuln": {},
     # public API + MCP
     "api": {"enabled": True, "public_url": ""},     # public_url: how agents reach /mcp (shown in Settings)
     # dashboard server. Binds to localhost: put a reverse proxy with auth in front, or set

@@ -54,8 +54,12 @@ scoring, timestamp handling, dedup, /24 roll-up and edge-ban logic are general.
   auth in front of it — don't expose it without some.
 - **Large estates make big MCP answers.** Tool results are capped at 200 KB and
   say so when truncated; ask narrower questions (a target, an IP, fewer hours).
-- **Run the trivy server with its token in a file or environment file,** not on its
-  command line — `--token` on the command line is readable by every local user via `ps`.
+- **Vulnerability matching depends on OSV.dev being reachable.** If it isn't, the scan errors per target and
+  keeps the previous results; advisories already fetched are cached locally. Alpine falls back to its cached secdb.
+- **Package types not read inside images:** Java jars, Ruby gems, PHP composer, .NET, and Go binaries older than
+  Go 1.18 (counted in the target's note). Rust binaries are read only when built with `cargo auditable`.
+- **Renamed forks are invisible.** A fork published under a new name (e.g. `unclecode-litellm`, a litellm 1.81 fork)
+  matches no advisories for the original project.
 
 ## netscan
 
