@@ -118,3 +118,8 @@ api:
   public_url: ""                    # how agents reach warden, e.g. https://warden.example.com
 dashboard:
   widgets: null                     # null = default; the Customise button saves your own
+
+# optional: which containers the internet reaches (wlib/exposure.py) — reads your reverse proxy's routes
+# exposure:
+#   npm: {url: "https://192.168.1.10:81", user_secret: NPM_USER, pass_secret: NPM_PASSWORD, verify_tls: false}
+#   extra: [{host: vpn.example.com, upstream: ["192.168.1.20:443"]}]   # hand-written routes the API can't show

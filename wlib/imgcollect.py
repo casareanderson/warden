@@ -12,6 +12,9 @@ writes a gzipped tar to stdout holding only package metadata:
   <n>/go/<i>                      256 KB from the Go build-info magic of each Go executable
   <n>/rust/<i>                    the .dep-v0 section of each Rust executable built with cargo-auditable
   ERRORS                          one line per image that could not be read
+  CONTAINERS                      (first) JSON: every running container's name, image, network mode, published ports,
+                                  IPs and listening ports — so warden can tell which one a public hostname reaches
+  HOSTIPS                         the docker host's own IPv4 addresses
 
 warden parses it with wlib/osv.py. Needs root (the /proc roots and volume paths are root-only).
 """
@@ -53,7 +56,10 @@ def npmmeta(b):
     return f"{n}\n{v}".encode() if isinstance(n, str) and isinstance(v, str) and n and v else None
 
 def sh(*a):
-    return subprocess.run(a, capture_output=True, text=True, timeout=60).stdout
+    try:
+        return subprocess.run(a, capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 def elf_section(m, want):
     is64, le = m[4] == 2, m[5] == 1
@@ -78,9 +84,64 @@ def elf_section(m, want):
             return m[off:off + min(size, 4 << 20)]
     return None
 
+def listening(pid, pids):
+    """TCP ports this container's own processes listen on. A host-network container sees EVERY host socket in
+    /proc/<pid>/net/tcp, so ownership is checked through each process's socket fds (2026-10-10: Home Assistant
+    and an idle alpine shell "listened" on NPMplus's port 80 without this)."""
+    inodes = set()
+    for p in pids or [pid]:
+        try:
+            for fd in os.listdir(f"/proc/{p}/fd"):
+                try:
+                    t = os.readlink(f"/proc/{p}/fd/{fd}")
+                except OSError:
+                    continue
+                if t.startswith("socket:["):
+                    inodes.add(t[8:-1])
+        except OSError:
+            pass
+    out = set()
+    for f in ("tcp", "tcp6"):
+        try:
+            for line in open(f"/proc/{pid}/net/{f}").readlines()[1:]:
+                x = line.split()
+                if x[3] == "0A" and x[9] in inodes:
+                    out.add(int(x[1].rsplit(":", 1)[1], 16))
+        except (OSError, IndexError, ValueError):
+            pass
+    return sorted(out)
+
+try:                            # on a no-sudo host this runs inside warden's own throwaway root container: skip it
+    SELF = open("/proc/self/cgroup").read()
+except OSError:
+    SELF = ""
+ALL = [c for c in sh("docker", "ps", "-q", "--no-trunc").split() if c not in SELF]
+ctrs = []
+for cid in ALL:
+    try:
+        d = json.loads(sh("docker", "inspect", cid))[0]
+    except (ValueError, IndexError):
+        continue
+    ns = d.get("NetworkSettings") or {}
+    nets = ns.get("Networks") or {}
+    ctrs.append({"name": d.get("Name", "").lstrip("/"),
+                 "image": sh("docker", "ps", "-f", "id=" + cid, "--format", "{{.Image}}").strip(),
+                 "hostnet": (d.get("HostConfig") or {}).get("NetworkMode") == "host",
+                 "published": sorted({int(b["HostPort"]) for v in (ns.get("Ports") or {}).values() for b in (v or [])
+                                      if b.get("HostPort", "").isdigit()}),
+                 "ips": sorted({n.get("IPAddress") for n in nets.values() if n.get("IPAddress")}),
+                 "aliases": sorted({a for n in nets.values() for a in (n.get("Aliases") or []) + (n.get("DNSNames") or [])}),
+                 "listen": listening((d.get("State") or {}).get("Pid") or 0,
+                                     [x for x in sh("docker", "top", cid, "-eo", "pid").split()[1:] if x.isdigit()])})
+add("CONTAINERS", json.dumps(ctrs).encode())
+hip = sh("hostname", "-I").split() if os.path.exists("/usr/bin/hostname") or os.path.exists("/bin/hostname") else []
+if not hip:
+    hip = re.findall(r"inet (\d+\.\d+\.\d+\.\d+)", sh("ip", "-4", "-o", "addr", "show"))
+add("HOSTIPS", " ".join(h for h in hip if ":" not in h and not h.startswith("127.")).encode())
+
 seen = set()
 n = 0
-for cid in sh("docker", "ps", "-q").split():
+for cid in ALL:
     # name as `docker ps` shows it (an image id once its tag has moved on), so history lines up across scans
     info = sh("docker", "ps", "-f", "id=" + cid, "--format", "{{.Image}}").strip().split("\n")[:1] + \
         sh("docker", "inspect", "-f", "{{.Image}}|{{.State.Pid}}", cid).strip().split("|")

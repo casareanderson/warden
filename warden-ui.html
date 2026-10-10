@@ -534,6 +534,7 @@ async function openCve(id) {
   $("#dr-body").innerHTML = `<p class="lead"><b>${esc(r.title || "No title from the scanner")}</b></p>
     <dl class="kv"><dt>Severity</dt><dd>${sevB(r.severity)}${r.kev ? ' <span class="b red">known exploited (CISA KEV)</span>' : ""}</dd>
       <dt>Exploit chance</dt><dd>${epssB(r.epss, r.epss_pct)} <span class="q">EPSS, next 30 days</span></dd>
+      <dt>Internet-facing</dt><dd>${[...new Set(r.rows.map(x => x.exposed).filter(Boolean))].map(pubB).join(" ") || '<span class="q">not reachable from outside (as far as warden can see)</span>'}</dd>
       <dt>Affects</dt><dd>${boxes.length} box${boxes.length === 1 ? "" : "es"} · ${r.rows.length} package${r.rows.length === 1 ? "" : "s"}</dd>
       <dt>Fix</dt><dd>${fixed.length ? `a fixed version exists for ${fixed.length} of ${r.rows.length} — patch the box (Vulnerabilities → Patch…) or update the image` : '<span class="q">no fix released upstream yet — nothing to install; watch it</span>'}</dd></dl>
     ${r.descr ? `<h3>What it is</h3><p style="white-space:pre-wrap;color:var(--dim);font-size:13px;line-height:1.6">${esc(r.descr)}</p>` : '<p class="note">The full description appears after the next nightly scan (03:30) — use the links below meanwhile.</p>'}
@@ -689,6 +690,7 @@ function render() {
 
 
 const SEVN = {4: "CRITICAL", 3: "HIGH", 2: "MEDIUM", 1: "LOW", 0: "UNKNOWN"};
+const pubB = x => !x ? "" : `<span class="b ${/sign-in/.test(x) && !/,/.test(x) ? "amb" : "red"}" title="reachable from the internet via ${esc(x)}">🌐 ${esc(x.split(",")[0].split(".")[0])}${/,/.test(x) ? " +" : ""}</span>`;
 const epssB = (e, p) => e == null ? '<span class="q">–</span>' :
   `<span class="b ${e >= 0.1 ? "red" : e >= 0.01 ? "amb" : "q"}" title="EPSS: chance of exploitation in the next 30 days${p != null ? ` · higher than ${(p * 100).toFixed(0)}% of all CVEs` : ""}">${(e * 100).toFixed(e < 0.01 ? 2 : 1)}%</span>`;
 const sevB = v => { const n = typeof v === "number" ? SEVN[v] : v; return `<span class="b ${{CRITICAL: "high", HIGH: "med", MEDIUM: "low"}[n] || ""}">${esc(n)}</span>`; };
@@ -730,6 +732,7 @@ function renderVulns(V) {
   table("vtop", [{h: "CVE", f: r => cveBtn(r.vid)},
     {h: "Severity", f: r => sevB(r.sev)}, {h: "KEV", f: r => r.kev ? '<span class="b red">exploited</span>' : ""},
     {h: "EPSS", f: r => epssB(r.epss, r.epss_pct), cls: "num"},
+    {h: "Public", f: r => pubB(r.exposed)},
     {h: "Boxes", k: "n_targets", cls: "num", num: 1}, {h: "Package", k: "pkgs", cls: "mono det"}, {h: "Fixed in", k: "fixed", cls: "mono"},
     {h: "Where", k: "targets", cls: "det mono", title: 1}, {h: "Title", k: "title", cls: "det", title: 1}], V.top, "Nothing known-exploited or fixable. 🎉");
   table("vjobs", [{h: "#", k: "id", cls: "num"}, {h: "Box", f: r => esc(r.name || r.target)},
@@ -752,7 +755,7 @@ document.addEventListener("click", async e => {
     $("#dr-body").innerHTML = `<p class="note" style="margin-top:0">Known-exploited and fixable first. Click a CVE for what it is and how to fix it.</p>
       <div class="tbl-tools"><input data-filter="vdet" placeholder="filter: CVE, package, severity…"><span class="n" id="vdet-n"></span></div><div class="wrap"><table id="vdet"></table></div>`;
     table("vdet", [{h: "CVE", f: x => cveBtn(x.vid)}, {h: "Severity", f: x => sevB(x.severity)}, {h: "KEV", f: x => x.kev ? '<span class="b red">exploited</span>' : ""},
-      {h: "EPSS", f: x => epssB(x.epss, x.epss_pct), cls: "num"},
+      {h: "EPSS", f: x => epssB(x.epss, x.epss_pct), cls: "num"}, {h: "Public", f: x => pubB(x.exposed)},
       {h: "Package", k: "pkg", cls: "mono"}, {h: "Installed", k: "installed", cls: "mono q"}, {h: "Fixed in", f: x => x.fixed ? `<span class="y mono">${esc(x.fixed)}</span>` : `<span class="q">${esc(x.status || "no fix")}</span>`},
       {h: "Image", k: "image", cls: "mono det"}, {h: "Title", k: "title", cls: "det", title: 1}], r.rows, "No CVEs recorded.");
     return;

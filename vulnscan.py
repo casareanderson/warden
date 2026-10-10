@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wlib import config, hosts, notify, osv  # noqa: E402
+from wlib import config, exposure, hosts, notify, osv  # noqa: E402
 from wlib.imgcollect import SOURCE as COLLECTOR  # noqa: E402
 
 DB = config.DB
@@ -51,7 +51,7 @@ PKG_FILES = ["var/lib/dpkg/status", "etc/os-release", "usr/lib/os-release", "lib
              "etc/alpine-release"]
 FACTS = ("n=$(apt list --upgradable 2>/dev/null | grep -c / ); r=0; [ -f /var/run/reboot-required ] && r=1; "
          "k=$(uname -r); nk=$(ls -1 /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | sort -V | tail -1); "
-         "echo \"$n $r $k ${nk:--}\"")
+         "echo \"$n $r $k ${nk:--} $(hostname -I 2>/dev/null)\"")
 KERNEL_PKG = __import__("re").compile(r"^linux-(libc-dev|headers|image|modules|tools|kbuild|source)")
 SEV_RANK = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "UNKNOWN": 0}
 
@@ -82,8 +82,14 @@ def db():
                      ("epss", "real"), ("epss_pct", "real")):  # 2026-10-10: exploit likelihood
         if col not in have:
             con.execute(f"alter table vulns add column {col} {typ}")
-    if "n_epss" not in {r[1] for r in con.execute("pragma table_info(vuln_targets)")}:
-        con.execute("alter table vuln_targets add column n_epss integer")
+    tcols = {r[1] for r in con.execute("pragma table_info(vuln_targets)")}
+    for col, typ in (("n_epss", "integer"), ("ips", "text"), ("n_public", "integer")):
+        if col not in tcols:
+            con.execute(f"alter table vuln_targets add column {col} {typ}")
+    if "exposed" not in {r[1] for r in con.execute("pragma table_info(vulns)")}:
+        con.execute("alter table vulns add column exposed text")       # public hostname(s) reaching it, or null
+    con.execute("""create table if not exists img_ports(target text, container text, image text, hostnet integer,
+                   published text, ips text, aliases text, listen text, primary key(target, container))""")
     return con
 
 
@@ -198,7 +204,8 @@ def scan_os(t, kev):
     f = (facts or "").split()
     extra = {"upgradable": int(f[0]) if f and f[0].isdigit() else None,
              "reboot_required": int(f[1]) if len(f) > 1 and f[1].isdigit() else None,
-             "kernel": f[2] if len(f) > 2 else None, "newest_kernel": f[3] if len(f) > 3 and f[3] != "-" else None}
+             "kernel": f[2] if len(f) > 2 else None, "newest_kernel": f[3] if len(f) > 3 and f[3] != "-" else None,
+             "ips": " ".join(x for x in f[4:] if x.count(".") == 3)}
     if t["kind"] == "node" and extra["kernel"] and extra["newest_kernel"] and extra["newest_kernel"] != extra["kernel"]:
         extra["reboot_required"] = 1          # Proxmox rarely writes reboot-required; a newer kernel on disk is the tell
     return label, rows, extra, len(entries)
@@ -251,6 +258,7 @@ def scan_images(t, kev):
     errs, rows, notes = [], [], []
     count = 0
     kernel = [0]
+    meta = {"containers": [], "hostips": []}
 
     def flush(files):
         # one image at a time: match it, keep only its rows, drop its files
@@ -273,6 +281,12 @@ def scan_images(t, kev):
             if m.name == "ERRORS":
                 errs += [l for l in data.decode().splitlines() if l]
                 continue
+            if m.name == "CONTAINERS":
+                meta["containers"] = json.loads(data or b"[]")
+                continue
+            if m.name == "HOSTIPS":
+                meta["hostips"] = data.decode().split()
+                continue
             n, _, rest = m.name.partition("/")
             if n != cur:
                 flush(files)
@@ -282,6 +296,7 @@ def scan_images(t, kev):
     del tarb
     if kernel[0]:
         notes.append(f"{kernel[0]} kernel packages skipped (containers run the host kernel)")
+    t["_meta"] = meta                              # ports/IPs for exposure.py
     return rows, errs + notes, count + len(errs)
 
 
@@ -318,13 +333,15 @@ def store(con, t, os_, rows, status, note, extra=None, pkgs=None):
     con.executemany("insert or replace into vulns(target,vid,pkg,installed,fixed,severity,title,kev,status,image,"
                     "descr,url) values(?,?,?,?,?,?,?,?,?,?,?,?)", [(t["target"],) + r for r in rows])
     fix = [r for r in rows if r[3]]
+    ips = extra.get("ips") or " ".join((t.get("_meta") or {}).get("hostips") or [])
     con.execute("""insert or replace into vuln_targets(target,kind,name,node,vmid,os,last_scan,status,note,pkgs,
-                   upgradable,reboot_required,kernel,newest_kernel,patchable,n_total,n_fixable,n_crit_fix,n_high_fix,n_kev)
-                   values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   upgradable,reboot_required,kernel,newest_kernel,patchable,n_total,n_fixable,n_crit_fix,n_high_fix,n_kev,
+                   ips)
+                   values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (t["target"], t["kind"], t["name"], t["node"], t["vmid"], os_, now(), status, note, pkgs,
                  extra.get("upgradable"), extra.get("reboot_required"), extra.get("kernel"), extra.get("newest_kernel"),
                  t["patchable"], len(rows), len(fix), sum(1 for r in fix if r[4] == "CRITICAL"),
-                 sum(1 for r in fix if r[4] == "HIGH"), sum(1 for r in rows if r[6])))
+                 sum(1 for r in fix if r[4] == "HIGH"), sum(1 for r in rows if r[6]), ips))
     con.commit()
 
 
@@ -358,6 +375,12 @@ def _scan_one(con, t, kev):
             store(con, t, os_, rows, "ok", note, extra, pkgs)
         elif t["kind"] == "images":
             rows, errs, n = scan_images(t, kev)
+            m = t.get("_meta") or {}
+            con.execute("delete from img_ports where target=?", (t["target"],))
+            con.executemany("insert or replace into img_ports values(?,?,?,?,?,?,?,?)",
+                            [(t["target"], c["name"], c["image"], int(c["hostnet"]), json.dumps(c["published"]),
+                              json.dumps(c["ips"]), json.dumps(c["aliases"]), json.dumps(c["listen"]))
+                             for c in m.get("containers") or []])
             done = n - sum(1 for e in errs if "not readable" in e)
             real = [e for e in errs if "kernel packages skipped" not in e and "pre-1.18" not in e]
             store(con, t, f"{done}/{n} running images", rows, "ok" if not real else "partial", "; ".join(errs)[:400])
@@ -448,6 +471,10 @@ def main():
                 con.execute("delete from vuln_targets where target=?", (tgt,))
         con.commit()
     log(f"EPSS: scored {epss_refresh(con)} CVEs")
+    try:
+        log("exposure: " + exposure.refresh(con))
+    except Exception as e:  # noqa: BLE001 — exposure is extra context; never fail the scan over it
+        log(f"exposure: skipped ({type(e).__name__}: {str(e)[:160]})")
     if switched and not first_run and not a:
         after = con.execute("select count(distinct target||vid) from vulns where kev=1 or "
                             "(severity='CRITICAL' and fixed!='')").fetchone()[0]
