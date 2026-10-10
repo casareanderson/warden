@@ -82,3 +82,17 @@ scoring, timestamp handling, dedup, /24 roll-up and edge-ban logic are general.
 - **Cloudflare rejects path traversal at the protocol layer**, with a 400,
   before custom rules run. A `../` clause in a WAF rule is dead code. Harmless,
   but do not count it as coverage.
+
+## Threat-list blocking (planned) — rules decided before it is built
+
+A reader pointed out (2026-10-10) that feeds which mark whole cloud ASNs as "proxy" cause collateral damage when turned
+into bans: CI and monitoring egress share those ranges. warden does not ban from threat lists today (feeds only alert
+about your own devices; edge bans come from behaviour against your own site, approved by you). When list-based blocking
+is added it will follow these rules:
+
+- **Never on one source.** A datacenter / proxy / hosting mark needs at least two independent, specialised sources.
+  A single-source datacenter mark is treated as noise.
+- **Challenge, not block,** for datacenter ranges, so legitimate automated traffic can still pass.
+- **A service-egress allowlist** (published ranges such as GitHub's meta API for Actions and webhooks, your uptime
+  checkers, ACME validation) is never banned. This also applies to today's edge-ban proposals.
+- **No range wider than a /24,** never a whole ASN or cloud provider.
