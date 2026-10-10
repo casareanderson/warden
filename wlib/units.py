@@ -52,6 +52,8 @@ UNITS = {
                                ["netintel.py"], ("every", "10min", "5min"), []),
     "warden-devices":         ("lan", "warden — one inventory of every device (sweep + router leases + Home Assistant)",
                                ["devices.py"], ("every", "15min", "6min"), []),
+    "warden-netwatch":        ("router", "warden — internet health every minute (router, internet, DNS, web, line usage)",
+                               ["netwatch.py"], ("every", "1min", "2min"), ["TimeoutStartSec=55"]),
     "warden-devicewatch":     ("router", "warden — score fixed-function devices doing something new; ask the owner on odd ones",
                                ["devicewatch.py"], ("every", "10min", "9min"), ["TimeoutStartSec=1200"]),
 }
