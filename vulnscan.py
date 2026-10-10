@@ -5,47 +5,44 @@
   vulnscan.py <target>     scan one target (e.g. ct:101, node:10.0.0.2, img:nas) — used after a patch
   vulnscan.py --list       show targets + last results
 
-HOW (nothing is installed on the scanned boxes):
+HOW (nothing is installed on the scanned boxes, and there is no scanner binary at all):
   Debian/Ubuntu/Alpine boxes — copy ONLY the package DB + OS-identity files (dpkg status, os-release,
-  lsb-release, debian_version, apk db) into a temp tree on the warden box and run `trivy rootfs` on it.
-  Verified 2026-10-07: identical to scanning the box's real / (4,592 = 4,592 findings, 0 differences).
-  Docker images — the verified trivy binary is copied to the docker host's /tmp and run in CLIENT mode
-  against a `trivy-server` (warden.yml `vuln.server`, token in `vuln.token_file`), only for images of
-  RUNNING containers.
+  apk db), parse them here and ask OSV.dev which advisories affect those exact versions (wlib/osv.py).
+  Docker images — a small Python collector (wlib/imgcollect.py) is fed to `python3 -` on the docker host.
+  It reads each running container's root through /proc and sends back only package metadata: OS packages,
+  Python and npm packages, and Go build info. Only images of RUNNING containers are scanned.
   Vendor-firmware hosts (`firmware:` on a host, e.g. zimaos) — no package DB; tracked as a firmware version
   vs the vendor's latest release.
 
 Targets come from wlib.hosts (warden.yml `hosts:`), so a new box is a config edit.
 
-Trivy: v0.74.0, checksum + Sigstore-verified (Aqua's release workflow @ tag) because v0.69.4 and the
-v0.69.5/6 Docker images were malicious (CVE-2026-33634). Never `docker pull aquasec/trivy`.
+Until 2026-10-10 this used trivy. Its v0.69.4 release and v0.69.5/6 images were malicious (CVE-2026-33634), and
+it needed a 161 MB binary, a 1.4 GB DB and a LAN server. OSV.dev is fed directly by Debian, Ubuntu, Alpine,
+GitHub, PyPA and the Go team (see wlib/osv.py).
 Priority = CISA KEV (known exploited) > CRITICAL with fix > HIGH with fix. Raw counts are mostly
 "affected, no fix yet" upstream noise (one box: 4,592 CVEs, 0 fixable) — the UI leads with fixable/KEV.
 """
 import io
 import json
 import os
-import shutil
 import sqlite3
 import sys
 import tarfile
-import tempfile
 import time
 from datetime import datetime, timezone
 
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wlib import config, hosts, notify  # noqa: E402
+from wlib import config, hosts, notify, osv  # noqa: E402
+from wlib.imgcollect import SOURCE as COLLECTOR  # noqa: E402
 
 DB = config.DB
-TRIVY = config.get("vuln.trivy")
-CACHE = config.get("vuln.cache")
 KEV_FILE = str(config.DATA / "kev.json")
 KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 SSH = hosts.SSH
-PKG_FILES = ["var/lib/dpkg/status", "etc/os-release", "usr/lib/os-release", "etc/lsb-release",
-             "etc/debian_version", "lib/apk/db/installed", "etc/alpine-release"]
+PKG_FILES = ["var/lib/dpkg/status", "etc/os-release", "usr/lib/os-release", "lib/apk/db/installed",
+             "etc/alpine-release"]
 FACTS = ("n=$(apt list --upgradable 2>/dev/null | grep -c / ); r=0; [ -f /var/run/reboot-required ] && r=1; "
          "k=$(uname -r); nk=$(ls -1 /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | sort -V | tail -1); "
          "echo \"$n $r $k ${nk:--}\"")
@@ -117,27 +114,43 @@ def sh_quote(s):
     return "'" + s.replace("'", "'\"'\"'") + "'"
 
 
-def trivy_json(path_or_args, timeout=600):
-    rc, so, se = run([TRIVY] + path_or_args + ["--quiet", "--scanners", "vuln", "--format", "json",
-                                                "--cache-dir", CACHE, "--skip-db-update"], timeout=timeout)
-    if rc != 0:
-        raise RuntimeError((se or "trivy failed").strip().splitlines()[-1][:200])
-    return json.loads(so)
+_OSV = None
 
 
-def scan_os(t):
+def osv_client():
+    global _OSV
+    if _OSV is None:
+        _OSV = osv.OSV(DB)
+    return _OSV
+
+
+def os_identity(files):
+    """files: {relpath: text} → (ecosystem, label, [(src, srcver, bin, binver)])."""
+    osr = osv.kv(files.get("etc/os-release") or files.get("usr/lib/os-release") or "")
+    eco, label = osv.ecosystem(osr, (files.get("etc/alpine-release") or "").strip())
+    if files.get("lib/apk/db/installed"):
+        entries = osv.parse_apk(files["lib/apk/db/installed"])
+    else:
+        entries = osv.parse_dpkg(files.get("var/lib/dpkg/status") or "")
+    return eco, label, entries
+
+
+def scan_os(t, kev):
     rc, tarb, se = remote(t, "tar czhf - --ignore-failed-read -C / " + " ".join(PKG_FILES) + " 2>/dev/null; true",
                           binary=True, timeout=120)
     if not tarb:
         raise RuntimeError(f"could not read package DB ({(se or b'')[-120:]!r})")
-    tmp = tempfile.mkdtemp(prefix="vs-")
-    try:
-        with tarfile.open(fileobj=io.BytesIO(tarb)) as tf:
-            tf.extractall(tmp, filter="data")
-        derived = normalise_derivative(tmp)
-        d = trivy_json(["rootfs", "--pkg-types", "os", tmp])
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    files = {}
+    with tarfile.open(fileobj=io.BytesIO(tarb)) as tf:
+        for m in tf.getmembers():
+            if m.isfile():
+                files[m.name.lstrip("./")] = tf.extractfile(m).read().decode("utf-8", "replace")
+    eco, label, entries = os_identity(files)
+    if not entries:
+        raise RuntimeError("OS not identified (no dpkg/apk DB?)")
+    if not eco:
+        raise RuntimeError(f"{label}: OSV has no advisory feed for this OS")
+    rows = osv.match(osv_client(), osv.os_packages(eco, entries), kev)
     rc, facts, _ = remote(t, FACTS, timeout=120)
     f = (facts or "").split()
     extra = {"upgradable": int(f[0]) if f and f[0].isdigit() else None,
@@ -145,73 +158,71 @@ def scan_os(t):
              "kernel": f[2] if len(f) > 2 else None, "newest_kernel": f[3] if len(f) > 3 and f[3] != "-" else None}
     if t["kind"] == "node" and extra["kernel"] and extra["newest_kernel"] and extra["newest_kernel"] != extra["kernel"]:
         extra["reboot_required"] = 1          # Proxmox rarely writes reboot-required; a newer kernel on disk is the tell
-    os_ = d.get("Metadata", {}).get("OS") or {}
-    if not os_.get("Family") or os_.get("Family") == "none":
-        raise RuntimeError("OS not identified (no dpkg/apk DB?)")
-    pkgs = sum(len(r.get("Packages") or []) for r in d.get("Results", [])) or None
-    label = f"{os_.get('Family')} {os_.get('Name')}"
-    return (f"{derived} (scanned as {label})" if derived else label), d, extra, pkgs
+    return label, rows, extra, len(entries)
 
 
-def normalise_derivative(root):
-    """Ubuntu derivatives (Pop!_OS etc.) call themselves ID=pop / DISTRIB_ID=Pop, which trivy does not know;
-    it then falls back to debian_version ('bookworm/sid') and matches NOTHING — a false clean bill of health
-    (a Pop!_OS box read 0 CVEs on 2026-10-07). Rewrite the identity to the Ubuntu base the packages come from."""
-    def kv(path):
-        try:
-            return dict(l.strip().split("=", 1) for l in open(path) if "=" in l)
-        except OSError:
-            return {}
-    osr = kv(os.path.join(root, "etc/os-release")) or kv(os.path.join(root, "usr/lib/os-release"))
-    ident = osr.get("ID", "").strip('"')
-    like = osr.get("ID_LIKE", "").strip('"').split()
-    ver = osr.get("VERSION_ID", "").strip('"')
-    if ident in ("ubuntu", "debian", "alpine", "") or "ubuntu" not in like or not ver:
-        return None
-    code = osr.get("UBUNTU_CODENAME", osr.get("VERSION_CODENAME", "")).strip('"')
-    for rel in ("etc/os-release", "usr/lib/os-release"):
-        p = os.path.join(root, rel)
-        if os.path.exists(p):
-            os.remove(p)
-    open(os.path.join(root, "etc/os-release"), "w").write(f'ID=ubuntu\nVERSION_ID="{ver}"\nVERSION_CODENAME={code}\n')
-    open(os.path.join(root, "etc/lsb-release"), "w").write(f"DISTRIB_ID=Ubuntu\nDISTRIB_RELEASE={ver}\nDISTRIB_CODENAME={code}\n")
-    dv = os.path.join(root, "etc/debian_version")
-    if os.path.exists(dv):
-        os.remove(dv)
-    return f"{ident} {ver}"
+def image_packages(files):
+    """One image's collected files → (match() input, label, unread_go)."""
+    osf = {k[3:]: v for k, v in files.items() if k.startswith("os/")}
+    named = {"etc_os-release": "etc/os-release", "usr_lib_os-release": "usr/lib/os-release",
+             "etc_alpine-release": "etc/alpine-release", "var_lib_dpkg_status": "var/lib/dpkg/status",
+             "lib_apk_db_installed": "lib/apk/db/installed"}
+    text = {named[k]: v.decode("utf-8", "replace") for k, v in osf.items() if k in named}
+    statusd = [v.decode("utf-8", "replace") for k, v in osf.items() if k.startswith("statusd_")]
+    if statusd and not text.get("var/lib/dpkg/status"):
+        text["var/lib/dpkg/status"] = "\n\n".join(statusd)
+    eco, label, entries = os_identity(text)
+    pkgs = osv.os_packages(eco, entries) if eco else []
+    unread = 0
+    for k, v in files.items():
+        kind = k.split("/", 1)[0]
+        body = v.split(b"\n", 1)[1] if b"\n" in v else b""
+        if kind == "py":
+            r = osv.parse_pymeta(body.decode("utf-8", "replace"))
+            if r:
+                pkgs.append(("PyPI", r[0], r[1], r[0], r[1]))
+        elif kind == "npm":
+            r = osv.parse_npm(body.decode("utf-8", "replace"))
+            if r:
+                pkgs.append(("npm", r[0], r[1], r[0], r[1]))
+        elif kind == "go":
+            gover, deps = osv.parse_gobuild(body)
+            if not gover:
+                unread += 1
+                continue
+            gv = gover.split()[0].removeprefix("go")
+            pkgs.append(("Go", "stdlib", gv, "stdlib", gv))
+            pkgs += [("Go", m, ver, m, ver) for m, ver in deps]
+        elif kind == "rust":
+            pkgs += [("crates.io", c, ver, c, ver) for c, ver in osv.parse_rustdeps(body)]
+    if not entries and not eco:
+        label = "no OS packages"
+    return sorted(set(pkgs)), label, unread
 
 
-TRIVY_REMOTE = "/tmp/warden-trivy"
-
-
-def scan_images(t):
-    tok = open(config.get("vuln.token_file")).read().strip()
-    want = run([TRIVY, "--version"])[1].split()[1]
-
-    def rsh(cmd, timeout=900, stdin=None):
-        return hosts.remote(t, cmd, timeout=timeout, stdin=stdin)
-    rc, so, _ = rsh(f"{TRIVY_REMOTE} --version 2>/dev/null | head -1")
-    if want not in (so or ""):
-        ok, err = hosts.push(t, TRIVY, TRIVY_REMOTE)
-        if not ok:
-            raise RuntimeError(f"copy trivy to {t['name']}: {err[:120]}")
-    rc, so, se = rsh("docker ps --format '{{.Image}}' | sort -u")
-    if rc != 0:
-        raise RuntimeError(f"docker ps: {se.strip()[:120]}")
-    images = [i for i in so.split() if i]
-    results, errs = [], []
-    server = config.get("vuln.server")
-    for img in images:
-        # token goes in on stdin, never argv: an argv token is readable by any user via ps on the target
-        cmd = (f"chmod 755 {TRIVY_REMOTE}; IFS= read -r TRIVY_TOKEN; export TRIVY_TOKEN; exec {TRIVY_REMOTE} image "
-               f"--server {server} --token-header Trivy-Token --scanners vuln --quiet --format json --timeout 10m "
-               f"{sh_quote(img)}")
-        rc, so, se = rsh(cmd, timeout=900, stdin=tok + "\n")
-        if rc != 0 or not so.strip().startswith("{"):
-            errs.append(f"{img}: {(se or 'no output').strip().splitlines()[-1][:80] if (se or '').strip() else 'failed'}")
-            continue
-        results.append((img, json.loads(so)))
-    return results, errs, len(images)
+def scan_images(t, kev):
+    rc, tarb, se = hosts.remote(t, "python3 -", timeout=1800, binary=True, root=True, stdin=COLLECTOR.encode())
+    if not tarb:
+        raise RuntimeError(f"collector: {(se or b'').decode('utf-8', 'replace').strip()[-160:] or 'no output'}")
+    images, errs = {}, []
+    with tarfile.open(fileobj=io.BytesIO(tarb), mode="r:gz") as tf:
+        for m in tf.getmembers():
+            if not m.isfile():
+                continue
+            data = tf.extractfile(m).read()
+            if m.name == "ERRORS":
+                errs += [l for l in data.decode().splitlines() if l]
+                continue
+            n, _, rest = m.name.partition("/")
+            images.setdefault(n, {})[rest] = data
+    rows, notes = [], []
+    for n, files in sorted(images.items(), key=lambda x: int(x[0])):
+        img = files.pop("IMAGE", b"?").decode()
+        pkgs, label, unread = image_packages(files)
+        rows += osv.match(osv_client(), pkgs, kev, image=img)
+        if unread:
+            notes.append(f"{img}: {unread} pre-1.18 Go binaries not read")
+    return rows, errs + notes, len(images) + len([e for e in errs])
 
 
 # Vendor firmware with no package DB: how to read the running version, and where the vendor publishes releases.
@@ -241,17 +252,6 @@ def firmware(t):
 
 
 # ── store ────────────────────────────────────────────────────────────────────
-def rows_from(d, kev, image=""):
-    out = {}
-    for r in d.get("Results", []):
-        for v in r.get("Vulnerabilities") or []:
-            key = (v["VulnerabilityID"], v["PkgName"], image)
-            out[key] = (v["VulnerabilityID"], v["PkgName"], v.get("InstalledVersion", ""), v.get("FixedVersion", ""),
-                        v.get("Severity", "UNKNOWN"), (v.get("Title") or "")[:200], int(v["VulnerabilityID"] in kev),
-                        v.get("Status", ""), image, (v.get("Description") or "")[:1200], v.get("PrimaryURL") or "")
-    return list(out.values())
-
-
 def store(con, t, os_, rows, status, note, extra=None, pkgs=None):
     extra = extra or {}
     con.execute("delete from vulns where target=?", (t["target"],))
@@ -271,8 +271,8 @@ def store(con, t, os_, rows, status, note, extra=None, pkgs=None):
 def scan_one(con, t, kev):
     try:
         if t["kind"] in ("node", "ct"):
-            os_, d, extra, pkgs = scan_os(t)
-            rows, note = rows_from(d, kev), ""
+            os_, rows, extra, pkgs = scan_os(t, kev)
+            note = ""
             if t["kind"] == "ct":
                 # An LXC container runs the HOST's kernel: kernel CVEs matched against linux-libc-dev / headers
                 # inside it are not exploitable there (one CT showed 2 'KEV' this way on 2026-10-07).
@@ -285,9 +285,16 @@ def scan_one(con, t, kev):
                         "blind spot here; keep the node on the latest pve kernel and reboot into it")
             store(con, t, os_, rows, "ok", note, extra, pkgs)
         elif t["kind"] == "images":
-            res, errs, n = scan_images(t)
-            rows = [r for img, d in res for r in rows_from(d, kev, img)]
-            store(con, t, f"{len(res)}/{n} running images", rows, "ok" if not errs else "partial", "; ".join(errs)[:400])
+            rows, errs, n = scan_images(t, kev)
+            # a container runs the host's kernel too: linux-libc-dev/headers CVEs inside an image are not reachable
+            # (462 of 600 "critical with a fix" on CT104 were these, 2026-10-10)
+            k = sum(1 for r in rows if KERNEL_PKG.match(r[1]))
+            rows = [r for r in rows if not KERNEL_PKG.match(r[1])]
+            if k:
+                errs = errs + [f"{k} kernel-package CVEs ignored (containers run the host kernel)"]
+            done = n - sum(1 for e in errs if "not readable" in e)
+            real = [e for e in errs if "kernel-package" not in e]
+            store(con, t, f"{done}/{n} running images", rows, "ok" if not real else "partial", "; ".join(errs)[:400])
         elif t["kind"] == "firmware":
             label, cur, latest, note = firmware(t)
             if cur is None and latest is None and note.startswith("no firmware check"):
@@ -309,8 +316,8 @@ def scan_one(con, t, kev):
                 store(con, t, "", [], "blind",
                       f"no non-interactive SSH access from warden ({err or 'key not accepted'}) — not scanned")
                 return "blind"
-            os_, d, extra, pkgs = scan_os(t)
-            store(con, t, os_, rows_from(d, kev), "ok", "", extra, pkgs)
+            os_, rows, extra, pkgs = scan_os(t, kev)
+            store(con, t, os_, rows, "ok", "", extra, pkgs)
         return "ok"
     except Exception as e:  # noqa: BLE001 — one dead box must not stop the estate scan
         prev = con.execute("select os from vuln_targets where target=?", (t["target"],)).fetchone()
@@ -350,13 +357,13 @@ def main():
                              "from vuln_targets order by target"):
             print(" | ".join("" if x is None else str(x) for x in r))
         return 0
-    rc, _, se = run([TRIVY, "image", "--download-db-only", "--cache-dir", CACHE, "--quiet"], timeout=900)
-    if rc != 0:
-        log(f"DB update failed: {se.strip()[-200:]} — scanning with the cached DB")
     kev = kev_set()
     before = {(r[0], r[1]) for r in con.execute(
         "select target, vid from vulns where kev=1 or (severity='CRITICAL' and fixed!='')")}
     first_run = con.execute("select count(*) from vuln_targets").fetchone()[0] == 0
+    # the first scan after the trivy → OSV switch finds fresher fixes; one summary, not dozens of "new" alerts
+    switched = con.execute("select count(*) from sqlite_master where name='osv_vulns'").fetchone()[0] == 0 or \
+        con.execute("select count(*) from osv_vulns").fetchone()[0] == 0
     ts = targets()
     if a:
         ts = [t for t in ts if t["target"] == a[0]]
@@ -374,7 +381,13 @@ def main():
                 con.execute("delete from vulns where target=?", (tgt,))
                 con.execute("delete from vuln_targets where target=?", (tgt,))
         con.commit()
-    if not first_run and not a:
+    if switched and not first_run and not a:
+        after = con.execute("select count(distinct target||vid) from vulns where kev=1 or "
+                            "(severity='CRITICAL' and fixed!='')").fetchone()[0]
+        notify.send(f"🩹 warden now matches vulnerabilities against OSV.dev instead of trivy. Must-fix (known-exploited "
+                    f"or critical with a fix): {len(before)} before → {after} now. Most of the change is fixes newer "
+                    "than trivy's database knew; open warden → Vulnerabilities for the list.")
+    elif not first_run and not a:
         alert_new(con, before)
     return 0
 

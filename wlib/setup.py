@@ -9,6 +9,8 @@ import shutil
 import sqlite3
 import time
 
+import requests
+
 from . import config, hosts, secrets
 
 
@@ -90,9 +92,13 @@ def checks(probe_hosts=False):
                 add(f"reach:{t['target']}", f"Reach {t['name']}", ok, t["target"] + (f" — {err}" if err else ""),
                     "check SSH keys: ssh-copy-id " + (t.get("ssh") or ""))
 
-    trivy = config.get("vuln.trivy")
-    add("trivy", "Vulnerability scanner (trivy)", bool(trivy and os.path.exists(trivy)), trivy or "",
-        "install a checksum-verified trivy release (never the 0.69.4–0.69.6 builds)", optional=True)
+    try:
+        osv_ok = requests.post("https://api.osv.dev/v1/query", timeout=10,
+                               json={"package": {"ecosystem": "PyPI", "name": "jinja2"}, "version": "2.4.1"}).ok
+    except Exception:  # noqa: BLE001
+        osv_ok = False
+    add("osv", "Vulnerability advisories (api.osv.dev reachable)", osv_ok, "https://api.osv.dev",
+        "allow outbound HTTPS to api.osv.dev and secdb.alpinelinux.org", optional=True)
     add("nmap", "LAN scanner (nmap)", bool(shutil.which("nmap")), "", "apt install nmap", optional=True)
     add("geo", "IP geolocation database", (config.DATA / "geo.db").exists(), "", "runs on first `geo.py` timer", optional=True)
 

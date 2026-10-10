@@ -106,7 +106,8 @@ def targets(discover=True):
                         "root_via": h.get("root_via"), "os_scan": h.get("os_scan", True)})
             if h.get("docker"):
                 out.append({"target": f"img:{name}", "kind": "images", "name": f"{name} Docker images",
-                            "node": None, "ssh": ssh, "vmid": None, "patchable": 0, "local": kind == "local"})
+                            "node": None, "ssh": ssh, "vmid": None, "patchable": 0, "local": kind == "local",
+                            "root_via": h.get("root_via"), "sudo_secret": h.get("sudo_secret")})
         if h.get("firmware"):
             out.append({"target": f"fw:{name}", "kind": "firmware", "name": f"{name} ({h['firmware']})", "node": None,
                         "ssh": ssh, "vmid": None, "patchable": 0, "firmware": h["firmware"]})
@@ -161,7 +162,7 @@ def remote(t, cmd, timeout=300, binary=False, root=False, stdin=None):
 
 
 def push(t, local_path, remote_path, mode="755"):
-    """Copy one file onto a target (used to ship the verified trivy binary). Returns (ok, error)."""
+    """Copy one file onto a target. Returns (ok, error)."""
     if t["kind"] == "local" or t.get("local") or not t.get("ssh"):
         shutil.copy(local_path, remote_path)
         return True, ""
