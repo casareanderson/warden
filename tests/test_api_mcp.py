@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 def env(tmp_path, monkeypatch):
     monkeypatch.setenv("WARDEN_DATA", str(tmp_path))
     monkeypatch.setenv("WARDEN_CONF", str(tmp_path / "warden.yml"))
-    (tmp_path / "warden.yml").write_text("estate: {name: test}\nnotify: {backend: none}\n")
+    (tmp_path / "warden.yml").write_text("estate: {name: test}\nnotify: {backend: none}\nui: {auth: proxy}\n")
     con = sqlite3.connect(tmp_path / "warden.db")
     con.executescript("""
       create table events(id integer primary key, ts text, source text, ip text, kind text, detail text, score int);
@@ -196,7 +196,7 @@ def test_geo_switch_validates_and_records(env, tmp_path):
     import wlib.config as c
     h = {"X-Warden": "geo"}
     assert call(env["url"] + "/api/geo", {"enabled": True, "block": ["RU"]}, headers=h)[1]["ok"] is False   # no zone
-    (tmp_path / "warden.yml").write_text("estate: {name: test}\nnotify: {backend: none}\ncloudflare: {zone_id: z1}\n")
+    (tmp_path / "warden.yml").write_text("estate: {name: test}\nnotify: {backend: none}\nui: {auth: proxy}\ncloudflare: {zone_id: z1}\n")
     c.cfg(reload=True)
     assert call(env["url"] + "/api/geo", {"enabled": True, "block": ["RUS"]}, headers=h)[0] == 400
     assert call(env["url"] + "/api/geo", {"enabled": True, "block": "RU"}, headers=h)[0] == 400
@@ -258,7 +258,7 @@ def test_review_20261009_integrity_never_autoaccepts_persistence():
 
 def test_own_ip_left_out_of_counts(env, tmp_path):
     # 10-10: our WAN IP (Uptime Kuma 404s) was 97% of a day's detections and pushed real rows off the lists
-    (tmp_path / "warden.yml").write_text("estate: {name: test}\nnotify: {backend: none}\nallow: [192.0.2.7]\n")
+    (tmp_path / "warden.yml").write_text("estate: {name: test}\nnotify: {backend: none}\nui: {auth: proxy}\nallow: [192.0.2.7]\n")
     con = sqlite3.connect(tmp_path / "warden.db")
     con.executemany("insert into events(ts,source,ip,kind,detail,score) values (datetime('now','-10 minutes'),"
                     "'proxy','192.0.2.7','4xx','/',1)", [()] * 150)

@@ -101,9 +101,18 @@ router:
 
 # ── console, REST API and MCP ───────────────────────────────────────────────
 ui:
-  host: 127.0.0.1                   # put a reverse proxy with auth in front …
+  host: 127.0.0.1                   # keep it on localhost and put HTTPS (a reverse proxy) in front
   port: 8792
-  basic_user: ""                    # … or set this + the WARDEN_UI_PASSWORD secret
+  auth: local                       # local = warden's own sign-in (users, roles, 2FA) — make the first admin with
+                                    #   warden-setup user add NAME --role admin
+                                    # proxy = your reverse proxy / SSO signs people in (Authelia, Authentik…)
+                                    # basic = the old single shared password (basic_user + WARDEN_UI_PASSWORD secret)
+  session_hours: 12                 # a sign-in lasts at most this long …
+  idle_minutes: 120                 # … and ends sooner if the console sits unused
+  cookie_secure: auto               # auto = Secure cookie when the proxy says X-Forwarded-Proto: https
+  real_ip_header: ""                # e.g. CF-Connecting-IP behind Cloudflare; default = last X-Forwarded-For hop
+  trust_proxy_user_header: Remote-User   # auth: proxy only
+  basic_user: ""                    # auth: basic only
 api:
   enabled: true
   public_url: ""                    # how agents reach warden, e.g. https://warden.example.com

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Sign in · warden</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2.5 4.5 6.8v8.4c0 6.9 4.8 12.4 11.5 14.3 6.7-1.9 11.5-7.4 11.5-14.3V6.8Z' fill='%230f1a28' stroke='%2358a6ff' stroke-width='2.4'/%3E%3Ccircle cx='16' cy='16.4' r='4' fill='%2339c5cf'/%3E%3C/svg%3E">
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--text:#e6edf3;--mute:#8b949e;--blue:#58a6ff;--cyan:#39c5cf;--red:#f85149;--amber:#d29922;--field:#0d1117}
+@media (prefers-color-scheme: light){:root{--bg:#f6f8fa;--panel:#ffffff;--line:#d0d7de;--text:#1f2328;--mute:#59636e;--blue:#0969da;--cyan:#1b7c83;--red:#cf222e;--amber:#9a6700;--field:#ffffff}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px}
+.card{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px 26px 24px}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.brand svg{width:40px;height:40px;flex:none}
+.brand b{font-size:20px;letter-spacing:.2px;display:block}
+.brand small{color:var(--mute);font-size:12.5px}
+label{display:block;font-size:13px;color:var(--mute);margin:14px 0 6px}
+input{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--field);color:var(--text);font:inherit}
+input:focus{outline:2px solid var(--blue);outline-offset:0;border-color:transparent}
+button{width:100%;margin-top:20px;padding:11px;border:0;border-radius:8px;background:var(--blue);color:#fff;font:600 15px system-ui,sans-serif;cursor:pointer}
+button[disabled]{opacity:.6;cursor:default}
+.msg{min-height:22px;margin-top:12px;font-size:13.5px;color:var(--red)}
+.note{color:var(--mute);font-size:13px;margin-top:18px;border-top:1px solid var(--line);padding-top:14px}
+code{background:var(--field);border:1px solid var(--line);border-radius:6px;padding:2px 6px;font-size:12.5px;white-space:nowrap}
+pre{background:var(--field);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px;white-space:pre-wrap;word-break:break-all}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="wg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#58a6ff"/><stop offset="1" stop-color="#39c5cf"/></linearGradient></defs>
+      <path d="M16 2.5 4.5 6.8v8.4c0 6.9 4.8 12.4 11.5 14.3 6.7-1.9 11.5-7.4 11.5-14.3V6.8L16 2.5Z" fill="#0f1a28" stroke="url(#wg)" stroke-width="1.8" stroke-linejoin="round"/>
+      <circle cx="16" cy="16.4" r="3" fill="url(#wg)"/></svg>
+    <div><b>warden</b><small>homelab security hub</small></div>
+  </div>
+
+  <form id="f" hidden autocomplete="on">
+    <label for="u">Username</label>
+    <input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="64">
+    <label for="p">Password</label>
+    <input id="p" name="password" type="password" autocomplete="current-password" required maxlength="256">
+    <div id="codebox" hidden>
+      <label for="c">6-digit code from your authenticator app</label>
+      <input id="c" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7">
+    </div>
+    <button id="go" type="submit">Sign in</button>
+    <div class="msg" id="msg" role="alert" aria-live="polite"></div>
+  </form>
+
+  <div id="first" hidden>
+    <p><b>No accounts yet.</b> For safety there's no sign-up page: make the first admin on the machine warden runs on.</p>
+    <pre>./warden-setup user add YOUR-NAME --role admin</pre>
+    <p class="note" style="border:0;padding:0">It prints a one-time password. Sign in with it here and you'll be asked to pick your own.</p>
+  </div>
+
+  <div class="note" id="foot">Signed-in sessions end after a while idle. Lost your 2FA device? An admin can reset it, or run <code>warden-setup user reset-2fa NAME</code>.</div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+(async () => {
+  let st = {mode: "local", users: true};
+  try { st = await (await fetch("auth/status", {cache: "no-store"})).json(); } catch {}
+  if (st.mode !== "local") { location.replace("./"); return; }
+  if (!st.users) { $("#first").hidden = false; $("#foot").hidden = true; return; }
+  $("#f").hidden = false; $("#u").focus();
+})();
+$("#f").addEventListener("submit", async e => {
+  e.preventDefault();
+  const go = $("#go"); go.disabled = true; $("#msg").textContent = "";
+  try {
+    const r = await fetch("auth/login", {method: "POST", headers: {"Content-Type": "application/json", "X-Warden": "login"},
+      body: JSON.stringify({username: $("#u").value.trim(), password: $("#p").value, code: $("#c").value.replace(/\s/g, "")})});
+    const j = await r.json();
+    if (j.ok) { location.replace(j.must_change ? "./#account" : "./"); return; }
+    if (j.need_code) { $("#codebox").hidden = false; $("#c").focus(); $("#msg").textContent = ""; }
+    else { $("#msg").textContent = j.error || "Couldn't sign in."; $("#p").select(); }
+  } catch { $("#msg").textContent = "Couldn't reach warden."; }
+  go.disabled = false;
+});
+</script>
+</body>
+</html>

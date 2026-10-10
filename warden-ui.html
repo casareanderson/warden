@@ -147,6 +147,8 @@ td:has(> .btn){white-space:nowrap;text-align:right}
 .linkbtn{background:none;border:0;padding:0;color:var(--acc);font:inherit;cursor:pointer;text-align:left}
 .linkbtn:hover{text-decoration:underline}
 .row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+table select,#nu-role{background:var(--panel);color:var(--fg);border:1px solid var(--line2);border-radius:6px;padding:3px 6px;font:inherit;font-size:12.5px}
+#users-wrap{margin-top:22px}
 .row input,.row select,.fld input,.fld select,#ov-editor input[type=text]{flex:1;min-width:140px;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;color:var(--fg);padding:5px 9px;font:inherit;font-size:var(--fs-sm)}
 .fld{display:grid;grid-template-columns:minmax(150px,220px) 1fr auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #1a2029}
 .fld label{color:var(--dim);font:12px var(--mono)}
@@ -239,6 +241,7 @@ html[data-density=compact] nav button{padding:7px 10px}
     <span class="updated" id="updated"></span>
     <button class="btn ghost sm" id="navpos" title="Tabs on the left or along the top">Tabs on top</button>
     <button class="btn ghost sm" id="density" title="Switch between comfortable and compact layout">Compact view</button>
+    <button class="btn ghost sm" id="me-chip" title="Your account" hidden></button>
   </div>
 </header>
 <nav id="nav"></nav>
@@ -397,6 +400,34 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="note">Whatever sits in front must pass <code>/mcp</code> and <code>/api/v1</code> straight through (no login page) — the bearer token is the auth there. Everything else can sit behind your SSO.</div>
 </section>
 
+<section class="tab" id="t-account">
+  <div class="banner warn" id="must-change" hidden style="margin-bottom:16px"><b>Pick your own password first.</b> You signed in with a one-time password; the rest of warden opens once you've changed it.</div>
+  <div class="grid g3">
+    <div class="card"><h3>You</h3><dl class="kv" id="me-kv"></dl>
+      <div class="row" style="margin-top:12px"><button class="btn ghost" id="sign-out">Sign out</button></div></div>
+    <div class="card" id="pw-card"><h3>Password</h3>
+      <form id="pw-form" autocomplete="on">
+        <input type="text" name="username" autocomplete="username" id="pw-user" hidden>
+        <div class="row"><input type="password" id="pw-cur" placeholder="current password" autocomplete="current-password" required></div>
+        <div class="row"><input type="password" id="pw-new" placeholder="new password (12+ characters)" autocomplete="new-password" minlength="12" required></div>
+        <div class="row"><input type="password" id="pw-new2" placeholder="new password again" autocomplete="new-password" minlength="12" required><button class="btn" type="submit">Change</button></div>
+      </form><div class="msg" id="pw-msg"></div></div>
+    <div class="card" id="tf-card"><h3>Two-factor sign-in</h3><div id="tf-body"></div><div class="msg" id="tf-msg"></div></div>
+  </div>
+  <div id="users-wrap" hidden>
+    <h2>Users <span class="hint">viewer = look · approver = also approve bans/patches · admin = also settings, tokens, users</span></h2>
+    <div class="card">
+      <div class="row"><input id="nu-name" placeholder="username" maxlength="64" autocomplete="off">
+        <select id="nu-role"><option>viewer</option><option>approver</option><option>admin</option></select>
+        <button class="btn" id="nu-add">Add user</button></div>
+      <div id="nu-once"></div>
+      <div class="wrap" style="border:0"><table id="users"></table></div>
+    </div>
+    <h2>Recent sign-ins <span class="hint">last 50, newest first</span></h2>
+    <div class="wrap"><table id="authlog"></table></div>
+  </div>
+</section>
+
 <section class="tab" id="t-search">
   <h2>Search <span class="hint" id="s-meta"></span></h2>
   <div class="chips" id="s-chips"></div>
@@ -426,7 +457,7 @@ const ccCell = (cc, red) => cc ? `<span class="flag">${flag(cc)}</span>${esc(cc)
 const GROUPS = [["Monitor", [["overview","Overview"],["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["search","Search"]]],
                 ["Exposure", [["surface","Attack surface"],["geo","Geo & red list"]]],
                 ["Assets", [["vulns","Vulnerabilities"],["endpoints","Endpoints"]]],
-                ["Hub", [["health","Health"],["connect","Connect"],["settings","Settings"]]]];
+                ["Hub", [["health","Health"],["connect","Connect"],["settings","Settings"],["account","Account"]]]];
 const TABS = GROUPS.flatMap(g => g[1]);
 let D = null;
 
@@ -915,8 +946,93 @@ function previewLayout() { D.layout = {...D.layout, ...EDIT}; renderOverview(D, 
 
 async function post(url, hdr, body) {
   try { const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json", "X-Warden": hdr}, body: JSON.stringify(body)});
+        if (r.status === 401 && !/basic/i.test(r.headers.get("WWW-Authenticate") || "")) { location.href = "login"; return {ok: false, error: "signed out"}; }
         return await r.json(); } catch (e) { return {ok: false, error: String(e)}; }
 }
+// GET JSON; a lapsed session goes to the sign-in page, a forced password change to Account
+async function getj(url) {
+  const r = await fetch(url, {cache: "no-store"});
+  if (r.status === 401 && !/basic/i.test(r.headers.get("WWW-Authenticate") || "")) { location.href = "login"; throw new Error("signed out"); }
+  if (r.status === 403) { const j = await r.json(); if (j.must_change) { mustChange(); throw new Error("must change password"); } return j; }
+  return r.json();
+}
+
+// ── Account: you, password, 2FA, users (admins) ─────────────────────────────
+let ME = null;
+function mustChange() { $("#must-change").hidden = false; show("account"); loadAccount(); }
+async function loadAccount() {
+  try { ME = await getj("api/me"); } catch { return; }
+  const local = ME.mode === "local";
+  $("#me-chip").hidden = false; $("#me-chip").textContent = `${ME.username} · ${ME.role}`;
+  $("#me-kv").innerHTML = `<dt>Name</dt><dd>${esc(ME.username)}</dd><dt>Role</dt><dd>${esc(ME.role)}</dd>
+    <dt>Sign-in</dt><dd>${{local: "warden", proxy: "your reverse proxy / SSO", basic: "basic auth (one shared password)"}[ME.mode] || esc(ME.mode)}</dd>`;
+  $("#sign-out").hidden = !local; $("#pw-user").value = ME.username;
+  $("#must-change").hidden = !ME.must_change;
+  $("#pw-card").hidden = $("#tf-card").hidden = !local;
+  if (!local) { $("#users-wrap").hidden = true; return; }
+  $("#tf-body").innerHTML = ME.totp
+    ? `<p class="y">On.</p><div class="row"><input type="password" id="tf-pw" placeholder="your password" autocomplete="current-password"><button class="btn ghost" id="tf-off">Turn off</button></div>`
+    : `<p class="q">Off. Turn it on so a leaked password alone can't get in.</p><button class="btn" id="tf-begin">Set up 2FA</button>`;
+  $("#users-wrap").hidden = ME.role !== "admin" || ME.must_change;
+  if (ME.role === "admin" && !ME.must_change) {
+    let U; try { U = await getj("api/users"); } catch { return; }
+    const lockd = r => r.locked_until && r.locked_until * 1000 > Date.now();
+    table("users", [{h: "User", k: "username"}, {h: "Role", f: r => `<select data-urole="${esc(r.username)}">${["viewer","approver","admin"].map(x => `<option${x === r.role ? " selected" : ""}>${x}</option>`).join("")}</select>`},
+      {h: "2FA", f: r => r.totp ? '<span class="y">on</span>' : '<span class="q">off</span>'},
+      {h: "State", f: r => r.disabled ? '<span class="n">disabled</span>' : lockd(r) ? '<span class="n">locked</span>' : r.must_change ? '<span class="q">new password due</span>' : '<span class="y">active</span>'},
+      {h: "Last sign-in", f: r => r.last_login ? ago(r.last_login.replace(" ", "T") + "Z") : "never", cls: "ts"},
+      {h: "", f: r => r.username.toLowerCase() === ME.username.toLowerCase() ? '<span class="q">you</span>' :
+        [["reset-password", "reset password"], ["reset-2fa", "reset 2FA"], lockd(r) ? ["unlock", "unlock"] : null, [r.disabled ? "enable" : "disable", r.disabled ? "enable" : "disable"], ["delete", "delete"]]
+        .filter(Boolean).map(([a, l]) => `<button class="btn ghost sm" data-uact="${a}" data-u="${esc(r.username)}">${l}</button>`).join(" ")}], U.users, "No users.");
+    table("authlog", [{h: "When", f: r => ago(r.ts.replace(" ", "T") + "Z"), cls: "ts"}, {h: "User", k: "username"}, {h: "From", k: "ip", cls: "mono"},
+      {h: "", f: r => r.ok ? '<span class="y">✓</span>' : '<span class="n">✗</span>'}, {h: "What", k: "why"}], U.log, "Nobody has signed in yet.");
+  }
+}
+document.addEventListener("submit", async e => {
+  if (e.target.id !== "pw-form") return;
+  e.preventDefault();
+  if ($("#pw-new").value !== $("#pw-new2").value) { $("#pw-msg").innerHTML = '<span class="n">The two new passwords differ.</span>'; return; }
+  const r = await post("api/password", "password", {current: $("#pw-cur").value, new: $("#pw-new").value});
+  $("#pw-msg").innerHTML = r.ok ? `<span class="y">${esc(r.msg)}</span>` : `<span class="n">${esc(r.error || "failed")}</span>`;
+  if (r.ok) { e.target.reset(); if (/again/.test(r.msg)) setTimeout(() => location.href = "login", 1500); else { $("#must-change").hidden = true; load(); loadAccount(); } }
+});
+document.addEventListener("click", async e => {
+  const t = e.target;
+  if (t.id === "me-chip") return show("account");
+  if (t.id === "sign-out") { await post("auth/logout", "logout", {}); location.href = "login"; return; }
+  if (t.id === "tf-begin") {
+    const r = await post("api/totp", "totp", {action: "begin"});
+    if (!r.ok) { $("#tf-msg").innerHTML = `<span class="n">${esc(r.error || "failed")}</span>`; return; }
+    $("#tf-body").innerHTML = `<p>Add this to your authenticator app (1Password, Bitwarden, Aegis, Google Authenticator…), then type the code it shows.</p>
+      <div class="tokbox">${esc(r.secret.replace(/(.{4})/g, "$1 ").trim())}</div>
+      <p class="note"><a href="${esc(r.uri)}">Open in an authenticator app</a> (on a phone) — or paste the key above.</p>
+      <div class="row"><input id="tf-code" inputmode="numeric" maxlength="7" placeholder="6-digit code" autocomplete="one-time-code"><button class="btn" id="tf-confirm">Turn on</button></div>`;
+    return;
+  }
+  if (t.id === "tf-confirm") { const r = await post("api/totp", "totp", {action: "confirm", code: $("#tf-code").value.replace(/\s/g, "")});
+    $("#tf-msg").innerHTML = r.ok ? `<span class="y">${esc(r.msg)}</span>` : `<span class="n">${esc(r.error || "failed")}</span>`; if (r.ok) loadAccount(); return; }
+  if (t.id === "tf-off") { const r = await post("api/totp", "totp", {action: "disable", password: $("#tf-pw").value});
+    $("#tf-msg").innerHTML = r.ok ? `<span class="y">${esc(r.msg)}</span>` : `<span class="n">${esc(r.error || "failed")}</span>`; if (r.ok) loadAccount(); return; }
+  if (t.id === "nu-add") {
+    const r = await post("api/users", "users", {action: "add", username: $("#nu-name").value.trim(), role: $("#nu-role").value});
+    $("#nu-once").innerHTML = r.ok ? `<div class="tokbox">${esc(r.password)}</div><div class="note">${esc(r.msg)}</div>` : `<div class="n">${esc(r.error || "failed")}</div>`;
+    if (r.ok) { $("#nu-name").value = ""; loadAccount(); } return;
+  }
+  const ua = t.closest("[data-uact]");
+  if (ua) {
+    const a = ua.dataset.uact, u = ua.dataset.u;
+    if (["delete", "disable", "reset-password", "reset-2fa"].includes(a) && !confirm(`${a.replace("-", " ")} for ${u}?`)) return;
+    const r = await post("api/users", "users", {action: a, username: u});
+    $("#nu-once").innerHTML = r.ok ? (r.password ? `<div class="tokbox">${esc(r.password)}</div><div class="note">New password for ${esc(u)}. ${esc(r.msg)}</div>` : "")
+      : `<div class="n">${esc(r.error || "failed")}</div>`;
+    loadAccount();
+  }
+});
+document.addEventListener("change", async e => {
+  const s = e.target.closest("[data-urole]"); if (!s) return;
+  const r = await post("api/users", "users", {action: "role", username: s.dataset.urole, role: s.value});
+  if (!r.ok) alert(r.error || "failed"); loadAccount();
+});
 
 // ── Connect: tokens, endpoints, integrations, VPN recipes ───────────────────
 const snip = (title, body, note) => `<div class="snip-h"><span>${title}</span><button class="btn ghost sm" data-copy>copy</button></div><pre class="snip">${esc(body)}</pre>${note ? `<div class="note" style="margin-top:-4px">${note}</div>` : ""}`;
@@ -1025,7 +1141,7 @@ document.addEventListener("click", async e => {
 // ── Settings: approvals, setup checks, tokens, snippets ──────────────────────
 let SET = null;
 async function loadSettings() {
-  try { SET = await (await fetch("api/settings", {cache: "no-store"})).json(); } catch { return; }
+  try { SET = await getj("api/settings"); if (SET.error) return; } catch { return; }
   const ap = SET.approvals || [];
   badge("settings", ap.length, false);
   $("#appr").innerHTML = ap.length ? ap.map(a => { const ch = JSON.parse(a.choices || "[]");
@@ -1060,7 +1176,7 @@ document.addEventListener("click", async e => {
 });
 
 async function load() {
-  try { D = await (await fetch("api", {cache: "no-store"})).json(); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec);
+  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec);
         const a = document.activeElement;   // don't wipe a half-typed setting/token on the 60-s refresh
         if (!(a && /INPUT|SELECT/.test(a.tagName) && a.closest("#t-settings,#t-connect"))) loadSettings(); }
   catch (e) { console.error("warden render:", e); $("#updated").textContent = "⚠ refresh failed"; }
@@ -1088,6 +1204,6 @@ let start = location.hash.slice(1);
 if (!TABS.some(t => t[0] === start)) { try { start = localStorage.getItem("warden-tab") || "overview"; } catch { start = "overview"; } }
 show(TABS.some(t => t[0] === start) ? start : "overview");
 window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (TABS.some(t => t[0] === h)) show(h); });
-load(); setInterval(load, 60000);
+loadAccount(); load(); setInterval(load, 60000);
 </script>
 </html>

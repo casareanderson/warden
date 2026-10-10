@@ -11,6 +11,11 @@
                                show (or write + enable) the systemd units for the features you use
   warden-setup secret <NAME>   store a secret in data/secrets.env (prompted, never echoed)
 
+  console sign-in (ui.auth: local — the default):
+  warden-setup user add NAME [--role viewer|approver|admin]   prints a one-time password
+  warden-setup user list | passwd NAME | role NAME ROLE | disable NAME | enable NAME
+  warden-setup user unlock NAME | reset-2fa NAME | delete NAME
+
 Nothing here bans, blocks or patches. It writes warden.yml (old copy kept as warden.yml.bak),
 data/secrets.env (mode 600) and, with --install, systemd units.
 """
@@ -21,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from wlib import config, hosts, secrets, setup, tokens, units  # noqa: E402
+from wlib import auth, config, hosts, secrets, setup, tokens, units  # noqa: E402
 
 G, R, Y, D, B, X = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[1m", "\033[0m"
 if not sys.stdout.isatty():
@@ -198,6 +203,54 @@ def units_cmd(argv):
     return 0
 
 
+def user_cmd(rest):
+    """Console users. The only way to make the FIRST admin — there is deliberately no web sign-up."""
+    if not rest or rest[0] == "list":
+        rows = auth.users()
+        if auth.mode() != "local":
+            print(f"{Y}note:{X} ui.auth is '{auth.mode()}', so these accounts aren't used until it is 'local'")
+        for u in rows:
+            state = "disabled" if u["disabled"] else "must change password" if u["must_change"] else "active"
+            print(f"  {u['username']:<20} {u['role']:<9} 2fa={'on' if u['totp'] else 'off'}  {state}"
+                  f"  last={u['last_login'] or 'never'}")
+        if not rows:
+            print("  no users yet —  warden-setup user add NAME --role admin")
+        return 0
+    act, args = rest[0], rest[1:]
+    role = args[args.index("--role") + 1] if "--role" in args and args.index("--role") + 1 < len(args) else None
+    names = [a for a in args if not a.startswith("--") and a != role]
+    if not names:
+        print(__doc__)
+        return 2
+    name = names[0]
+    try:
+        if act == "add":
+            pw = auth.add_user(name, role or ("admin" if not auth.users() else "viewer"))
+            print(f"{G}added{X} {name}. One-time password (asked to change it at first sign-in):\n\n  {B}{pw}{X}\n")
+            if auth.mode() != "local":
+                print(f"{Y}note:{X} set  ui:  auth: local  in warden.yml to switch the console to this sign-in")
+        elif act == "passwd":
+            print(f"new one-time password for {name}:\n\n  {B}{auth.update_user(name, reset_password=True)}{X}\n"
+                  f"{D}their sessions were signed out{X}")
+        elif act == "role" and len(names) > 1:
+            auth.update_user(name, role=names[1]); print("done")
+        elif act in ("disable", "enable"):
+            auth.update_user(name, disabled=act == "disable"); print("done")
+        elif act == "unlock":
+            auth.update_user(name, unlock=True); print("done")
+        elif act == "reset-2fa":
+            auth.update_user(name, reset_totp=True); print("done — they can sign in with just their password")
+        elif act == "delete":
+            auth.delete_user(name); print("done")
+        else:
+            print(__doc__)
+            return 2
+    except ValueError as e:
+        print(f"{R}{e}{X}")
+        return 1
+    return 0
+
+
 def main(argv):
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__)
@@ -231,6 +284,8 @@ def main(argv):
         return connect()
     if cmd == "units":
         return units_cmd(rest)
+    if cmd == "user":
+        return user_cmd(rest)
     if cmd == "secret" and rest:
         return 0 if put_secret(rest[0]) else 1
     print(__doc__)
