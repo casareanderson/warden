@@ -148,6 +148,10 @@ def scan_os(t, kev):
     eco, label, entries = os_identity(files)
     if not entries:
         raise RuntimeError("OS not identified (no dpkg/apk DB?)")
+    if t["kind"] == "ct":                      # LXC runs the host kernel: skip kernel packages before querying
+        kern = [e for e in entries if KERNEL_PKG.match(e[2])]
+        entries = [e for e in entries if not KERNEL_PKG.match(e[2])]
+        t["_kernel_skipped"] = len(kern)
     if not eco:
         raise RuntimeError(f"{label}: OSV has no advisory feed for this OS")
     rows = osv.match(osv_client(), osv.os_packages(eco, entries), kev)
@@ -172,19 +176,20 @@ def image_packages(files):
     if statusd and not text.get("var/lib/dpkg/status"):
         text["var/lib/dpkg/status"] = "\n\n".join(statusd)
     eco, label, entries = os_identity(text)
+    # containers run the host kernel: don't even ask about linux-libc-dev/headers (thousands of big advisories that
+    # were all thrown away afterwards; they were most of the scan's 530 MB peak, 2026-10-10)
+    kern = sum(1 for e in entries if KERNEL_PKG.match(e[2]))
+    entries = [e for e in entries if not KERNEL_PKG.match(e[2])]
     pkgs = osv.os_packages(eco, entries) if eco else []
     unread = 0
     for k, v in files.items():
         kind = k.split("/", 1)[0]
         body = v.split(b"\n", 1)[1] if b"\n" in v else b""
-        if kind == "py":
-            r = osv.parse_pymeta(body.decode("utf-8", "replace"))
-            if r:
-                pkgs.append(("PyPI", r[0], r[1], r[0], r[1]))
-        elif kind == "npm":
-            r = osv.parse_npm(body.decode("utf-8", "replace"))
-            if r:
-                pkgs.append(("npm", r[0], r[1], r[0], r[1]))
+        if kind in ("py", "npm"):                       # the collector already reduced these to name\nversion
+            nv = body.decode("utf-8", "replace").split("\n")
+            if len(nv) == 2 and nv[0] and nv[1]:
+                eco = "PyPI" if kind == "py" else "npm"
+                pkgs.append((eco, nv[0], nv[1], nv[0], nv[1]))
         elif kind == "go":
             gover, deps = osv.parse_gobuild(body)
             if not gover:
@@ -197,16 +202,32 @@ def image_packages(files):
             pkgs += [("crates.io", c, ver, c, ver) for c, ver in osv.parse_rustdeps(body)]
     if not entries and not eco:
         label = "no OS packages"
-    return sorted(set(pkgs)), label, unread
+    return sorted(set(pkgs)), label, unread, kern
 
 
 def scan_images(t, kev):
     rc, tarb, se = hosts.remote(t, "python3 -", timeout=1800, binary=True, root=True, stdin=COLLECTOR.encode())
     if not tarb:
         raise RuntimeError(f"collector: {(se or b'').decode('utf-8', 'replace').strip()[-160:] or 'no output'}")
-    images, errs = {}, []
-    with tarfile.open(fileobj=io.BytesIO(tarb), mode="r:gz") as tf:
-        for m in tf.getmembers():
+    errs, rows, notes = [], [], []
+    count = 0
+    kernel = [0]
+
+    def flush(files):
+        # one image at a time: match it, keep only its rows, drop its files
+        nonlocal count
+        if not files:
+            return
+        count += 1
+        img = files.pop("IMAGE", b"?").decode()
+        pkgs, label, unread, kern = image_packages(files)
+        kernel[0] += kern
+        rows.extend(osv.match(osv_client(), pkgs, kev, image=img))
+        if unread:
+            notes.append(f"{img}: {unread} pre-1.18 Go binaries not read")
+    cur, files = None, {}
+    with tarfile.open(fileobj=io.BytesIO(tarb), mode="r|gz") as tf:   # members arrive grouped by image
+        for m in tf:
             if not m.isfile():
                 continue
             data = tf.extractfile(m).read()
@@ -214,15 +235,15 @@ def scan_images(t, kev):
                 errs += [l for l in data.decode().splitlines() if l]
                 continue
             n, _, rest = m.name.partition("/")
-            images.setdefault(n, {})[rest] = data
-    rows, notes = [], []
-    for n, files in sorted(images.items(), key=lambda x: int(x[0])):
-        img = files.pop("IMAGE", b"?").decode()
-        pkgs, label, unread = image_packages(files)
-        rows += osv.match(osv_client(), pkgs, kev, image=img)
-        if unread:
-            notes.append(f"{img}: {unread} pre-1.18 Go binaries not read")
-    return rows, errs + notes, len(images) + len([e for e in errs])
+            if n != cur:
+                flush(files)
+                cur, files = n, {}
+            files[rest] = data
+    flush(files)
+    del tarb
+    if kernel[0]:
+        notes.append(f"{kernel[0]} kernel packages skipped (containers run the host kernel)")
+    return rows, errs + notes, count + len(errs)
 
 
 # Vendor firmware with no package DB: how to read the running version, and where the vendor publishes releases.
@@ -269,6 +290,20 @@ def store(con, t, os_, rows, status, note, extra=None, pkgs=None):
 
 
 def scan_one(con, t, kev):
+    before = osv_client().failed
+    r = _scan_one(con, t, kev)
+    lost = osv_client().failed - before
+    if lost and r == "ok":
+        # some advisories could not be downloaded: say so instead of quietly under-reporting
+        con.execute("update vuln_targets set status='partial', note=trim(coalesce(note,'') || ' · ' || ?) "
+                    "where target=?", (f"{lost} advisories could not be fetched from OSV — counts may be low",
+                                       t["target"]))
+        con.commit()
+        return f"partial ({lost} advisories not fetched)"
+    return r
+
+
+def _scan_one(con, t, kev):
     try:
         if t["kind"] in ("node", "ct"):
             os_, rows, extra, pkgs = scan_os(t, kev)
@@ -276,24 +311,16 @@ def scan_one(con, t, kev):
             if t["kind"] == "ct":
                 # An LXC container runs the HOST's kernel: kernel CVEs matched against linux-libc-dev / headers
                 # inside it are not exploitable there (one CT showed 2 'KEV' this way on 2026-10-07).
-                k = [r for r in rows if KERNEL_PKG.match(r[1])]
-                rows = [r for r in rows if not KERNEL_PKG.match(r[1])]
-                if k:
-                    note = f"{len(k)} kernel-package CVEs ignored (LXC runs the host kernel)"
+                if t.get("_kernel_skipped"):
+                    note = f"{t['_kernel_skipped']} kernel packages skipped (LXC runs the host kernel)"
             else:
                 note = ("Proxmox kernel (proxmox-kernel-*) is NOT covered by Debian advisories — kernel CVEs are a "
                         "blind spot here; keep the node on the latest pve kernel and reboot into it")
             store(con, t, os_, rows, "ok", note, extra, pkgs)
         elif t["kind"] == "images":
             rows, errs, n = scan_images(t, kev)
-            # a container runs the host's kernel too: linux-libc-dev/headers CVEs inside an image are not reachable
-            # (462 of 600 "critical with a fix" on CT104 were these, 2026-10-10)
-            k = sum(1 for r in rows if KERNEL_PKG.match(r[1]))
-            rows = [r for r in rows if not KERNEL_PKG.match(r[1])]
-            if k:
-                errs = errs + [f"{k} kernel-package CVEs ignored (containers run the host kernel)"]
             done = n - sum(1 for e in errs if "not readable" in e)
-            real = [e for e in errs if "kernel-package" not in e]
+            real = [e for e in errs if "kernel packages skipped" not in e and "pre-1.18" not in e]
             store(con, t, f"{done}/{n} running images", rows, "ok" if not real else "partial", "; ".join(errs)[:400])
         elif t["kind"] == "firmware":
             label, cur, latest, note = firmware(t)

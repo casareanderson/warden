@@ -6,8 +6,9 @@ writes a gzipped tar to stdout holding only package metadata:
 
   <n>/IMAGE                       image name as `docker ps` shows it
   <n>/os/...                      os-release, dpkg status (+ distroless status.d), apk db
-  <n>/py/<i>                      first 4 KB of each *.dist-info/METADATA, *.egg-info/PKG-INFO
-  <n>/npm/<i>                     each node_modules/<pkg>/package.json (≤64 KB)
+  <n>/py/<i>                      "name\nversion" from each *.dist-info/METADATA, *.egg-info/PKG-INFO
+  <n>/npm/<i>                     "name\nversion" from each node_modules/<pkg>/package.json
+  (name/version are pulled out on the docker host: whole package.json files took the Zima scan to 1.1 GB)
   <n>/go/<i>                      256 KB from the Go build-info magic of each Go executable
   <n>/rust/<i>                    the .dep-v0 section of each Rust executable built with cargo-auditable
   ERRORS                          one line per image that could not be read
@@ -31,6 +32,25 @@ def head(path, n):
             return f.read(n)
     except OSError:
         return None
+
+def pymeta(b):
+    name = ver = None
+    for line in (b or b"").decode("utf-8", "replace").splitlines():
+        if not line.strip():
+            break
+        if line.startswith("Name:"):
+            name = line[5:].strip()
+        elif line.startswith("Version:"):
+            ver = line[8:].strip()
+    return f"{name}\n{ver}".encode() if name and ver else None
+
+def npmmeta(b):
+    try:
+        d = json.loads(b or b"")
+    except ValueError:
+        return None
+    n, v = d.get("name"), d.get("version")
+    return f"{n}\n{v}".encode() if isinstance(n, str) and isinstance(v, str) and n and v else None
 
 def sh(*a):
     return subprocess.run(a, capture_output=True, text=True, timeout=60).stdout
@@ -102,11 +122,11 @@ for cid in sh("docker", "ps", "-q").split():
             fp = os.path.join(dp, fn)
             kind = None
             if fn == "METADATA" and dp.endswith(".dist-info") or fn == "PKG-INFO" and dp.endswith(".egg-info"):
-                kind, data = "py", head(fp, 4096)
+                kind, data = "py", pymeta(head(fp, 4096))
             elif fn.endswith(".egg-info") and os.path.isfile(fp):
-                kind, data = "py", head(fp, 4096)
+                kind, data = "py", pymeta(head(fp, 4096))
             elif fn == "package.json" and re.search(r"/node_modules/(@[^/]+/)?[^/@]+$", dp):
-                kind, data = "npm", head(fp, 65536)
+                kind, data = "npm", npmmeta(head(fp, 1 << 20))
             else:
                 try:
                     st = os.lstat(fp)

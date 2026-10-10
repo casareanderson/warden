@@ -210,17 +210,65 @@ def deb_cmp(a, b):
     return _deb_part(ua, ub) or _deb_part(ra, rb)
 
 
-def gen_cmp(a, b):
-    """Dotted-number comparison for apk/semver/PEP 440 — good enough to order 'fixed' candidates."""
+_APK_SUF = {"alpha": -4, "beta": -3, "pre": -2, "rc": -1, "": 0, "cvs": 1, "svn": 2, "git": 3, "hg": 4, "p": 5}
+
+
+def apk_cmp(a, b):
+    """apk-tools ordering: 1.2.3[letter][_suffixN…][-rN]; _alpha<_beta<_pre<_rc<release<_p, -r10 > -r9."""
     def key(v):
-        return [(0, int(x)) if x.isdigit() else (1, x) for x in re.split(r"[.\-+_]", v.lstrip("v")) if x]
+        m = re.match(r"^(.*?)(?:-r(\d+))?$", v)
+        base, rel = m.group(1), int(m.group(2) or 0)
+        m = re.match(r"^([\d.]*\d)?([a-z]?)((?:_[a-z]+\d*)*)$", base)
+        if not m:
+            return ((), "", (), rel, base)
+        nums = tuple(int(x) for x in (m.group(1) or "0").split("."))
+        sufs = tuple((_APK_SUF.get(re.match(r"[a-z]+", x).group(0), 0), int(re.sub(r"\D", "", x) or 0))
+                     for x in m.group(3).split("_") if x)
+        return (nums, m.group(2), sufs + ((0, 0),), rel, "")
+    ka, kb = key(a), key(b)
+    for x, y in zip(ka[0], kb[0]):                      # numeric parts, then length (1.2 < 1.2.1)
+        if x != y:
+            return -1 if x < y else 1
+    if len(ka[0]) != len(kb[0]):
+        return -1 if len(ka[0]) < len(kb[0]) else 1
+    ka, kb = ka[1:], kb[1:]
+    return (ka > kb) - (ka < kb)
+
+
+_PRE = re.compile(r"(?i)^[-._]?(alpha|beta|preview|pre|dev|rc|a|b|c)[-._]?(\d*)")
+_POST = re.compile(r"(?i)^[-._]?(post|rev|p|r)[-._]?(\d*)")
+
+
+def gen_cmp(a, b):
+    """semver / PEP 440 / Go: release numbers first, then dev < alpha < beta < rc < release < post.
+    (Plain text comparison put 2.0.0rc1 after 2.0.0, research review 2026-10-10.)"""
+    rank = {"dev": -5, "a": -4, "alpha": -4, "b": -3, "beta": -3, "c": -2, "pre": -2, "preview": -2, "rc": -1}
+
+    def key(v):
+        v = v.strip().lstrip("vV").split("+")[0]
+        m = re.match(r"^(\d+(?:\.\d+)*)(.*)$", v)
+        if not m:
+            return ((), 0, 0, v)
+        nums = [int(x) for x in m.group(1).split(".")]
+        while len(nums) > 1 and nums[-1] == 0:
+            nums.pop()                                  # 1.0 == 1.0.0
+        rest = m.group(2)
+        p = _PRE.match(rest)
+        if p:
+            return (tuple(nums), rank[p.group(1).lower()], int(p.group(2) or 0), rest[p.end():])
+        p = _POST.match(rest)
+        if p and (p.group(2) or p.group(1).lower() == "post"):
+            return (tuple(nums), 1, int(p.group(2) or 0), rest[p.end():])
+        return (tuple(nums), 0, 0, rest)
     ka, kb = key(a), key(b)
     return (ka > kb) - (ka < kb)
 
 
 def vcmp(eco, a, b):
     try:
-        return deb_cmp(a, b) if eco.startswith(("Debian", "Ubuntu")) else gen_cmp(a, b)
+        if eco.startswith(("Debian", "Ubuntu")):
+            return deb_cmp(a, b)
+        return apk_cmp(a, b) if eco.startswith("Alpine") else gen_cmp(a, b)
     except Exception:  # noqa: BLE001
         return 0
 
@@ -301,18 +349,28 @@ class OSV:
         self.s = session or requests.Session()
         self.s.headers.update(UA)
         self.fetched = 0
+        self.failed = 0                     # advisories that could not be fetched → the target is stored "partial"
         self._secdb = {}
+
+    @staticmethod
+    def _wait(r, attempt):
+        """Back off 2, 4, 8 s, or what the server's Retry-After asks (capped at 60 s)."""
+        ra = r.headers.get("Retry-After", "") if r is not None else ""
+        time.sleep(min(int(ra), 60) if ra.isdigit() else 2 ** (attempt + 1))
 
     def _post(self, path, body):
         for attempt in range(4):
+            r = None
             try:
                 r = self.s.post(API + path, json=body, timeout=120)
-                if r.status_code < 500:
+                if r.status_code < 500 and r.status_code != 429:
                     r.raise_for_status()
                     return r.json()
             except requests.RequestException:
                 if attempt == 3:
                     raise
+            if attempt < 3:
+                self._wait(r, attempt)
         raise RuntimeError(f"OSV {path}: server errors")
 
     def secdb(self, branch):
@@ -382,15 +440,19 @@ class OSV:
 
         def one(i):
             for attempt in range(4):
+                r = None
                 try:
                     r = self.s.get(f"{API}/vulns/{i}", timeout=60)
                     if r.status_code == 404:
                         return i, False
-                    r.raise_for_status()
-                    return i, slim(r.json())
+                    if r.status_code != 429:
+                        r.raise_for_status()
+                        return i, slim(r.json())
                 except requests.RequestException:
-                    if attempt == 3:
-                        return i, None
+                    pass
+                if attempt < 3:
+                    self._wait(r, attempt)
+            return i, None
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with ThreadPoolExecutor(16) as ex:
             for i, body in ex.map(one, need):
@@ -398,6 +460,8 @@ class OSV:
                     self.con.execute("insert or replace into osv_vulns values(?,?,?,?)", (i, "missing", "null", now))
                     continue
                 if body is None:
+                    if pairs[i]:                    # a real hit we could not read (not an optional alias lookup)
+                        self.failed += 1
                     continue
                 self.fetched += 1
                 have[i] = (body.get("modified", ""), json.dumps(body, separators=(",", ":")))
@@ -514,7 +578,9 @@ def match(osv, pkgs, kev, image="", alias_sev=True):
     out = {}
     for e, n, v, rn, rv in pkgs:
         for b in by_q.get((e, n, v), []):
-            if b.get("withdrawn"):
+            # USN/DSA/DLA notices bundle CVEs that UBUNTU-CVE-*/DEBIAN-CVE-* records already carry one by one;
+            # counted again they double the fixable list with UNKNOWN severity (research review 2026-10-10)
+            if b.get("withdrawn") or b["id"].startswith(("USN-", "DSA-", "DLA-", "DTSA-")):
                 continue
             vid = _cve(b) or b["id"]
             sev = severity(b)
