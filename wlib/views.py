@@ -333,10 +333,14 @@ def vuln_payload():
     return {
         "targets": q("select * from vuln_targets order by n_kev desc, n_crit_fix desc, n_fixable desc, target"),
         # what matters: known-exploited anywhere, or anything with a fix — ranked KEV > severity > reach
+        # what matters: known-exploited, then likely-to-be-exploited (EPSS ≥ 10% with a fix), then severity
         "top": q(f"select vid, max({SEV}) sev, max(kev) kev, count(distinct target) n_targets, "
                  "group_concat(distinct target) targets, group_concat(distinct pkg) pkgs, max(fixed) fixed, "
-                 "max(title) title from vulns where fixed!='' or kev=1 group by vid "
-                 f"order by kev desc, sev desc, n_targets desc limit 400"),
+                 f"max(title) title{', max(epss) epss, max(epss_pct) epss_pct' if _epss() else ''} "
+                 "from vulns where fixed!='' or kev=1 group by vid "
+                 f"order by kev desc, {'(max(epss)>=0.1) desc, ' if _epss() else ''}sev desc, n_targets desc limit 400"),
+        "brief": (q("select ts, model, status, text, reason from vuln_brief order by id desc limit 1") or [None])[0]
+        if has("vuln_brief") else None,
         "sev_fixable": q("select severity k, count(*) n from vulns where fixed!='' group by severity order by n desc"),
         "by_target": q("select t.name k, t.n_fixable n from vuln_targets t where t.n_fixable>0 order by n desc limit 8"),
         "totals": q(f"select count(*) total, sum(fixed!='') fixable, sum(fixed!='' and severity='CRITICAL') crit, "
@@ -530,16 +534,22 @@ def bans():
     return {"mode": p["mode"], "proposed_or_active": p["bans"], "edge_blocklist": p["edge_bans"]}
 
 
+def _epss():
+    return has("vulns") and "epss" in {r["name"] for r in q("pragma table_info(vulns)")}
+
+
 def vulns(target=""):
     if target:
+        e = ",epss,epss_pct" if _epss() else ""
         return {"target": target, "rows": q(
-            f"select vid,pkg,installed,fixed,severity,title,kev,status,image from vulns where target=? "
-            f"order by kev desc, (fixed!='') desc, {SEV} desc limit 3000", (target[:64],))}
+            f"select vid,pkg,installed,fixed,severity,title,kev,status,image{e} from vulns where target=? "
+            f"order by kev desc, (fixed!='') desc, {'coalesce(epss,0)>=0.1 desc, ' if e else ''}{SEV} desc limit 3000",
+            (target[:64],))}
     v = vuln_payload()
     if not v:
         return {"enabled": False}
     return {"enabled": True, "totals": v["totals"], "targets": v["targets"], "top": v["top"][:100],
-            "images": v["images"], "patch_jobs": v["jobs"]}
+            "images": v["images"], "patch_jobs": v["jobs"], "brief": v.get("brief")}
 
 
 def cve(vid):
@@ -548,7 +558,7 @@ def cve(vid):
     if not vid or not has("vulns"):
         return {"vid": vid, "rows": []}
     cols = {r["name"] for r in q("pragma table_info(vulns)")}
-    extra = "".join(f", v.{c}" for c in ("descr", "url") if c in cols)   # absent until vulnscan migrates
+    extra = "".join(f", v.{c}" for c in ("descr", "url", "epss", "epss_pct") if c in cols)  # absent until migrated
     rows = q(f"select v.target, coalesce(t.name, v.target) name, v.pkg, v.installed, v.fixed, v.severity, v.title, "
              f"v.kev, v.status, v.image{extra} "
              f"from vulns v left join vuln_targets t on t.target=v.target where v.vid=? order by v.target", (vid,))
@@ -556,6 +566,8 @@ def cve(vid):
     return {"vid": vid, "severity": first.get("severity"), "title": first.get("title"), "kev": any(r["kev"] for r in rows),
             "descr": next((r.get("descr") for r in rows if r.get("descr")), ""),
             "url": next((r.get("url") for r in rows if r.get("url")), ""), "rows": rows,
+            "epss": next((r.get("epss") for r in rows if r.get("epss") is not None), None),
+            "epss_pct": next((r.get("epss_pct") for r in rows if r.get("epss_pct") is not None), None),
             "links": {"NVD": f"https://nvd.nist.gov/vuln/detail/{vid}", "OSV": f"https://osv.dev/vulnerability/{vid}",
                       "CISA KEV": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog?search_api_fulltext=" + vid}}
 

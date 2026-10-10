@@ -60,10 +60,10 @@ patch:
   expire_hours: 24                  # an unanswered plan expires; nothing changes
   snapshot_keep_days: 7
 
-vuln:                               # trivy, checksum-verified; never the 0.69.4–0.69.6 builds
-  trivy: /usr/local/bin/trivy
-  server: http://127.0.0.1:4954     # trivy server mode for Docker image scans
-  token_file: /etc/trivy/token
+# vulnerability scanning needs no settings: advisories come from api.osv.dev (+ Alpine secdb), exploit data from
+# CISA KEV and FIRST EPSS. Optional AI "fix first" briefing (vulnbrief.py, any OpenAI-compatible endpoint):
+vuln:
+  brief: {url: https://openrouter.ai/api/v1, models: [deepseek/deepseek-v4-flash-0731], key_secret: OPENROUTER_API_KEY}
 
 # ── alerts and approvals ────────────────────────────────────────────────────
 # discord can read ✅/❌ reactions back; webhook/ntfy/none approve in the dashboard (Settings).

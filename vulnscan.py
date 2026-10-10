@@ -22,6 +22,7 @@ GitHub, PyPA and the Go team (see wlib/osv.py).
 Priority = CISA KEV (known exploited) > CRITICAL with fix > HIGH with fix. Raw counts are mostly
 "affected, no fix yet" upstream noise (one box: 4,592 CVEs, 0 fixable) — the UI leads with fixable/KEV.
 """
+import gzip
 import io
 import json
 import os
@@ -40,6 +41,11 @@ from wlib.imgcollect import SOURCE as COLLECTOR  # noqa: E402
 DB = config.DB
 KEV_FILE = str(config.DATA / "kev.json")
 KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+# FIRST EPSS: the daily probability that a CVE is exploited in the next 30 days. KEV says "already exploited"; EPSS
+# ranks the other 99%, and catches far more of what gets exploited than "CVSS ≥ 9" does (FIRST's own figures).
+EPSS_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
+EPSS_FILE = str(config.DATA / "epss.csv.gz")
+EPSS_HOT = 0.1                                  # ≥10% chance in 30 days, with a fix available → must-fix
 SSH = hosts.SSH
 PKG_FILES = ["var/lib/dpkg/status", "etc/os-release", "usr/lib/os-release", "lib/apk/db/installed",
              "etc/alpine-release"]
@@ -72,9 +78,12 @@ def db():
       create index if not exists vu_vid on vulns(vid);
     """)
     have = {r[1] for r in con.execute("pragma table_info(vulns)")}
-    for col in ("descr", "url"):                 # added 2026-10-09: the CVE drawer shows what the CVE actually is
+    for col, typ in (("descr", "text"), ("url", "text"),       # 2026-10-09: the CVE drawer shows what it is
+                     ("epss", "real"), ("epss_pct", "real")):  # 2026-10-10: exploit likelihood
         if col not in have:
-            con.execute(f"alter table vulns add column {col} text")
+            con.execute(f"alter table vulns add column {col} {typ}")
+    if "n_epss" not in {r[1] for r in con.execute("pragma table_info(vuln_targets)")}:
+        con.execute("alter table vuln_targets add column n_epss integer")
     return con
 
 
@@ -97,6 +106,36 @@ def kev_set():
             return {v["cveID"] for v in json.load(open(KEV_FILE))["vulnerabilities"]}
         except Exception:  # noqa: BLE001
             return set()
+
+
+def epss_refresh(con):
+    """Score every CVE in the vulns table from FIRST's daily EPSS file (cached 20 h; a stale file beats none)."""
+    try:
+        if not os.path.exists(EPSS_FILE) or time.time() - os.path.getmtime(EPSS_FILE) > 20 * 3600:
+            r = requests.get(EPSS_URL, timeout=120, headers={"User-Agent": "warden-vulnscan/2"})
+            r.raise_for_status()
+            if b"cve,epss" not in gzip.decompress(r.content)[:200]:
+                raise ValueError("not an EPSS file")
+            open(EPSS_FILE + ".tmp", "wb").write(r.content)
+            os.replace(EPSS_FILE + ".tmp", EPSS_FILE)
+    except Exception as e:  # noqa: BLE001
+        log(f"EPSS refresh failed ({e}); using cached copy if any")
+    if not os.path.exists(EPSS_FILE):
+        return 0
+    wanted = {r[0] for r in con.execute("select distinct vid from vulns where vid like 'CVE-%'")}
+    scores = []
+    with gzip.open(EPSS_FILE, "rt") as f:
+        for line in f:
+            if line.startswith("CVE-"):
+                c, e, p = line.rstrip().split(",")[:3]
+                if c in wanted:
+                    scores.append((float(e), float(p), c))
+    con.execute("update vulns set epss=null, epss_pct=null")
+    con.executemany("update vulns set epss=?, epss_pct=? where vid=?", scores)
+    con.execute("update vuln_targets set n_epss=(select count(*) from vulns v where v.target=vuln_targets.target "
+                "and v.epss>=? and v.fixed!='')", (EPSS_HOT,))
+    con.commit()
+    return len(scores)
 
 
 def targets():
@@ -408,6 +447,7 @@ def main():
                 con.execute("delete from vulns where target=?", (tgt,))
                 con.execute("delete from vuln_targets where target=?", (tgt,))
         con.commit()
+    log(f"EPSS: scored {epss_refresh(con)} CVEs")
     if switched and not first_run and not a:
         after = con.execute("select count(distinct target||vid) from vulns where kev=1 or "
                             "(severity='CRITICAL' and fixed!='')").fetchone()[0]
