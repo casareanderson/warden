@@ -3,7 +3,8 @@
 
 THREE AUDIENCES, THREE AUTH RULES
   Browser   GET /  /api  /api/search  /api/vuln  /api/settings
-            behind your reverse proxy's auth, or `ui.basic_user` + WARDEN_UI_PASSWORD.
+            `ui.auth: local` (default) — warden's own sign-in page, users + roles + optional 2FA (wlib/auth.py);
+            `proxy` — your reverse proxy signs people in; `basic` — the old single shared password.
   Agents    GET /api/v1/<view>   POST /mcp      — always a bearer token (`wdn_…`), never proxy auth:
             an MCP client has no browser and cannot follow a login redirect, so your proxy must
             let /api/v1 and /mcp through to here and this server checks the token.
@@ -35,9 +36,17 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from wlib import config, mcp, notify, secrets, setup, tokens, views  # noqa: E402
+from wlib import auth, config, mcp, notify, secrets, setup, tokens, views  # noqa: E402
 
 PAGE = Path(__file__).with_name("warden-ui.html")
+LOGIN_PAGE = Path(__file__).with_name("warden-login.html")
+# which role each write needs (viewer < approver < admin). A write not listed here is refused.
+NEEDS = {"/api/approvals": "approver", "/api/patch": "approver", "/api/accept": "approver",
+         "/api/layout": "admin", "/api/tokens": "admin", "/api/geo": "admin", "/api/config": "admin",
+         "/api/secret": "admin", "/api/users": "admin",
+         "/api/password": "viewer", "/api/totp": "viewer"}
+# what a signed-in person who still has to change their password may touch
+MUST_CHANGE_OK = {"/", "/index.html", "/api/me", "/api/password", "/auth/logout"}
 QUEUE = config.DATA / "patch-queue"
 
 
@@ -117,24 +126,74 @@ class H(BaseHTTPRequestHandler):
         h = self.headers.get("Authorization", "")
         return tokens.check(h[7:].strip()) if h.lower().startswith("bearer ") else None
 
-    def browser_ok(self):
-        """Proxy auth is trusted (we bind to localhost). Optional basic auth for proxy-less installs."""
-        user = config.get("ui.basic_user")
-        if not user:
-            return True
-        pw = secrets.get(config.get("ui.password_secret") or "WARDEN_UI_PASSWORD") or ""
-        h = self.headers.get("Authorization", "")
-        if h.lower().startswith("basic "):
-            try:
-                u, _, p = base64.b64decode(h[6:]).decode().partition(":")
-            except ValueError:
-                return False
-            return bool(pw) and hmac.compare_digest(u, user) and hmac.compare_digest(p, pw)
-        return False
+    def user(self):
+        """Who is at the browser: {"username", "role", …} or None. Cached per request."""
+        if hasattr(self, "_user"):
+            return self._user
+        self._user = None
+        m = auth.mode()
+        if m == "proxy":
+            # warden binds to localhost: only the proxy in front can reach it, so its header is trusted
+            name = self.headers.get(config.get("ui.trust_proxy_user_header") or "Remote-User") or "dashboard"
+            self._user = {"username": name[:64], "role": "admin", "mode": m}
+        elif m == "basic":
+            user = config.get("ui.basic_user")
+            pw = secrets.get(config.get("ui.password_secret") or "WARDEN_UI_PASSWORD") or ""
+            h = self.headers.get("Authorization", "")
+            if h.lower().startswith("basic "):
+                try:
+                    u, _, p = base64.b64decode(h[6:]).decode().partition(":")
+                except ValueError:
+                    return None
+                if pw and hmac.compare_digest(u, user) and hmac.compare_digest(p, pw):
+                    self._user = {"username": user, "role": "admin", "mode": m}
+        else:
+            u = auth.session(self.cookie(auth.COOKIE))
+            if u:
+                self._user = dict(u, mode=m)
+        return self._user
 
-    def deny_browser(self):
-        self.send({"error": "authentication required"}, status=401,
-                  extra={"WWW-Authenticate": 'Basic realm="warden"'})
+    def browser_ok(self):
+        return self.user() is not None
+
+    def deny_browser(self, path=""):
+        if auth.mode() == "basic":
+            return self.send({"error": "authentication required"}, status=401,
+                             extra={"WWW-Authenticate": 'Basic realm="warden"'})
+        if path in ("/", "/index.html"):
+            return self.send(b"", "text/plain", status=302, extra={"Location": "login"})
+        self.send({"error": "sign in", "login": "login"}, status=401)
+
+    def cookie(self, name):
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return v
+        return ""
+
+    def client_ip(self):
+        """The person's address, for rate limits and the sign-in log. Behind a local proxy the TCP peer is the
+        proxy, so take the address it added: `ui.real_ip_header` if set (e.g. CF-Connecting-IP), else the
+        last X-Forwarded-For hop."""
+        peer = self.client_address[0] if self.client_address else ""
+        if peer in ("127.0.0.1", "::1"):
+            h = config.get("ui.real_ip_header")
+            v = self.headers.get(h) if h else None
+            if not v and self.headers.get("X-Forwarded-For"):
+                v = self.headers.get("X-Forwarded-For").split(",")[-1]
+            if v:
+                return v.strip()[:64]
+        return peer
+
+    def secure_cookie(self):
+        s = config.get("ui.cookie_secure")
+        if s is None or str(s).lower() == "auto":
+            return (self.headers.get("X-Forwarded-Proto") or "").lower() == "https"
+        return bool(s)
+
+    def set_session(self, tok, max_age):
+        flags = f"; Path=/; HttpOnly; SameSite=Strict; Max-Age={int(max_age)}" + ("; Secure" if self.secure_cookie() else "")
+        return {"Set-Cookie": f"{auth.COOKIE}={tok}{flags}"}
 
     def same_origin(self, header):
         host, origin = self.headers.get("Host", ""), self.headers.get("Origin", "")
@@ -143,8 +202,8 @@ class H(BaseHTTPRequestHandler):
                 and self.headers.get("X-Warden") == header)
 
     def who(self):
-        return self.headers.get(config.get("ui.trust_proxy_user_header") or "Remote-User") or config.get("ui.basic_user") \
-            or "dashboard"
+        u = self.user()
+        return u["username"] if u else "dashboard"
 
     # ── GET ─────────────────────────────────────────────────────────────────
     def do_GET(self):
@@ -156,8 +215,26 @@ class H(BaseHTTPRequestHandler):
             return
         if u.path.startswith("/api/v1"):
             return self.v1(u, qs)
+        if u.path == "/login":
+            if auth.mode() != "local":
+                return self.send(b"", "text/plain", status=302, extra={"Location": "./"})
+            return self.send(LOGIN_PAGE.read_bytes(), "text/html; charset=utf-8",
+                             extra={"Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; "
+                                    "style-src 'unsafe-inline'; img-src data:; connect-src 'self'; "
+                                    "form-action 'self'; frame-ancestors 'none'"})
+        if u.path == "/auth/status":                 # what the sign-in page needs to know, and nothing more
+            return self.send({"mode": auth.mode(), "users": auth.has_users() if auth.mode() == "local" else True})
         if not self.browser_ok():
-            return self.deny_browser()
+            return self.deny_browser(u.path)
+        me = self.user()
+        if me.get("must_change") and u.path not in MUST_CHANGE_OK:
+            return self.send({"error": "change your password first", "must_change": True}, status=403)
+        if u.path == "/api/me":
+            return self.send({k: me.get(k) for k in ("username", "role", "mode", "must_change", "totp")})
+        if u.path == "/api/users":
+            if not auth.at_least(me["role"], "admin") or auth.mode() != "local":
+                return self.send({"error": "admins only"}, status=403)
+            return self.send({"users": auth.users(), "log": auth.recent_log(50)})
         if u.path in ("/", "/index.html"):
             self.send(PAGE.read_bytes(), "text/html; charset=utf-8")
         elif u.path == "/api":
@@ -211,17 +288,29 @@ class H(BaseHTTPRequestHandler):
                 self.send_response(202); self.send_header("Content-Length", "0"); self.end_headers()
                 return
             return self.send(out, status=status)
+        if u.path in ("/auth/login", "/auth/logout"):
+            if not self.same_origin(u.path[6:]):
+                return self.send({"error": "forbidden"}, status=403)
+            return self.post_login() if u.path == "/auth/login" else self.post_logout()
         if not self.browser_ok():
-            return self.deny_browser()
+            return self.deny_browser(u.path)
         routes = {"/api/patch": ("patch", self.post_patch), "/api/layout": ("layout", self.post_layout),
                   "/api/tokens": ("tokens", self.post_tokens), "/api/approvals": ("approvals", self.post_approval),
                   "/api/geo": ("geo", self.post_geo), "/api/config": ("config", self.post_config),
-                  "/api/secret": ("secret", self.post_secret), "/api/accept": ("accept", self.post_accept)}
+                  "/api/secret": ("secret", self.post_secret), "/api/accept": ("accept", self.post_accept),
+                  "/api/password": ("password", self.post_password), "/api/totp": ("totp", self.post_totp),
+                  "/api/users": ("users", self.post_users)}
         if u.path not in routes:
             return self.send({"error": "not found"}, status=404)
         header, fn = routes[u.path]
         if not self.same_origin(header):
             return self.send({"error": "forbidden"}, status=403)
+        me = self.user()
+        if me.get("must_change") and u.path not in MUST_CHANGE_OK:
+            return self.send({"error": "change your password first", "must_change": True}, status=403)
+        if not auth.at_least(me["role"], NEEDS.get(u.path, "admin")):
+            return self.send({"ok": False, "error": f"your role ({me['role']}) can't do that — it needs "
+                                                    f"{NEEDS.get(u.path, 'admin')}"}, status=403)
         try:
             data = json.loads(self.body() or b"{}")
             if not isinstance(data, dict):
@@ -232,6 +321,95 @@ class H(BaseHTTPRequestHandler):
             fn(data)
         finally:
             views.invalidate()                      # the next refresh must show what this write changed
+
+    # ── sign in / account ───────────────────────────────────────────────────
+    def post_login(self):
+        if auth.mode() != "local":
+            return self.send({"ok": False, "error": "this install doesn't use warden's own sign-in"}, status=400)
+        try:
+            data = json.loads(self.body(cap=2048) or b"{}")
+            tok, u = auth.login(str(data.get("username", ""))[:64], str(data.get("password", ""))[:256],
+                                str(data.get("code", ""))[:12], ip=self.client_ip(),
+                                ua=self.headers.get("User-Agent", ""))
+        except ValueError as e:
+            if str(e) == "2fa":
+                return self.send({"ok": False, "need_code": True})
+            return self.send({"ok": False, "error": str(e)}, status=401)
+        hours = float(config.get("ui.session_hours") or 12)
+        self.send({"ok": True, "must_change": bool(u["must_change"])}, extra=self.set_session(tok, hours * 3600))
+
+    def post_logout(self):
+        auth.logout(self.cookie(auth.COOKIE))
+        self.send({"ok": True}, extra=self.set_session("", 0))
+
+    def post_password(self, body):
+        me = self.user()
+        if me.get("mode") != "local":
+            return self.send({"ok": False, "error": "passwords are managed by your sign-in provider"}, status=400)
+        try:
+            auth.change_password(me["id"], str(body.get("current", "")), str(body.get("new", "")))
+        except ValueError as e:
+            return self.send({"ok": False, "error": str(e)}, status=400)
+        tok = None
+        if not me.get("totp"):                       # keep this browser signed in; with 2FA, sign in again properly
+            try:
+                tok, _ = auth.login(me["username"], str(body.get("new", "")), "", ip=self.client_ip(),
+                                    ua=self.headers.get("User-Agent", ""))
+            except ValueError:
+                tok = None
+        extra = self.set_session(tok, float(config.get("ui.session_hours") or 12) * 3600) if tok else \
+            self.set_session("", 0)
+        self.send({"ok": True, "msg": "Password changed. Other sessions are signed out."
+                                      + ("" if tok else " Sign in again with your new password.")}, extra=extra)
+
+    def post_totp(self, body):
+        me = self.user()
+        if me.get("mode") != "local":
+            return self.send({"ok": False, "error": "2FA is managed by your sign-in provider"}, status=400)
+        try:
+            act = body.get("action")
+            if act == "begin":
+                return self.send({"ok": True, **auth.totp_begin(me["id"])})
+            if act == "confirm":
+                auth.totp_confirm(me["id"], str(body.get("code", "")))
+                return self.send({"ok": True, "msg": "2FA is on. You'll need a code from your app to sign in."})
+            if act == "disable":
+                auth.totp_disable(me["id"], str(body.get("password", "")))
+                return self.send({"ok": True, "msg": "2FA is off."})
+        except ValueError as e:
+            return self.send({"ok": False, "error": str(e)}, status=400)
+        self.send({"error": "action must be begin, confirm or disable"}, status=400)
+
+    def post_users(self, body):
+        if auth.mode() != "local":
+            return self.send({"ok": False, "error": "users are managed by your sign-in provider"}, status=400)
+        act, name = body.get("action"), str(body.get("username", ""))[:64]
+        me = self.user()
+        try:
+            if act == "add":
+                pw = auth.add_user(name, str(body.get("role", "viewer")))
+                return self.send({"ok": True, "password": pw,
+                                  "msg": "Shown once. They'll be asked to change it when they first sign in."})
+            if name.lower() == me["username"].lower() and act in ("role", "disable", "delete"):
+                return self.send({"ok": False, "error": "you can't change your own role or remove yourself here"})
+            if act == "role":
+                auth.update_user(name, role=str(body.get("role", "")))
+            elif act in ("disable", "enable"):
+                auth.update_user(name, disabled=act == "disable")
+            elif act == "reset-password":
+                return self.send({"ok": True, "password": auth.update_user(name, reset_password=True),
+                                  "msg": "Shown once. Their other sessions are signed out."})
+            elif act == "reset-2fa":
+                auth.update_user(name, reset_totp=True)
+            elif act == "unlock":
+                auth.update_user(name, unlock=True)
+            elif act == "delete":
+                auth.delete_user(name)
+            else:
+                return self.send({"error": "unknown action"}, status=400)
+        except ValueError as e:
+            return self.send({"ok": False, "error": str(e)}, status=400)
+        self.send({"ok": True})
 
     def post_patch(self, body):
         """Queue a patch REQUEST. It runs nothing: patcher.py turns it into a plan the owner must approve."""
