@@ -114,8 +114,14 @@ def check_password_policy(pw, username=""):
     return None
 
 
+# no look-alikes: 0/O/o, 1/l/I/i, 5/S, 2/Z, 8/B, u/v — people type these off a screen
+_EASY = "abcdefghjkmnpqrstwxyz3467"
+
+
 def generate_password():
-    return _rand.token_urlsafe(15)          # 20 characters, ~120 bits
+    """One-time passwords are READ and TYPED by a person: 5 groups of 4 from a 25-letter look-alike-free set
+    (~93 bits), e.g. 'kq7d-mx3t-…'. The first one, 9eLIpupt8dhWMO98Eq9I, failed twice on I/l and O/0."""
+    return "-".join("".join(_rand.choice(_EASY) for _ in range(4)) for _ in range(5))
 
 
 # ── 2FA (RFC 6238 TOTP, 30 s, 6 digits, SHA-1 — what every authenticator app speaks) ──────────────────
