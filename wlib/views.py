@@ -295,6 +295,7 @@ def payload():
         "netsec": netsec_payload(),
         "topology": topology(),
         "incidents": incidents(),
+        "agents": agents_payload(),
     }
 
 
@@ -316,6 +317,23 @@ def endpoints_payload():
                           "order by idx")
     out.update(heartbeat_payload())
     return out
+
+
+def agents_payload():
+    """AI agent egress: one row per agent with its destinations, any known-bad hits, and the review/coverage detail."""
+    if not has("agent_conns"):
+        return {"agents": [], "conns": [], "alerts": [], "findings": [], "runs": []}
+    return {
+        "agents": q("""select a.agent, max(a.host) host, count(*) dests, sum(a.hits) conns, max(a.last_seen) last_seen,
+                       (select count(*) from agent_alerts al where al.agent=a.agent) alerts
+                       from agent_conns a group by a.agent order by alerts desc, conns desc"""),
+        "conns": q("select agent,host,dest,dest_ip,port,domain,first_seen,last_seen,hits,container from agent_conns "
+                   "order by agent, hits desc"),
+        "alerts": q("select ts,agent,host,dest,dest_ip,kind,feed,detail from agent_alerts order by id desc limit 100"),
+        "findings": q("select ts,agent,host,dest,score,decision,reasons,explain,verdict from agent_findings "
+                      "order by (verdict is null) desc, id desc limit 200"),
+        "runs": q("select host,ts,status,note,seen,attributed from agent_runs order by host"),
+    }
 
 
 def heartbeat_payload():

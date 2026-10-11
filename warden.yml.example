@@ -138,3 +138,14 @@ dashboard:
 # exposure:
 #   npm: {url: "https://192.168.1.10:81", user_secret: NPM_USER, pass_secret: NPM_PASSWORD, verify_tls: false}
 #   extra: [{host: vpn.example.com, upstream: ["192.168.1.20:443"]}]   # hand-written routes the API can't show
+
+# ── Hermes agent activity ────────────────────────────────────────────────────
+# agents.py attributes each outbound connection on an agent host to the Hermes agent that made it, and flags any
+# reaching a known-bad host. Detect-only. The box warden runs on is watched by default.
+agents:
+  include_local: true            # also watch the box warden itself runs on (where most agents run); false to skip it
+  learn_hours: 48                # a destination first seen within this long of an agent's first sighting is "learning"
+  hermes_profile: sec            # which Hermes profile writes the advisory line on a review card
+  ignore:                        # processes NOT tracked (substring, or /regex/ against the command line). The defaults
+    []                           #   already drop Claude Code, ssh/sshd and system daemons; add your own here.
+# Mark any OTHER host that runs agents with `agents: true` in its hosts: entry above.

@@ -60,6 +60,8 @@ UNITS = {
                                ["devices.py"], ("every", "15min", "6min"), []),
     "warden-netwatch":        ("router", "warden — internet health every minute (router, internet, DNS, web, line usage)",
                                ["netwatch.py"], ("every", "1min", "2min"), ["TimeoutStartSec=55"]),
+    "warden-agents":          ("agents", "warden — which Hermes agent is talking to what; flag any reaching a known-bad host",
+                               ["agents.py"], ("every", "10min", "5min"), ["TimeoutStartSec=300"]),
     "warden-devicewatch":     ("router", "warden — score fixed-function devices doing something new; ask the owner on odd ones",
                                ["devicewatch.py"], ("every", "10min", "9min"), ["TimeoutStartSec=1200"]),
 }
@@ -73,6 +75,7 @@ GROUPS = {
     "cloudflare": "cloudflare.zone_id set",
     "ids": "ids.suricata_host set",
     "router": "router.ssh set",
+    "agents": "an agent host (agents.include_local defaults on)",
 }
 
 
@@ -89,6 +92,7 @@ def enabled_groups():
         "cloudflare": bool(config.get("cloudflare.zone_id")),
         "ids": bool(config.get("ids.suricata_host")),
         "router": bool(config.get("router.ssh")),
+        "agents": bool(config.get("agents.include_local", True)) or any(h.get("agents") for h in hosts.declared()),
     }
 
 

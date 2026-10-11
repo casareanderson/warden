@@ -393,6 +393,24 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="note">netscan is detect-only with no enforcement path: acting automatically against a LAN device has a far worse blast radius than a late alert.</div>
 </section>
 
+<!-- HERMES AGENTS -->
+<section class="tab" id="t-agents">
+  <div class="kpis" id="ag-kpis"></div>
+  <h2>Reached a known-bad destination <span class="hint">a Hermes agent connected to a host on a threat feed — detect-only, nothing was blocked</span></h2>
+  <div class="wrap"><table id="ag-alerts"></table></div>
+  <h2>Hermes agents <span class="hint">each autonomous agent and what it talks to; Claude Code and system noise are not tracked</span></h2>
+  <div class="tbl-tools"><input data-filter="ag-agents" placeholder="filter: agent, host…"><span class="n" id="ag-agents-n"></span></div>
+  <div class="wrap"><table id="ag-agents"></table></div>
+  <h2>Destinations</h2>
+  <div class="tbl-tools"><input data-filter="ag-conns" placeholder="filter: agent, destination, ip…"><span class="n" id="ag-conns-n"></span></div>
+  <div class="wrap"><table id="ag-conns"></table></div>
+  <h2>New-destination reviews <span class="hint">✅ expected, learn it · ❌ not expected</span></h2>
+  <div class="wrap"><table id="ag-find"></table></div>
+  <h2>Coverage</h2>
+  <div class="wrap"><table id="ag-runs"></table></div>
+  <div class="note"><code>ss</code> is a snapshot every 10 minutes, so a connection that opens and closes between polls is missed. Without root on a host, only warden's own user's sockets are attributed — never guessed.</div>
+</section>
+
 <!-- HEALTH -->
 <section class="tab" id="t-health">
   <h2>Source health — is it actually reading anything?</h2>
@@ -482,7 +500,7 @@ const ago = ts => { if (!ts) return "—"; const d = (Date.now() - new Date(ts.r
 const selfB = r => r.self ? ' <span class="b acc" title="our own address (self-ips.txt / warden.yml allow) — excluded from counts">self</span>' : "";
 const ccCell = (cc, red) => cc ? `<span class="flag">${flag(cc)}</span>${esc(cc)}${red ? ' <span class="b red">red list</span>' : ""}` : '<span class="q">—</span>';
 
-const GROUPS = [["Monitor", [["overview","Overview"],["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["search","Search"]]],
+const GROUPS = [["Monitor", [["overview","Overview"],["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["agents","Hermes agents"],["search","Search"]]],
                 ["Exposure", [["surface","Attack surface"],["geo","Geo & red list"]]],
                 ["Assets", [["vulns","Vulnerabilities"],["endpoints","Endpoints"]]],
                 ["Hub", [["health","Health"],["connect","Connect"],["settings","Settings"],["account","Account"]]]];
@@ -974,6 +992,35 @@ function loginCell(b) {
   return `<span style="white-space:nowrap"><span class="mono" title="${esc(tip)}">${who}</span> <span class="q">${ago(l.ts)}${l.method && l.method !== "console" ? " · " + esc(l.method) : ""}</span></span>`
     + (l.key_label ? ` <span class="b acc">${esc(l.key_label)}</span>` : "") + (l.new ? ' <span class="b amb">new</span>' : "") + f;
 }
+function renderAgents(A) {
+  if (!A) return;
+  const open = (A.findings || []).filter(f => f.verdict == null && f.decision === "review").length;
+  const bad = (A.alerts || []).length;
+  $("#ag-kpis").innerHTML = [
+    ["Hermes agents", (A.agents || []).length, "autonomous agents seen talking out", ""],
+    ["Known-bad hits", bad, "matched a threat feed", bad ? "red" : "grn"],
+    ["New to review", open, "destinations awaiting \u2705/\u274c", open ? "amb" : "grn"],
+  ].map(([t, v, s, c]) => `<div class="kpi ${c}"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join("");
+  table("ag-alerts", [{h: "When", f: r => ago(r.ts), cls: "ts"}, {h: "Agent", k: "agent", cls: "mono"}, {h: "Host", k: "host"},
+    {h: "Kind", f: r => `<span class="b red">${esc(r.kind)}</span>`}, {h: "Destination", f: r => esc(r.dest), cls: "mono"},
+    {h: "Feed", k: "feed"}, {h: "Detail", k: "detail", cls: "det"}], A.alerts, "No Hermes agent has reached a known-bad destination. \ud83c\udf89");
+  table("ag-agents", [{h: "Agent", f: r => `<b>${esc(r.agent)}</b>`}, {h: "Host", k: "host"},
+    {h: "Destinations", k: "dests", cls: "num", num: 1}, {h: "Connections", k: "conns", cls: "num", num: 1},
+    {h: "Last seen", f: r => ago(r.last_seen), cls: "ts"},
+    {h: "Flags", f: r => r.alerts ? `<span class="b red">${r.alerts} alert${r.alerts > 1 ? "s" : ""}</span>` : '<span class="q">\u2014</span>'}],
+    A.agents, "agents.py has not run yet.");
+  table("ag-conns", [{h: "Agent", k: "agent", cls: "mono"}, {h: "Destination", f: r => esc(r.domain || r.dest), cls: "mono"},
+    {h: "IP", k: "dest_ip", cls: "ip mono", ip: 1}, {h: "Port", k: "port", cls: "num"}, {h: "Seen", k: "hits", cls: "num", num: 1},
+    {h: "Last", f: r => ago(r.last_seen), cls: "ts"}, {h: "In", k: "container", cls: "det q"}], A.conns, "No destinations recorded.");
+  table("ag-find", [{h: "When", f: r => ago(r.ts), cls: "ts"}, {h: "Agent", k: "agent", cls: "mono"}, {h: "Destination", k: "dest", cls: "mono"},
+    {h: "Score", k: "score", cls: "num", num: 1}, {h: "Why", f: r => esc((JSON.parse(r.reasons || "[]")).slice(1).join("; ")), cls: "det", title: 1},
+    {h: "Verdict", f: r => r.verdict ? `<span class="b ${r.verdict === "suspicious" ? "red" : r.verdict === "normal" ? "ok" : ""}">${esc(r.verdict)}</span>` : '<span class="b amb">open</span>'}],
+    A.findings, "Nothing new from any agent.");
+  table("ag-runs", [{h: "Host", k: "host"}, {h: "Status", f: r => `<span class="b ${r.status === "ok" ? "ok" : "red"}">${esc(r.status)}</span>`},
+    {h: "Sockets", k: "seen", cls: "num", num: 1}, {h: "Attributed", k: "attributed", cls: "num", num: 1},
+    {h: "Last", f: r => ago(r.ts), cls: "ts"}, {h: "Note", k: "note", cls: "det"}], A.runs, "No agent-host runs yet.");
+  badge("agents", bad + open, bad > 0);
+}
 function renderNetsec(N) {
   if (!N) return;
   donut($("#ch-ids"), N.ids_top.map(x => ({k: x.k, n: x.n, red: x.sev === 1})), {unit: "alerts", q: x => "type:ids " + x.k.split(" ").slice(0, 3).join(" ")});
@@ -1429,7 +1476,7 @@ document.addEventListener("click", async e => {
 });
 
 async function load() {
-  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec);
+  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); renderAgents(D.agents);
         const a = document.activeElement;   // don't wipe a half-typed setting/token on the 60-s refresh
         if (!(a && /INPUT|SELECT/.test(a.tagName) && a.closest("#t-settings,#t-connect"))) loadSettings(); }
   catch (e) { console.error("warden render:", e); $("#updated").textContent = "⚠ refresh failed"; }

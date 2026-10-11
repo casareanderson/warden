@@ -134,3 +134,15 @@ is added it will follow these rules:
 - **A shared key hides its users.** "Self" is any key that lives on the warden box. If another job on that box signs <!-- steward: skip (advice, design or upstream; not for the coding agent) -->
   in with the same key, it is left out too. Give jobs their own keys and name them in `logins.known_keys`.
 - **Container sign-ins and heartbeats need Proxmox** (`pct`, `pvesh`). Containers on other hypervisors are not seen.
+
+## Hermes agent tracking
+
+- **`ss` is a snapshot.** `agents.py` polls every 10 minutes; a connection that opens and closes between polls is
+  not seen. It catches steady talkers (beacons, long transfers), not a single sub-second request.
+- **Attribution needs root on the agent host.** Without it, `ss` only annotates warden's own user's sockets; the
+  rest are counted but shown as unattributed, never guessed.
+- **Destinations are IPs first.** The threat check is reliable on the destination IP (C2/botnet feeds); mapping an
+  IP back to the domain the agent intended is best-effort, so domain-feed and red-list matches depend on a resolver
+  log being available.
+- **Interactive tools are out of scope by design.** Claude Code, ssh and system daemons are in `agents.ignore`;
+  this watches the autonomous Hermes agents, not a person at a keyboard.
