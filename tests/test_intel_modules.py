@@ -68,6 +68,16 @@ def test_allowlist_guards(home):
     assert w.net_overlaps_allow("not-a-net", [])          # unparseable → never ban
 
 
+def test_allowlist_guards_read_self_ips(home):
+    (home / "self-ips.txt").write_text("# our dynamic WAN lease\n203.0.113.7\n")
+    w = load("warden")
+    allow = w.allow_extra(w.load_conf())
+    assert "203.0.113.7" in allow                        # self-ips.txt is part of the set
+    assert w.is_allowlisted("203.0.113.7", allow)
+    assert w.net_overlaps_allow("203.0.113.0/24", allow)         # own WAN's /24 refused
+    assert not w.net_overlaps_allow("198.51.100.0/24", allow)    # hostile /24 still bannable
+
+
 def test_unconfigured_sources_are_skipped(home, monkeypatch):
     w = load("warden")
     no_subprocess(monkeypatch)
