@@ -49,27 +49,62 @@ RISKY_TLD = {"xyz", "top", "tk", "ml", "ga", "cf", "gq", "pw", "click", "work", 
              "mov", "ru", "su", "cn"}
 TZ = ZoneInfo(config.get("estate.timezone") or "Europe/London")
 
-# One read-only collector. Emits: @@meta, @@total <n>, @@conn <pid> <rip> <rport>, @@proc <pid> <uid> <cg> <exe> <cmd>.
+# One read-only collector. Emits, tab-separated:
+#   @@meta  host=.. root=.. ss=..                       the box, whether we ran as root, whether ss exists
+#   @@total <n>                                          established outbound sockets (for the attribution ratio)
+#   @@conn  <pid> <rip> <rport> <bytes_recv>            one per (pid, peer); bytes_recv is this socket's lifetime so far
+#   @@proc  <pid> <uid> <cg> <exe> <cmd>                attribution facts for a pid
+#   @@perm  <pid> <uid> <gid> <capeff_hex> <groups>     access facts for a pid (effective ids, caps, supplementary gids)
+#   @@sudo  <uid> <summary>                              best-effort `sudo -n -l` for a user (root only)
+#   @@file  <path> <owner_uid:owner_gid:mode>           stat of a configured sensitive file (readability decided later)
+# Every read is read-only; nothing is written, killed or changed. __SECRET_FILES__ is filled in from warden.yml.
 COLLECT = r'''LC_ALL=C; export LC_ALL
 printf '@@meta\thost=%s\troot=%s\tss=%s\n' "$(hostname 2>/dev/null)" \
   "$([ "$(id -u)" = 0 ] && echo 1 || echo 0)" "$(command -v ss >/dev/null 2>&1 && echo 1 || echo 0)"
 command -v ss >/dev/null 2>&1 || exit 0
 printf '@@total\t%s\n' "$(ss -tnH state established 2>/dev/null | wc -l)"
-ss -tnpH state established 2>/dev/null | while IFS= read -r line; do
-  peer=$(printf '%s\n' "$line" | awk '{print $4}')
-  case "$peer" in *:*) : ;; *) continue ;; esac
-  rip=${peer%:*}; rport=${peer##*:}; rip=${rip#[}; rip=${rip%]}
-  for p in $(printf '%s\n' "$line" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
-    printf '@@conn\t%s\t%s\t%s\n' "$p" "$rip" "$rport"
-  done
+# -i adds a tab-indented info line after each socket; we carry bytes_received from it onto the socket's @@conn.
+rip=""; rport=""; pids=""
+flush() { [ -n "$pids" ] || return; for p in $pids; do printf '@@conn\t%s\t%s\t%s\t%s\n' "$p" "$rip" "$rport" "${1:-0}"; done; pids=""; }
+ss -tinpH state established 2>/dev/null | while IFS= read -r line; do
+  case "$line" in
+    "	"*)                                              # info line: bytes for the socket just read
+      br=$(printf '%s\n' "$line" | grep -o 'bytes_received:[0-9]*' | head -1 | cut -d: -f2)
+      flush "${br:-0}" ;;
+    *)                                                   # socket line
+      flush 0
+      peer=$(printf '%s\n' "$line" | awk '{print $4}')
+      case "$peer" in *:*) : ;; *) continue ;; esac
+      rip=${peer%:*}; rport=${peer##*:}; rip=${rip#[}; rip=${rip%]}
+      pids=$(printf '%s\n' "$line" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u | tr '\n' ' ') ;;
+  esac
 done
 for p in $(ss -tnpH state established 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -un); do
   [ -r /proc/$p/cmdline ] || continue
   uid=$(awk '/^Uid:/{print $2; exit}' /proc/$p/status 2>/dev/null)
+  gid=$(awk '/^Gid:/{print $2; exit}' /proc/$p/status 2>/dev/null)
+  cap=$(awk '/^CapEff:/{print $2; exit}' /proc/$p/status 2>/dev/null)
+  grp=$(awk '/^Groups:/{sub(/^Groups:[ \t]*/,""); print; exit}' /proc/$p/status 2>/dev/null)
   exe=$(readlink /proc/$p/exe 2>/dev/null)
   cg=$(grep -ao 'docker[-/][0-9a-f]\{12,64\}\|lxc[-/.][A-Za-z0-9_-]*' /proc/$p/cgroup 2>/dev/null | head -1)
   cmd=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | cut -c1-240)
   printf '@@proc\t%s\t%s\t%s\t%s\t%s\n' "$p" "$uid" "$cg" "$exe" "$cmd"
+  printf '@@perm\t%s\t%s\t%s\t%s\t%s\n' "$p" "$uid" "$gid" "$cap" "$grp"
+done
+# sudo rights per user (bounded: one check per distinct user behind a socket; needs root; never prompts)
+if [ "$(id -u)" = 0 ] && command -v sudo >/dev/null 2>&1; then
+  for p in $(ss -tnpH state established 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -un); do
+    awk '/^Uid:/{print $2; exit}' /proc/$p/status 2>/dev/null
+  done | sort -un | while read -r uid; do
+    user=$(getent passwd "$uid" 2>/dev/null | cut -d: -f1); [ -n "$user" ] || continue
+    sud=$(timeout 5 sudo -n -l -U "$user" 2>/dev/null | grep -iE 'NOPASSWD|\(ALL|may run the following' | tr '\n' ';' | cut -c1-200)
+    printf '@@sudo\t%s\t%s\n' "$uid" "${sud:-none or unknown}"
+  done
+fi
+# sensitive files: stat only; whether a given agent can actually read them is worked out from these facts
+for f in __SECRET_FILES__; do
+  [ -e "$f" ] || continue
+  printf '@@file\t%s\t%s\n' "$f" "$(stat -c '%u:%g:%a' "$f" 2>/dev/null)"
 done
 true
 '''
@@ -95,7 +130,15 @@ def db():
         decided_at text, unique(agent, dest));
       create table if not exists agent_runs(host text primary key, ts text, status text, note text,
         seen integer, attributed integer);
+      -- what each agent can do where it runs (read-only facts; the console turns them into plain English):
+      create table if not exists agent_perms(agent text, host text, ts text, user text, uid integer, gid integer,
+        groups text, caps text, sudo text, root integer, primary key(agent, host));
+      -- sensitive files on each host (one stat), joined with agent_perms to decide who could read them:
+      create table if not exists agent_files(host text, path text, stat text, ts text, primary key(host, path));
     """)
+    # bytes_recv: best-effort download volume per destination, added in v3.1 (tolerate an older DB)
+    if "bytes_recv" not in {r[1] for r in con.execute("pragma table_info(agent_conns)")}:
+        con.execute("alter table agent_conns add column bytes_recv integer default 0")
     return con
 
 
@@ -121,23 +164,67 @@ def ignored(cmd):
 
 
 # ── who is this agent? ─────────────────────────────────────────────────────────
-# (compiled pattern over the command line, a namer). First match wins; order matters. Hermes profiles first.
-CLASSIFY = [
-    (re.compile(r"\bhermes\b"),          lambda m, cmd, u: "hermes:" + (re.search(r"--profile[= ]+(\S+)", cmd).group(1)
-                                                                        if re.search(r"--profile[= ]+(\S+)", cmd) else "default")),
-    (re.compile(r"\bopencode\b"),        lambda m, cmd, u: "opencode:" + (u or "?")),
-    (re.compile(r"\bollama\b"),          lambda m, cmd, u: "ollama"),
-    (re.compile(r"crawl4ai|playwright|chromium|headless"),                  lambda m, cmd, u: "app:scraper"),
+# Each rule is (compiled regex over the command line, namer(match, cmd, user) -> label). First match wins.
+# This is NOT Hermes-specific: the built-ins below are examples for a Hermes-style estate, and any owner can
+# name their own agents — Muse, a ChatGPT bridge, a custom bot, whatever — in warden.yml:
+#   agents:
+#     patterns:                       # checked BEFORE the built-ins, so you can override or add
+#       - {pattern: "\\bmybot\\b", name: "mybot"}                  # fixed label
+#       - {pattern: "myagent --role (\\w+)", name: "myagent:$1"}   # $1..$9 = regex capture groups
+# Anything unmatched still gets a name: a Python script becomes app:<script>, everything else other:<exe>.
+def _hermes_name(m, cmd, u):
+    pm = re.search(r"--profile[= ]+(\S+)", cmd)
+    return "hermes:" + (pm.group(1) if pm else "default")
+
+
+BUILTIN_CLASSIFY = [
+    (re.compile(r"\bhermes\b"),   _hermes_name),
+    (re.compile(r"\bopencode\b"), lambda m, cmd, u: "opencode:" + (u or "?")),
+    (re.compile(r"\bollama\b"),   lambda m, cmd, u: "ollama"),
+    (re.compile(r"\b(aider|goose|cline|cursor-agent|gptme)\b"), lambda m, cmd, u: "app:" + m.group(1)),
+    (re.compile(r"crawl4ai|playwright|chromium|headless"),      lambda m, cmd, u: "app:scraper"),
 ]
+
+
+def _name_template(tmpl):
+    """A namer from a configured `name` string; $1..$9 expand to the regex capture groups."""
+    def namer(m, cmd, u):
+        out = tmpl
+        for i in range(1, 10):
+            if "$%d" % i in out:
+                try:
+                    g = m.group(i) or ""
+                except (IndexError, re.error):
+                    g = ""
+                out = out.replace("$%d" % i, g)
+        return out.strip() or "agent"
+    return namer
+
+
+def _build_classify():
+    """Owner `agents.patterns` first (override/extend), then the built-in examples."""
+    rules = []
+    for p in (config.get("agents.patterns") or []):
+        try:
+            pat = p["pattern"] if isinstance(p, dict) else str(p)
+            name = (p.get("name") if isinstance(p, dict) else None) or "agent"
+            rules.append((re.compile(pat), _name_template(name)))
+        except (re.error, KeyError, TypeError):
+            continue                                           # a bad rule is skipped, never fatal
+    return rules + BUILTIN_CLASSIFY
+
+
+CLASSIFY = _build_classify()
 
 
 def classify(cmd, exe="", uid_name=""):
     """(agent, why). From the process command line; Python scripts become app:<script>, everything else other:<exe>."""
     cmd = cmd or ""
-    for rx, name in CLASSIFY:
-        if rx.search(cmd):
+    for rx, namer in CLASSIFY:
+        m = rx.search(cmd)
+        if m:
             label = rx.pattern.split("|")[0].strip("\\b").strip("()^$")
-            return name(None, cmd, uid_name), f"matched '{label}' in command"
+            return namer(m, cmd, uid_name), f"matched '{label}' in command"
     m = re.search(r"(?:^|\s)(?:python3?|python3\.\d+)\s+(?:-[A-Za-z]+\s+)*(?:-m\s+(\S+)|(\S+\.py))", cmd)
     if m:
         mod = (m.group(1) or os.path.basename(m.group(2) or "")).rsplit(".", 1)[0]
@@ -164,15 +251,35 @@ def agent_targets():
     return out
 
 
+def _secret_files():
+    """Sensitive files whose readability by an agent is worth knowing: warden's own config + DB, plus any the owner
+    names in `agents.secret_files`. Only shell-safe absolute paths are passed to the collector."""
+    cand = [str(config.HOME / "warden.yml"), str(config.DB)]
+    cand += [str(x) for x in (config.get("agents.secret_files") or [])]
+    out, seen = [], set()
+    for p in cand:
+        p = p.strip()
+        if p and p not in seen and re.fullmatch(r"[A-Za-z0-9 ._/\-]+", p):   # no quotes/metachars → safe to single-quote
+            out.append(p); seen.add(p)
+    return out
+
+
+def _collect_script():
+    files = " ".join("'%s'" % p for p in _secret_files()) or "''"
+    return COLLECT.replace("__SECRET_FILES__", files)
+
+
 def collect(t):
-    """(meta, conns, procs) from one host. conns: [(pid,rip,rport)]; procs: {pid:(uid,container,exe,cmd)}."""
-    rc, out, err = hosts.remote(t, COLLECT, timeout=120, root=t["kind"] in ("host", "local", "node", "ct"))
-    meta = {"host": t["name"], "root": False, "ss": False, "total": 0, "err": (err or "").strip()[:160] if rc else ""}
+    """Facts from one host. Returns a meta dict (with perms/sudo/files/err/rc), a conns list [(pid,rip,rport,bytes)],
+    and procs {pid: (uid, container, exe, cmd)}."""
+    rc, out, err = hosts.remote(t, _collect_script(), timeout=120, root=t["kind"] in ("host", "local", "node", "ct"))
+    meta = {"host": t["name"], "root": False, "ss": False, "total": 0, "err": (err or "").strip()[:160] if rc else "",
+            "perms": {}, "sudo": {}, "files": {}}
     conns, procs = [], {}
     for line in (out or "").splitlines():
         f = line.split("\t")
         if f[0] == "@@meta":
-            for kv in line.split("\t")[1:]:
+            for kv in f[1:]:
                 k, _, v = kv.partition("=")
                 if k == "host" and v:
                     meta["host"] = v
@@ -180,10 +287,16 @@ def collect(t):
                     meta[k] = v == "1"
         elif f[0] == "@@total" and len(f) > 1:
             meta["total"] = int(f[1]) if f[1].isdigit() else 0
-        elif f[0] == "@@conn" and len(f) == 4:
-            conns.append((f[1], f[2], f[3]))
+        elif f[0] == "@@conn" and len(f) >= 4:
+            conns.append((f[1], f[2], f[3], int(f[4]) if len(f) > 4 and f[4].isdigit() else 0))
         elif f[0] == "@@proc" and len(f) >= 6:
             procs[f[1]] = (f[2], f[3], f[4], "\t".join(f[5:]))
+        elif f[0] == "@@perm" and len(f) >= 5:
+            meta["perms"][f[1]] = (f[2], f[3], f[4], f[5] if len(f) > 5 else "")
+        elif f[0] == "@@sudo" and len(f) >= 3:
+            meta["sudo"][f[1]] = "\t".join(f[2:])
+        elif f[0] == "@@file" and len(f) >= 3:
+            meta["files"][f[1]] = f[2]
     meta["rc"] = rc
     return meta, conns, procs
 
@@ -203,6 +316,13 @@ def uid_name(uid):
         return pwd.getpwuid(int(uid)).pw_name
     except (KeyError, ValueError, OverflowError):
         return uid or ""
+
+
+def _int(x, default=-1):
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        return default
 
 
 # ── scoring a NEW destination (mirrors devicewatch) ──────────────────────────────
@@ -277,23 +397,28 @@ def run(dry=False):
                         (host, ts, "error", meta["err"] or f"exit {meta['rc']}", 0, 0))
             continue
         attributed = {c[0] for c in conns if c[0] in procs}
-        for pid, rip, rport in conns:
+        perms_here = {}                                        # agent -> (uid, gid, caps, groups) to record for this host
+        for pid, rip, rport, brecv in conns:
             if not is_internet(rip) or pid not in procs:
                 continue
             uid, cg, exe, cmd = procs[pid]
             if ignored(cmd):                                   # Claude Code, ssh, system daemons — not autonomous agents
                 continue
             agent, _ = classify(cmd, exe, uid_name(uid))
+            pm = meta["perms"].get(pid)                         # record the agent's access; prefer a root instance if seen
+            if pm and (agent not in perms_here or pm[0] == "0"):
+                perms_here[agent] = pm
             port = int(rport) if rport.isdigit() else 0
             dom = ""                                           # best-effort name; raw IP otherwise
             dest = dom or rip
             counts["conns"] += 1
             con.execute("insert into agent_seen(agent,first_seen,last_seen,host) values(?,?,?,?) on conflict(agent) "
                         "do update set last_seen=excluded.last_seen", (agent, ts, ts, host))
-            con.execute("""insert into agent_conns(agent,host,dest,dest_ip,port,domain,first_seen,last_seen,hits,container,sample_cmd)
-                           values(?,?,?,?,?,?,?,?,1,?,?) on conflict(agent,dest,port) do update set
-                           last_seen=excluded.last_seen, hits=agent_conns.hits+1, host=excluded.host""",
-                        (agent, host, dest, rip, port, dom, ts, ts, cg, cmd[:200]))
+            con.execute("""insert into agent_conns(agent,host,dest,dest_ip,port,domain,first_seen,last_seen,hits,container,sample_cmd,bytes_recv)
+                           values(?,?,?,?,?,?,?,?,1,?,?,?) on conflict(agent,dest,port) do update set
+                           last_seen=excluded.last_seen, hits=agent_conns.hits+1, host=excluded.host,
+                           bytes_recv=max(agent_conns.bytes_recv, excluded.bytes_recv)""",
+                        (agent, host, dest, rip, port, dom, ts, ts, cg, cmd[:200], brecv))
             # ── threat match (highest priority) ──
             hit = []
             f_ip = netintel.ip_in(v4, rip)
@@ -348,6 +473,16 @@ def run(dry=False):
                     (host, ts, "ok", ("root" if meta["root"] else "no root — only warden's own sockets")
                      + (f"; {len(attributed)}/{meta['total']} sockets attributed" if meta["total"] else ""),
                      meta["total"], len(attributed)))
+        for agent, (uid, gid, caps, groups) in perms_here.items():      # access facts for every agent seen here
+            con.execute("""insert into agent_perms(agent,host,ts,user,uid,gid,groups,caps,sudo,root)
+                           values(?,?,?,?,?,?,?,?,?,?) on conflict(agent,host) do update set
+                           ts=excluded.ts,user=excluded.user,uid=excluded.uid,gid=excluded.gid,groups=excluded.groups,
+                           caps=excluded.caps,sudo=excluded.sudo,root=excluded.root""",
+                        (agent, host, ts, uid_name(uid), _int(uid), _int(gid), groups, caps,
+                         meta["sudo"].get(uid, ""), 1 if uid == "0" else 0))
+        for path, stt in meta["files"].items():
+            con.execute("insert into agent_files(host,path,stat,ts) values(?,?,?,?) "
+                        "on conflict(host,path) do update set stat=excluded.stat,ts=excluded.ts", (host, path, stt, ts))
     counts["alerts"] = len(alerts)
     if dry:
         print("agents (dry):", " ".join(f"{k}={v}" for k, v in counts.items()))
