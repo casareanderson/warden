@@ -510,11 +510,32 @@ class H(BaseHTTPRequestHandler):
         self.send({"ok": True, "msg": "Stored in data/secrets.env (0600). It is never shown again."})
 
 
+LOOPBACK = {"127.0.0.1", "::1", "localhost", "ip6-localhost"}
+
+
+def _guard_proxy_bind(host):
+    """In `ui.auth: proxy` the Remote-User header is trusted as the signed-in user, which is safe ONLY when the
+    port can be reached solely through the reverse proxy. Refuse to start if proxy mode is bound to a routable
+    address — there anyone on the network could send Remote-User directly and be admin — unless the operator
+    explicitly opts in (the proxy is genuinely the only path). Confirmed exploitable in testing 2026-10."""
+    if auth.mode() != "proxy" or host in LOOPBACK or host.startswith("127."):
+        return
+    if config.get("ui.trust_proxy_insecure"):
+        print(f"warden-ui: WARNING ui.auth=proxy on non-loopback bind {host!r} (ui.trust_proxy_insecure set). "
+              "Your proxy MUST overwrite the Remote-User header and the port MUST be firewalled.", file=sys.stderr)
+        return
+    sys.exit(f"warden-ui: refusing to start — ui.auth is 'proxy' but ui.host is {host!r}, not loopback. In proxy "
+             "mode the Remote-User header is trusted as the user, so a routable bind lets anyone on the network "
+             "become admin. Bind to 127.0.0.1 behind your reverse proxy, or set ui.trust_proxy_insecure: true if "
+             "that port really is reachable only through the proxy.")
+
+
 def main():
     host, port = config.get("ui.host") or "127.0.0.1", int(config.get("ui.port") or 8792)
     import os  # noqa: PLC0415
     host = os.environ.get("WARDEN_UI_HOST", host)
     port = int(os.environ.get("WARDEN_UI_PORT", port))
+    _guard_proxy_bind(host)
     views.warm_cache()
     ThreadingHTTPServer((host, port), H).serve_forever()
 
