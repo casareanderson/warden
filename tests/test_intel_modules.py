@@ -73,6 +73,9 @@ def test_unconfigured_sources_are_skipped(home, monkeypatch):
     assert w.collect_npm(con) == ([], 0)
     assert w.collect_authelia(con) == ([], 0)
     assert w.collect_cloudflared(con) == ([], 0)
+    assert w.collect_caddy(con) == ([], 0)
+    assert w.collect_traefik(con) == ([], 0)
+    assert w.collect_authentik(con) == ([], 0)
 
 
 def test_source_commands(home, monkeypatch):
@@ -94,6 +97,47 @@ def test_source_commands(home, monkeypatch):
     seen.clear()
     w.collect_authelia(con)
     assert seen[0] == ["sh", "-c", "wc -c < /var/log/authelia.log"]
+
+
+# ── the extra log formats (Caddy JSON, Traefik CLF, Authentik JSON) ─────────
+CADDY = ('{"level":"info","ts":1704067200.0,"logger":"http.log.access","msg":"handled request",'
+         '"request":{"remote_ip":"203.0.113.5","remote_port":"4321","proto":"HTTP/2.0",'
+         '"method":"GET","host":"example.com","uri":"/wp-login.php",'
+         '"headers":{"User-Agent":["Mozilla/5.0 (X11; Linux x86_64)"]}},"size":1234,"status":404}')
+TRAEFIK = ('203.0.113.5 - - [11/Oct/2026:12:00:00 +0000] "GET /wp-login.php HTTP/1.1" '
+           '404 153 "-" "Mozilla/5.0 (X11; Linux x86_64)" 1 "router@docker" "http://10.0.0.1:80" 3ms')
+AUTHENTIK = ('{"event": "Created Event", "level": "info", "logger": "authentik.events.models",'
+             ' "action": "login_failed", "client_ip": "203.0.113.6",'
+             ' "user": {"pk": 2, "email": "", "username": "AnonymousUser"},'
+             ' "timestamp": "2026-10-11T12:00:00.000000Z"}')
+
+
+def test_caddy_scorer(home):
+    w = load("warden")
+    ev = w.score_caddy(CADDY)
+    assert ev["ip"] == "203.0.113.5" and "wordpress-probe" in ev["kind"] and ev["score"] >= 3
+    assert w.score_caddy('{"msg": "something else"}') is None
+
+
+def test_traefik_scorer(home):
+    w = load("warden")
+    ev = w.score_traefik(TRAEFIK)
+    assert ev["ip"] == "203.0.113.5" and "wordpress-probe" in ev["kind"]
+
+
+def test_authentik_scorer(home):
+    w = load("warden")
+    ev = w.score_authentik(AUTHENTIK)
+    assert ev["ip"] == "203.0.113.6" and ev["kind"] == "auth-failure" and ev["score"] == 3
+    assert w.score_authentik('{"action": "login", "client_ip": "203.0.113.6"}') is None
+    assert w.score_authentik("not json") is None
+
+
+def test_new_source_event_times(home):
+    w = load("warden")
+    assert w.event_time("caddy", CADDY) == "2024-01-01 00:00:00"
+    assert w.event_time("traefik", TRAEFIK) == "2026-10-11 12:00:00"
+    assert w.event_time("authentik", AUTHENTIK) == "2026-10-11 12:00:00"
 
 
 # ── netintel / netids: optional vantage points ──────────────────────────────
