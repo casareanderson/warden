@@ -277,6 +277,16 @@ html[data-density=compact] nav button{padding:7px 10px}
 .count.dot{min-width:9px;width:9px;height:9px;padding:0;border-radius:50%;background:var(--amb);text-indent:-999px;overflow:hidden}
 .count.dot.bad{background:var(--red)}
 .fld label .fkey{display:block;font-size:10px;color:var(--faint);font-weight:400;margin-top:2px;font-family:var(--mono)}
+.acc{display:flex;flex-direction:column;gap:6px}
+.acc-item{background:var(--panel);border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+.acc-item summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:9px;padding:10px 13px;font-weight:600;color:var(--fg)}
+.acc-item summary::-webkit-details-marker{display:none}
+.acc-item summary::before{content:"+";width:14px;flex:none;text-align:center;color:var(--acc);font-weight:700;font-size:15px}
+.acc-item[open] summary::before{content:"\2212"}
+.acc-item summary .b{margin-left:auto;font-weight:400}
+.acc-item[open] summary{border-bottom:1px solid var(--line2)}
+.acc-item:hover summary{color:var(--acc)}
+.acc-body{padding:11px 13px}
 </style>
 
 <header>
@@ -513,9 +523,9 @@ html[data-density=compact] nav button{padding:7px 10px}
     <div class="card"><h3>2 · Your endpoints</h3><div id="endpoints-info"></div></div>
   </div>
   <h2>3 · Plug in a tool <span class="hint">copy, replace $WARDEN_TOKEN with the token from step 1</span></h2>
-  <div class="grid g3 intg" id="intg"></div>
+  <div class="acc" id="intg"></div>
   <h2>Put warden behind your VPN <span class="hint">the console has no reason to be on the open internet — pick what you already run</span></h2>
-  <div class="grid g3 intg" id="vpn"></div>
+  <div class="acc" id="vpn"></div>
   <div class="note">Whatever sits in front must pass <code>/mcp</code> and <code>/api/v1</code> straight through (no login page) — the bearer token is the auth there. Everything else can sit behind your SSO.</div>
 
   <div id="users-wrap" hidden>
@@ -1605,7 +1615,7 @@ Authorization: Bearer $WARDEN_TOKEN`)],
 Header: Authorization: Bearer $WARDEN_TOKEN
 Fields: kpi.events_24h · kpi.vuln_kev · kpi.ids_24h · mode`, "Uptime Kuma: an HTTP(s)-Json Query monitor on <code>kpi.vuln_kev == 0</code> turns red when a known-exploited CVE appears.")],
   ];
-  $("#intg").innerHTML = I.map(([t, tag, body]) => `<div class="card"><h3>${t} <span class="b">${tag}</span></h3>${body}</div>`).join("");
+  $("#intg").innerHTML = I.map(([t, tag, body]) => `<details class="acc-item"><summary>${t} <span class="b">${tag}</span></summary><div class="acc-body">${body}</div></details>`).join("");
   const V = [
     ["Tailscale", `tailscale serve --bg --https=443 http://127.0.0.1:8792
 # tailnet-only: https://<this-machine>.<tailnet>.ts.net
@@ -1627,7 +1637,7 @@ handle { forward_auth <your-sso> … ; reverse_proxy 127.0.0.1:8792 }`],
 # allow only your admin devices to it (ACL / flow rules),
 # and leave it off every public DNS record`],
   ];
-  $("#vpn").innerHTML = V.map(([t, body]) => `<div class="card"><h3>${t}</h3>${snip("recipe", body)}</div>`).join("");
+  $("#vpn").innerHTML = V.map(([t, body]) => `<details class="acc-item"><summary>${t}</summary><div class="acc-body">${snip("recipe", body)}</div></details>`).join("");
 }
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-copy]"); if (!b) return;
