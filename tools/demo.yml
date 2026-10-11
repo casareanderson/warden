@@ -1,0 +1,20 @@
+# Demo config for screenshots and a look round. NOT a starting point for a real install (use `warden-setup init`).
+#   WARDEN_CONF=tools/demo.yml WARDEN_DATA=/tmp/warden-demo python3 tools/demo.py
+#   WARDEN_CONF=tools/demo.yml WARDEN_DATA=/tmp/warden-demo python3 warden-ui.py
+# Every address is private or from the documentation ranges; every name ends in example.com.
+estate: {name: demo, domain: example.com, lan: [192.168.1.0/24, 192.168.10.0/24]}
+network:
+  subnets: {192.168.1.0/24: LAN, 192.168.10.0/24: IoT VLAN}
+hosts:
+  - {name: pve1, kind: proxmox, ssh: root@192.168.1.2}
+  - {name: nas, kind: linux, ssh: admin@192.168.1.5, docker: true}
+  - {name: llm, kind: linux, ssh: me@192.168.1.7}
+cloudflare: {zone_id: demo, sso_portal: auth.example.com}
+sources:
+  npm: {ssh: admin@192.168.1.5, container: npmplus}
+  authelia: {ssh: admin@192.168.1.5, container: authelia}
+  cloudflared: {ssh: admin@192.168.1.5, container: cloudflared}
+router: {ssh: root@192.168.1.1}
+notify: {backend: none}
+logins:
+  known_keys: {"SHA256:demoLaptopKey": "my laptop"}

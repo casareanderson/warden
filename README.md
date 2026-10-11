@@ -2,7 +2,7 @@
 
 A lightweight, self-hosted security console for a homelab or small estate. warden reads the logs your WAF can't see, sweeps your LAN, scans your machines and containers for vulnerabilities, watches files for drift, and lets your AI agent ask it questions over MCP. Detect-only by default: anything that changes something waits for your approval.
 
-![warden Overview: headline numbers, detection breakdowns, a 30-day timeline, open attack-surface findings and the top-scoring addresses](docs/v2-overview.png)
+![warden Overview: headline numbers, where traffic comes from on a world map, and detection breakdowns](docs/v3-overview.png)
 
 *The Overview on demo data (`tools/demo.py`: documentation addresses only). Every chart and number on it can be swapped. See [Make the home page yours](#make-the-home-page-yours).*
 
@@ -10,6 +10,7 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 
 ## Contents
 
+- [What's new in v3](#whats-new-in-v3)
 - [What's new in v2](#whats-new-in-v2)
 - [What it does](#what-it-does)
 - [How it compares](#how-it-compares)
@@ -24,6 +25,24 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 - [Status, limits and real results](#status-limits-and-real-results)
 - [Roadmap](#roadmap)
 - [Support and licence](#support-and-licence)
+
+## What's new in v3
+
+- **A heartbeat for every box.** Every 5 minutes: up, down, stopped or unknown, and for how long. One SSH call per Proxmox node answers for the node *and* every container on it, so twenty containers cost one sign-in, not twenty. A box that misses three beats sends one message, and another when it's back, saying "it rebooted" when the uptime shows it. If a node stops answering, its containers show as unknown rather than down, so one dead node is one message.
+- **Who last signed in, to every box.** SSH and console sign-ins from each box's own log, the failed ones counted, and a 7-day list. Sign-ins made with warden's own key are left out, otherwise every box would always say "warden, 4 minutes ago" (on the author's estate that was about three sign-ins in four). Name your other automation keys and they show as jobs, not people. After a silent first read, a user, address and key a box has never seen sends a message.
+- **A live network map.** Internet and line health, the router, the Cloudflare edge and the box running the tunnel, each subnet with your servers (containers under their node, coloured by heartbeat), and every other device counted by kind. It's drawn from data warden already has, so it changes when the network does, and it reads on a phone.
+- **No scanner binary.** trivy is gone, after its own v0.69.4 release and v0.69.5/6 images turned out to be malicious (CVE-2026-33634). Vulnerabilities now come straight from [OSV.dev](https://osv.dev), ranked by CISA known-exploited, then FIRST EPSS, then severity with a fix. Debian security notices are expanded so older releases don't look clean. An optional AI "fix first" briefing is withheld if it names anything that isn't in the scan.
+- **What the internet can reach.** Vulnerable containers and boxes that are publicly reachable are marked and ranked first.
+- **Every device in the house.** One inventory from the LAN sweep, the router's leases and Home Assistant, each device with a kind and the reason for it. warden learns what each bulb, plug, TV or camera normally looks up, scores anything new, and asks you only about the odd ones.
+- **Internet health once a minute.** Router, internet, DNS and web checks, plus line usage and the busiest devices when it goes bad, so "the internet was slow" has a cause.
+- **An attack map** of where traffic comes from, by country, on the home page.
+- **More log formats** (Caddy, Traefik, Authentik), an optional [Beszel](https://github.com/henrygd/beszel) host-health card, and a [setup guide](docs/SETUP.md) that CI runs every week.
+
+![Endpoints: heartbeat and last sign-in for every box, failed sign-ins, and the 7-day sign-in list](docs/v3-endpoints.png)
+
+![The network map: internet and line health, the router, Cloudflare and the tunnel host, servers with their containers, and devices by kind on a LAN and an IoT VLAN](docs/v3-network-map.png)
+
+*Both on demo data: `WARDEN_CONF=tools/demo.yml python3 tools/demo.py` (private and documentation addresses only).*
 
 ## What's new in v2
 
@@ -43,12 +62,14 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 | LAN | `netscan.py` | ARP discovery every 15 min, daily port sweep, new-device, IP-conflict and new-port alerts, with a learning window so sleeping bulbs don't page you. |
 | Vulnerabilities | `vulnscan.py`, `images.py` | Agentless: copies only the package database off each box and matches it against [OSV.dev](https://osv.dev) (fed directly by Debian, Ubuntu, Alpine, GitHub, PyPA and the Go team), plus Alpine's own secdb; reads OS, Python, npm, Go and Rust packages inside the images of running containers; ranks CISA known-exploited > likely to be exploited (FIRST EPSS ≥ 10% with a fix) > critical with a fix > the rest. Marks which containers and boxes the internet can reach (public DNS + tunnel origin + reverse-proxy routes + who owns the listening socket), and ranks those first. Optional `vulnbrief.py` turns the ranking into a short AI-written "fix first" list, using any OpenAI-compatible endpoint; it only sees the scan's facts, and a briefing that names any CVE, box, image, package or number not in them is withheld. Checks NAS firmware against the vendor's latest release. |
 | Patching | `patcher.py` | Turns a request into a plan (packages, removals, snapshot, reboot) and waits for your ✅. Snapshots containers first. Holds core services for the night window. Never auto-reboots a hypervisor. |
+| Heartbeat and sign-ins | `heartbeat.py` | Is every box up (one call per Proxmox node covers its containers), who last signed in over SSH or the console, failed sign-ins, down/back/reboot messages, and a message for a sign-in from a user, address and key a box has never seen. warden's own key is left out. |
 | Endpoint drift | `integrity.py`, `harden.py` | Agentless file and config baselines with ✅-to-accept; weekly Lynis hardening score per box (run from a temp dir, nothing left installed). |
+| Devices and internet | `devices.py`, `devicewatch.py`, `netwatch.py` | One inventory of every device (sweep, router leases, Home Assistant) with its normal behaviour learned and anything new scored; internet health every minute with line usage and the busiest devices. The Network tab draws all of it as a live map. |
 | Network IDS | `netids.py`, `netintel.py` | Pulls Suricata alerts; checks router DNS and connection logs against threat feeds. Both optional. |
 | Edge | `intel.py`, `edgeban.py`, `cfsec.py`, `edge-sentry/` | Cloudflare edge events, an attack-surface snapshot (public names, WAF rules, zone settings, SSO coverage), a proposed edge blocklist, a zone audit, and a report-only Worker. All optional. |
 | Alerts | `siemalert.py`, `wlib/notify.py` | New findings to Discord, a webhook or ntfy, with self-report suppression. |
 | Console | `warden-ui.py`, `wlib/auth.py` | Thirteen tabs, sign-in with roles and 2FA, unified search (`ip:` `cc:` `kind:` `type:`), per-collector health, a customisable home page, settings and approvals. |
-| Agents | `wlib/mcp.py`, `/api/v1` | Thirteen read-only MCP tools and the same views over REST. |
+| Agents | `wlib/mcp.py`, `/api/v1` | Eighteen read-only MCP tools and the same views over REST. |
 
 Every optional feature switches itself off when it isn't configured. A box with no Cloudflare zone never runs the Cloudflare jobs.
 
@@ -231,7 +252,7 @@ warden/
 
 ## Status, limits and real results
 
-Status: v2.0, running in detect-only mode on the author's estate since September 2026. It's a second opinion, not a replacement for CrowdSec or a WAF: it reads what they miss.
+Status: v3.0, running in detect-only mode on the author's estate since September 2026. It's a second opinion, not a replacement for CrowdSec or a WAF: it reads what they miss.
 
 Measured on that estate:
 
