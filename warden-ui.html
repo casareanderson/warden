@@ -548,10 +548,12 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="grid g2">
     <div class="card"><h3>1 · Make a token</h3>
       <div class="row"><input id="tok-name" placeholder="who it's for, e.g. home-assistant" maxlength="60"><button class="btn" id="tok-new">New token</button></div>
-      <div id="tok-once"></div><div class="wrap" style="border:0"><table id="toks"></table></div></div>
+      <div id="tok-once"></div>
+      <div class="row" style="margin-top:8px"><input id="tok-fill" placeholder="… or paste a wdn_… token to auto-fill the snippets" autocomplete="off" spellcheck="false"></div>
+      <div class="wrap" style="border:0"><table id="toks"></table></div></div>
     <div class="card"><h3>2 · Your endpoints</h3><div id="endpoints-info"></div></div>
   </div>
-  <h2>Plug in a tool <span class="hint">pick a tool, copy the snippet — replace $WARDEN_TOKEN with your token</span></h2>
+  <h2>Plug in a tool <span class="hint">make or paste a token above and the snippets fill in — ready to copy</span> <span class="hint" id="tok-state" style="color:var(--amb)"></span></h2>
   <div class="tiles" id="intg"></div>
   <h2>Put warden behind your VPN <span class="hint">the console has no reason to be on the open internet — pick what you already run</span></h2>
   <div class="tiles" id="vpn"></div>
@@ -1616,14 +1618,18 @@ document.addEventListener("change", async e => {
 
 // ── Connect: tokens, endpoints, integrations, VPN recipes ───────────────────
 function shieldCode(){try{document.querySelectorAll("pre,code,kbd,.mono,.ip,.num").forEach(e=>e.setAttribute("translate","no"))}catch(e){}}
+let TOKEN = "";                 // a token the viewer made/pasted this session; fills the snippets
 const ICN = {
   mcp:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>',
   rest:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 4c-2 0-3 1-3 3v2c0 1-1 2-2 2 1 0 2 1 2 2v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1 1 2 2 2-1 0-2 1-2 2v2c0 2-1 3-3 3"/></svg>',
   dash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M8 17v-5M13 17V8M18 17v-7"/></svg>',
   home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>',
   shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg>',
+  cloud:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 18a4 4 0 01-.5-7.97A5.5 5.5 0 0117.5 10 3.5 3.5 0 0118 18z"/></svg>',
 };
-const iconFor = tag => /MCP|agent|GPT|Action/i.test(tag) ? "mcp" : /dashboard/i.test(tag) ? "dash" : /automation/i.test(tag) ? "home" : "rest";
+function fillTok(str){ if(!TOKEN) return str; const tk = esc(TOKEN); return str.split("${WARDEN_TOKEN}").join(tk).split("$WARDEN_TOKEN").join(tk); }
+document.addEventListener("input", e => { if(e.target && e.target.id === "tok-fill"){ TOKEN = e.target.value.trim(); if(SET) renderConnect(); } });
+const iconFor = tag => /cloud|aws|gcp|azure/i.test(tag) ? "cloud" : /MCP|agent|GPT|Action|bot/i.test(tag) ? "mcp" : /dashboard|metric|monitoring/i.test(tag) ? "dash" : /automation/i.test(tag) ? "home" : "rest";
 const snip = (title, body, note) => `<div class="snip-h"><span>${title}</span><button class="btn ghost sm" data-copy>copy</button></div><pre class="snip" translate="no">${esc(body)}</pre>${note ? `<div class="note" style="margin-top:-4px">${note}</div>` : ""}`;
 function renderConnect() {
   const here = location.origin + location.pathname.replace(/\/$/, "") + "/mcp";
@@ -1675,8 +1681,42 @@ Authorization: Bearer $WARDEN_TOKEN`)],
     ["Grafana / Homepage / Uptime Kuma", "dashboards · REST", snip("JSON API data source", `URL:    ${api}/summary
 Header: Authorization: Bearer $WARDEN_TOKEN
 Fields: kpi.events_24h · kpi.vuln_kev · kpi.ids_24h · mode`, "Uptime Kuma: an HTTP(s)-Json Query monitor on <code>kpi.vuln_kev == 0</code> turns red when a known-exploited CVE appears.")],
+    ["Open WebUI / LibreChat / Ollama", "local AI · MCP", snip("MCP server config", `name: warden
+transport: http (streamable)
+url: ${mcp}
+headers:
+  Authorization: Bearer $WARDEN_TOKEN`, "Open WebUI → Tools/MCP; LibreChat → librechat.yaml mcpServers; any local-AI front-end that speaks MCP over HTTP.")],
+    ["Prometheus / Grafana Agent", "metrics · REST (JSON)", snip("json_exporter module", `# warden serves JSON, not OpenMetrics — scrape it with json_exporter:
+modules:
+  warden:
+    metrics:
+      - name: warden_vuln_kev
+        path: '{ .kpi.vuln_kev }'
+      - name: warden_ids_24h
+        path: '{ .kpi.ids_24h }'
+# target ${api}/summary · header  Authorization: Bearer $WARDEN_TOKEN`, "Or point Grafana's JSON API data source straight at /summary.")],
+    ["Netdata / Zabbix / Checkmk", "monitoring · REST", snip("HTTP (JSON) check", `URL:    ${api}/summary
+Header: Authorization: Bearer $WARDEN_TOKEN
+Field:  kpi.vuln_kev       # alert when > 0
+# Zabbix:  HTTP agent item + JSONPath $.kpi.vuln_kev
+# Checkmk: check_httpv2 --json-path`, "Go red when a known-exploited CVE appears, or when warden leaves detect-only.")],
+    ["Slack / Discord bot", "chat bot · MCP / REST", snip("bot backend", `GET ${api}/approvals     # "what is warden waiting on?"
+GET ${api}/summary       # the headline numbers
+Authorization: Bearer $WARDEN_TOKEN
+# or wire the MCP endpoint ${mcp} into an MCP-aware bot`, "warden already pushes alerts to your channel — this is the pull side, so you can ask it questions from chat.")],
+    ["AWS", "cloud · CloudWatch / Security Hub", snip("scheduled Lambda", `import urllib.request, json, boto3
+req = urllib.request.Request("${api}/summary", headers={"Authorization": "Bearer $WARDEN_TOKEN"})
+k = json.load(urllib.request.urlopen(req))["kpi"]
+boto3.client("cloudwatch").put_metric_data(Namespace="warden",
+  MetricData=[{"MetricName": "vuln_kev", "Value": k["vuln_kev"]}])
+# EventBridge rate(5 minutes) -> this Lambda -> CloudWatch alarm on vuln_kev > 0`, "Or map findings into Security Hub (ASFF) and alert via SNS.")],
+    ["GCP", "cloud · Cloud Monitoring / SCC", snip("scheduled Cloud Function", `import urllib.request, json
+req = urllib.request.Request("${api}/summary", headers={"Authorization": "Bearer $WARDEN_TOKEN"})
+k = json.load(urllib.request.urlopen(req))["kpi"]
+# write k["vuln_kev"] as custom.googleapis.com/warden/vuln_kev via monitoring_v3
+# Cloud Scheduler (every 5 min) drives it; alert policy on the metric > 0`, "Or push findings to Security Command Center.")],
   ];
-  $("#intg").innerHTML = I.map(([t, tag, body]) => `<details class="tile"><summary><span class="ti-ic">${ICN[iconFor(tag)]}</span><span class="ti-txt"><span class="ti-name">${t}</span><span class="ti-tag">${tag}</span></span></summary><div class="ti-body">${body}</div></details>`).join("");
+  $("#intg").innerHTML = I.map(([t, tag, body]) => `<details class="tile"><summary><span class="ti-ic">${ICN[iconFor(tag)]}</span><span class="ti-txt"><span class="ti-name">${t}</span><span class="ti-tag">${tag}</span></span></summary><div class="ti-body">${fillTok(body)}</div></details>`).join("");
   const V = [
     ["Tailscale", `tailscale serve --bg --https=443 http://127.0.0.1:8792
 # tailnet-only: https://<this-machine>.<tailnet>.ts.net
@@ -1698,7 +1738,8 @@ handle { forward_auth <your-sso> … ; reverse_proxy 127.0.0.1:8792 }`],
 # allow only your admin devices to it (ACL / flow rules),
 # and leave it off every public DNS record`],
   ];
-  $("#vpn").innerHTML = V.map(([t, body]) => `<details class="tile"><summary><span class="ti-ic">${ICN.shield}</span><span class="ti-txt"><span class="ti-name">${t}</span><span class="ti-tag">VPN / mesh</span></span></summary><div class="ti-body">${snip("recipe", body)}</div></details>`).join("");
+  $("#vpn").innerHTML = V.map(([t, body]) => `<details class="tile"><summary><span class="ti-ic">${ICN.shield}</span><span class="ti-txt"><span class="ti-name">${t}</span><span class="ti-tag">VPN / mesh</span></span></summary><div class="ti-body">${fillTok(snip("recipe", body))}</div></details>`).join("");
+  const ts = $("#tok-state"); if (ts) ts.textContent = TOKEN ? "✓ filled with your token — don't share screenshots" : "";
 }
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-copy]"); if (!b) return;
@@ -1791,7 +1832,7 @@ document.addEventListener("click", async e => {
   if (e.target.id === "tok-new") {
     const r = await post("api/tokens", "tokens", {name: $("#tok-name").value.trim() || "agent"});
     $("#tok-once").innerHTML = r.ok ? `<div class="tokbox">${esc(r.token)}</div><div class="note" style="margin:0 0 8px">${esc(r.note)}</div>` : `<div class="n">${esc(r.error || "failed")}</div>`;
-    $("#tok-name").value = ""; loadSettings();
+    $("#tok-name").value = ""; if (r.ok && r.token) TOKEN = r.token; loadSettings();
   }
 });
 
