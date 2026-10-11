@@ -108,6 +108,26 @@ def is_allowlisted(ip, extra):
             continue
     return False
 
+SELF_IPS = config.HOME / "self-ips.txt"
+
+def self_ips():
+    """Addresses that are US (self-ips.txt), incl. the dynamic WAN lease.
+
+    The log-side /24 roll-up must refuse a range containing one of these just
+    as edgeban does, or a lease change turns your own address into the thing
+    that gets you banned. A file rather than a hardcode because a home WAN
+    address is usually dynamic; when it changes, this is the one place to edit.
+    """
+    try:
+        return [l.split("#")[0].strip() for l in SELF_IPS.read_text().splitlines()
+                if l.split("#")[0].strip()]
+    except OSError:
+        return []
+
+def allow_extra(cfg):
+    """Config `allow:` plus self-ips.txt — the full set a ban must never touch."""
+    return list(cfg.get("allow", [])) + self_ips()
+
 # ------------------------------------------------------------------ db ----
 SCHEMA = """
 create table if not exists events(
@@ -487,6 +507,7 @@ def cf_ban(ip, note, cfg):
 # ------------------------------------------------------------------ main ---
 def main():
     cfg = load_conf()
+    allow = allow_extra(cfg)
     con = db()
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     total_new = 0
@@ -532,7 +553,7 @@ def main():
 
     proposed = 0
     for r in rows:
-        if is_allowlisted(r["ip"], cfg.get("allow", [])):
+        if is_allowlisted(r["ip"], allow):
             continue
         already = con.execute(
             "select 1 from bans where ip=? and state in ('active','proposed') "
@@ -562,7 +583,7 @@ def main():
             "select ip, sum(score) s, count(*) n from events "
             "where ip!='' and ip like '%.%.%.%' and ts > datetime('now',?) "
             "group by ip", (win,)):
-        if is_allowlisted(r["ip"], cfg.get("allow", [])):
+        if is_allowlisted(r["ip"], allow):
             continue
         net = ".".join(r["ip"].split(".")[:3]) + ".0/24"
         d = subs.setdefault(net, {"score": 0, "ips": set(), "events": 0})
@@ -572,7 +593,7 @@ def main():
         if d["score"] < cfg["subnet_threshold"] or len(d["ips"]) < cfg["subnet_min_ips"]:
             continue
         # ⚠️ Refuse a range that would take an allowlisted address with it.
-        if net_overlaps_allow(net, cfg.get("allow", [])):
+        if net_overlaps_allow(net, allow):
             continue
         if proposed >= cfg["max_bans_per_run"]:
             break
