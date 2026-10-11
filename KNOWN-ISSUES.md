@@ -5,12 +5,15 @@ enforcement caveats below apply. Read this before you flip `enforce: true`.
 
 ## Enforcement is less proven than detection
 
-- **The Cloudflare enforcement path is not battle-tested.** warden proposes
-  bans continuously and those proposals are correct; but `cf_ban()` posts to the
-  account **IP Access Rules** API, and Cloudflare has been moving customers off
-  the legacy firewall APIs. Before you trust `enforce: true`, confirm that
-  endpoint still accepts writes on your account, or point `cf_ban()` at whatever
-  Cloudflare's current equivalent is. Detect-only does not call it.
+- **The Cloudflare enforcement path is still not battle-tested.** warden
+  proposes bans continuously and those proposals are correct; `cf_ban()` now
+  appends to the zone's `warden: blocklist` **WAF custom rule** — Cloudflare's
+  current equivalent of the retired firewall APIs, the same rule `edgeban.py`
+  maintains — instead of the legacy account IP Access Rules API. That request
+  shape is unit-tested against a fake API, but no test here can prove the
+  endpoint accepts writes on *your* account, so before you trust `enforce:
+  true`, run `edgeban.py sync` once and confirm the rule lands in Cloudflare.
+  Detect-only does not call `cf_ban()`.
 - **An allowlist that is stale is worse than no allowlist.** `net_overlaps_allow()`
   is what stops a `/24` roll-up from containing your own WAN address and banning
   you at the edge. It is tested (own `/24`, own `/16`, RFC1918 and Cloudflare's

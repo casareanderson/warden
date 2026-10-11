@@ -3,9 +3,11 @@
 Each test points WARDEN_HOME at a temp dir and reloads wlib.config, so nothing
 touches a real install."""
 import importlib
+import json
 import sqlite3
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -97,6 +99,75 @@ def test_source_commands(home, monkeypatch):
     seen.clear()
     w.collect_authelia(con)
     assert seen[0] == ["sh", "-c", "wc -c < /var/log/authelia.log"]
+
+
+# ── warden.py cf_ban: the current Cloudflare enforcement API ────────────────
+class FakeResp:
+    def __init__(self, payload):
+        self._data = payload
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class FakeCF:
+    def __init__(self, extra=None):
+        self.rules = list(extra or [])
+        self.calls = []
+
+    def urlopen(self, req, timeout=None):
+        method = req.get_method()
+        body = json.loads(req.data) if req.data else None
+        self.calls.append((method, req.full_url, body))
+        if method == "PUT":
+            self.rules = body["rules"]
+        payload = json.dumps({"success": True, "result": {"id": "rs1", "rules": list(self.rules)}}).encode()
+        return FakeResp(payload)
+
+
+def _cf_home(home, monkeypatch):
+    (home / "warden.yml").write_text(
+        "cloudflare:\n  zone_id: 0123456789abcdef0123456789abcdef\n  token_secret: CF_API_TOKEN\n")
+    monkeypatch.setenv("CF_API_TOKEN", "tok")
+    w = load("warden")
+    client = FakeCF(extra=[{"id": "x", "action": "challenge", "expression": 'http.request.uri.path contains "/admin"',
+                            "description": "existing rule", "enabled": True}])
+    monkeypatch.setattr(urllib.request, "urlopen", client.urlopen)
+    return w, client
+
+
+def test_cf_ban_uses_waf_custom_rules(home, monkeypatch):
+    w, client = _cf_home(home, monkeypatch)
+    ok, msg = w.cf_ban("203.0.113.9", "sqli", {})
+    assert ok and "updated" in msg
+    assert not any("firewall/access_rules" in c[1] for c in client.calls)
+    assert client.calls[0][1].endswith("/rulesets/phases/http_request_firewall_custom/entrypoint")
+    put = next(c for c in client.calls if c[0] == "PUT")
+    block = next(r for r in put[2]["rules"] if r["description"] == w.DESC)
+    assert block["action"] == "block" and block["expression"] == "(ip.src in {203.0.113.9})"
+    assert any(r["description"] == "existing rule" for r in put[2]["rules"])
+
+
+def test_cf_ban_appends_without_duplicates(home, monkeypatch):
+    w, client = _cf_home(home, monkeypatch)
+    assert w.cf_ban("203.0.113.9", "sqli", {})[0]
+    assert w.cf_ban("203.0.113.9", "sqli", {})[0]
+    assert w.cf_ban("198.51.100.0/24", "spread", {})[0]
+    puts = [c for c in client.calls if c[0] == "PUT"]
+    block = next(r for r in puts[-1][2]["rules"] if r["description"] == w.DESC)
+    assert block["expression"] == "(ip.src in {203.0.113.9 198.51.100.0/24})"
+
+
+def test_cf_ban_needs_credentials(home):
+    w = load("warden")
+    ok, msg = w.cf_ban("203.0.113.9", "sqli", {})
+    assert not ok and "credentials" in msg
 
 
 # ── the extra log formats (Caddy JSON, Traefik CLF, Authentik JSON) ─────────
