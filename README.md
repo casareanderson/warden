@@ -6,7 +6,7 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 
 *The Overview on demo data (`tools/demo.py`: documentation addresses only). Every chart and number on it can be swapped. See [Make the home page yours](#make-the-home-page-yours).*
 
-![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue) ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776ab) ![Mode: detect-only](https://img.shields.io/badge/mode-detect--only-2ea44f) ![MCP](https://img.shields.io/badge/MCP-read--only-8a63d2) [![Buy Me a Coffee](https://raw.githubusercontent.com/casareanderson/.github/main/badges/bmc-yellow.svg)](https://buymeacoffee.com/iamc_tech)
+![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue) ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776ab) ![Mode: detect-only](https://img.shields.io/badge/mode-detect--only-2ea44f) ![MCP](https://img.shields.io/badge/MCP-read--only-8a63d2) [![Buy Me a Coffee](https://raw.githubusercontent.com/casareanderson/.github/main/badges/bmc-yellow.svg)](https://buymeacoffee.com/iamc_tech) [![Beginner's guide: £5](https://img.shields.io/badge/beginner%27s%20guide-%C2%A35%20PDF-ff90e8)](https://asareanderson.gumroad.com/l/ynfgq)
 
 ## Contents
 
