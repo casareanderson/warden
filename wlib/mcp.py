@@ -104,6 +104,12 @@ TOOLS = [
                     "subnet with the managed servers (containers under their Proxmox node, heartbeat state) and every "
                     "other device counted by kind.",
      "inputSchema": _obj(), "fn": lambda a: views.topology()},
+    {"name": "warden_incidents",
+     "description": "SHADOW MODE: signals from every detector joined into incidents (an outside /24, a box, a device), "
+                    "with the action a model WOULD take (ignore_learn, watch, ask_owner, propose_edge_block, "
+                    "propose_patch_now, check_box — never carried out), its confidence and fact-checked reason, and "
+                    "what the owner actually decided where they did.",
+     "inputSchema": _obj(), "fn": lambda a: views.incidents()},
     {"name": "warden_health",
      "description": "Is warden itself working: last run of each collector in 24 h, lines read/scored, and "
                     "alerts that were suppressed and why.",

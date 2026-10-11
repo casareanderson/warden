@@ -272,6 +272,9 @@ html[data-density=compact] nav button{padding:7px 10px}
 
 <!-- DETECTIONS -->
 <section class="tab" id="t-detections">
+  <h2>Incidents · shadow <span class="hint" id="inc-hint">signals from every detector joined up · the model's would-be action is recorded, never carried out</span></h2>
+  <div class="tbl-tools"><input data-filter="incidents" placeholder="filter: entity, action, owner…"><span class="n" id="incidents-n"></span></div>
+  <div class="wrap"><table id="incidents"></table></div>
   <h2>Ban decisions <span class="hint" id="ban-hint"></span></h2>
   <div class="wrap"><table id="bans"></table></div>
   <h2>Edge blocklist <span class="hint">proposed hourly · you ✅/❌ in your alerts channel or Settings · enforced as ONE Cloudflare WAF rule · bans lapse after 30 days</span></h2>
@@ -550,6 +553,13 @@ function openDrawer(title, html) {
 function closeDrawer() { $("#drawer").classList.remove("on"); $("#scrim").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true"); }
 $("#dr-close").onclick = closeDrawer; $("#scrim").onclick = closeDrawer;
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#drawer").classList.contains("on")) closeDrawer(); });
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-inc]"); if (!b || !window._inc) return;
+  const r = window._inc[b.dataset.inc];
+  openDrawer(`Incident <span class="mono">${esc(r.entity)}</span>`, `<div class="note">Shadow mode: nothing here was acted on.${r.model ? " Model: " + esc(r.model) + "." : ""}</div>`
+    + `<table><tbody>${r.facts.map(f => `<tr><td class="ts">${esc(f.ts)}</td><td class="mono">${esc(f.fact_id)}</td><td>${esc(f.source)}</td><td class="det">${esc(f.summary)}</td></tr>`).join("")}</tbody></table>`
+    + (r.n_facts > r.facts.length ? `<div class="note">… ${r.n_facts - r.facts.length} more signals (heaviest shown)</div>` : ""));
+});
 const cveBtn = id => `<button class="linkbtn mono" data-cve="${esc(id)}" title="What is this, where is it, how to fix">${esc(id)}</button>`;
 async function openCve(id) {
   openDrawer(esc(id), '<div class="empty">Loading…</div>');
@@ -606,6 +616,19 @@ function render() {
   const open = S.findings.filter(f => !f.accepted);
 
   // detections
+  const IN = d.incidents || {rows: []};
+  $("#inc-hint").textContent = IN.mode === "shadow" ? "signals from every detector joined up · the model's would-be action is recorded, never carried out"
+    : "incidents.py " + IN.mode;
+  table("incidents", [{h: "Last", f: r => ago(r.last_seen), cls: "ts"}, {h: "Incident", f: r => `<span class="mono">${esc(r.entity)}</span>`},
+    {h: "Signals", k: "n_facts", cls: "num", num: 1},
+    {h: "Would do", f: r => r.status === "ok" ? `<span class="b ${{ignore_learn: "", watch: "acc", ask_owner: "amb", check_box: "red",
+        propose_edge_block: "red", propose_patch_now: "red"}[r.action] ?? ""}">${esc(r.action)}</span> <span class="q">${Math.round((r.confidence || 0) * 100)}%</span>`
+      : r.status === "withheld" ? `<span class="b" title="${esc(r.reason)}">withheld</span>` : '<span class="q">—</span>'},
+    {h: "Why", f: r => esc(r.why || r.reason || ""), cls: "det", title: 1},
+    {h: "You decided", f: r => r.owner_label ? `<span class="b ${r.owner_label === "act" ? "red" : "ok"}" title="${esc(r.owner_source)}">${r.owner_label === "act" ? "acted" : "benign"}</span>` : '<span class="q">—</span>'},
+    {h: "", f: r => `<button class="btn" data-inc="${r.id}">Facts</button>`}], IN.rows,
+    IN.mode === "not run yet" ? "incidents.py has not run yet." : "No incidents.");
+  window._inc = Object.fromEntries(IN.rows.map(r => [r.id, r]));
   $("#ban-hint").textContent = d.mode === "detect-only" ? "detect-only — these are what warden WOULD ban; nothing is applied" : "";
   table("bans", [{h: "When", k: "ts", cls: "ts"}, {h: "Address", k: "ip", cls: "ip", ip: 1}, {h: "Country", f: r => ccCell(r.cc, r.red)},
     {h: "Score", k: "score", cls: "num", num: 1}, {h: "State", f: r => `<span class="b ${r.state === "active" ? "red" : "amb"}">${esc(r.state)}</span>`},

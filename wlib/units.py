@@ -36,6 +36,8 @@ UNITS = {
                                ["integrity.py"], ("calendar", "*-*-* *:40"), ["TimeoutStartSec=3600"]),
     "warden-integrity-deep":  ("integrity", "warden integrity — deep sweep",
                                ["integrity.py", "--deep"], ("calendar", "*-*-* 04:10"), ["TimeoutStartSec=3600"]),
+    "warden-incidents":       ("core", "warden — join detections into incidents; model decisions in SHADOW mode only",
+                               ["incidents.py"], ("every", "10min", "9min"), ["TimeoutStartSec=900"]),
     "warden-heartbeat":       ("integrity", "warden — heartbeat of every box (one call per Proxmox node covers its containers)",
                                ["heartbeat.py"], ("every", "5min", "1min"), ["TimeoutStartSec=120"]),
     "warden-logins":          ("integrity", "warden — SSH and console sign-ins on every box (warden's own key left out)",
