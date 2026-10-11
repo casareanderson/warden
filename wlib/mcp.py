@@ -19,7 +19,7 @@ from . import views
 
 PROTOCOL = "2025-06-18"
 KNOWN = {"2025-06-18", "2025-03-26", "2024-11-05"}
-SERVER = {"name": "warden", "version": "2.0.0"}
+SERVER = {"name": "warden", "version": "3.0.0"}
 
 
 def _obj(props=None, required=None):

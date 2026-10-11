@@ -388,6 +388,16 @@ def topology():
                      key=lambda c: int(c["target"].split(":")[1]))
         servers.append({"name": h.get("name") or ip, "kind": kind, "ip": ip, "target": tid, "state": b.get("state"),
                         "uptime_s": b.get("uptime_s"), "subnet": subnet(ip), "cts": cts, "docker": bool(h.get("docker"))})
+    if not servers:     # no hosts in warden.yml (demo data, or config moved): draw what the heartbeat has seen
+        for t, r in sorted(hb.items()):
+            if r["kind"] not in ("node", "host"):
+                continue
+            ip = t.split(":", 1)[1]
+            cts = sorted(({"target": c, "name": x["name"], "state": x["state"], "uptime_s": x["uptime_s"]}
+                          for c, x in hb.items() if x["kind"] == "ct" and x["node"] == ip),
+                         key=lambda c: int(c["target"].split(":")[1]))
+            servers.append({"name": r["name"], "kind": "proxmox" if r["kind"] == "node" else "linux", "ip": ip, "target": t,
+                            "state": r["state"], "uptime_s": r["uptime_s"], "subnet": subnet(ip), "cts": cts, "docker": False})
     groups = {}
     for d in devices_list():
         ip = (d.get("ips") or "").split(",")[-1]
