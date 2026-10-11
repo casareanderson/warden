@@ -21,6 +21,7 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 - [Approvals](#approvals)
 - [Configuration](#configuration)
 - [How it works](#how-it-works)
+- [Incidents (shadow mode)](#incidents-shadow-mode)
 - [Security model](#security-model)
 - [Status, limits and real results](#status-limits-and-real-results)
 - [Roadmap](#roadmap)
@@ -237,6 +238,32 @@ warden/
 ├── tools/demo.py        demo data for screenshots and try-outs
 ├── tests/               36 tests: API, MCP traps, read-only guard, hosts, patch timing, intel
 └── KNOWN-ISSUES.md      read before enforce: true
+```
+
+## Incidents (shadow mode)
+
+Every detector used to alert on its own: an address probing `/.env` at Cloudflare, failing SSO logins, then signing in
+over SSH was three unrelated messages. `incidents.py` (timer, every 10 minutes) joins signals from the log detector,
+the Cloudflare edge, Suricata, threat intel, device behaviour, integrity drift, sign-ins and the heartbeat into
+incidents: one per outside /24, box or device, with a stable id on every fact. That part is plain code.
+
+Then, **in shadow mode only**, a model (the same endpoint as the vulnerability briefing, `vuln.brief`, or its own
+`incidents.model`) picks one action per incident from a fixed list: `ignore_learn`, `watch`, `ask_owner`,
+`propose_edge_block`, `propose_patch_now` or `check_box`, with a confidence and two sentences of why that must cite fact
+ids. Anything it writes that isn't in the facts (a number, an address, a name, a CVE) gets one repair round and is then
+withheld. Decisions are shown in the console (Detections → Incidents) and over MCP/REST, and **never carried out or
+sent anywhere**; `incidents.py` doesn't even import the alerting code.
+
+Next to each decision warden records what you actually decided where you did (edge-ban ✅/❌, integrity ✅/❌, device
+verdicts), and `incidents.py --report` measures how often the model agreed. It stays in shadow mode until that number
+says it's worth trusting. First run on the author's estate: 73 incidents from 7 days, 10 decisions, none withheld, under
+a fifth of a US cent; it agreed with the owner on 2 of the 5 incidents the owner had already judged.
+
+```yaml
+incidents:
+  mode: shadow        # shadow | off
+  min_weight: 8       # lighter incidents are listed but never sent to the model
+  max_decisions: 20   # model calls per run; unchanged incidents are never re-asked
 ```
 
 ## Security model

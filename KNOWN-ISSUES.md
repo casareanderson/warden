@@ -109,6 +109,20 @@ is added it will follow these rules:
   checkers, ACME validation) is never banned. This also applies to today's edge-ban proposals.
 - **No range wider than a /24,** never a whole ASN or cloud provider.
 
+## Incidents (shadow)
+
+- **Shadow only.** The model's actions are recorded, never carried out, and there is no setting to change that yet.
+  Agreement with the owner was 2 of 5 on the first run: it asks for box checks on integrity changes the owner had
+  already accepted. <!-- steward: skip (design: the point of shadow mode is to measure this before trusting it) -->
+- **Suricata decoder anomalies are left out.** Low-severity "Generic Protocol Command Decode" and `anomaly` alerts
+  (one-way replies, odd timestamps) were 2,000+ a week and made a search engine's /24 look like an attacker. A real
+  attack that only shows up as a decoder anomaly would be missed by incidents (it's still in the IDS table).
+- **Direction is guessed from which side is outside.** A reply from an outside server counts as that server being the
+  source. Low-severity noise is filtered, but a high-severity alert on reply traffic would still open an incident for
+  the outside /24.
+- **Incidents join by entity only** (an outside /24, a box, a device). A single address hitting the edge and then a box
+  links through shared facts (a sign-in from it), not by time alone.
+
 ## Heartbeat and sign-ins (v3)
 
 - **Containers inside Docker are not heartbeat-checked one by one.** A stopped container on a box that is up still
