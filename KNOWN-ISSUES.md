@@ -23,10 +23,12 @@ enforcement caveats below apply. Read this before you flip `enforce: true`.
   refused; a genuinely hostile `/24` is still bannable). What remains: nothing
   discovers your WAN address for you, so on a dynamic lease you must keep
   `self-ips.txt` current.
-- **A ban never expires in practice.** `ban_hours` and an `expires` timestamp
-  are written to the database, but nothing removes the Cloudflare rule when the
-  window lapses — there is no unban path yet. Edge rules accumulate until you
-  clear them by hand. Fine while proposing; a real gap once enforcing.
+- **Enforced bans now expire, but the unban path is as unproven as the ban
+  path.** `cf_unban()` removes a lapsed address from the `warden: blocklist`
+  rule once `expires` passes, so edge rules no longer pile up until cleared by
+  hand. It is unit-tested against the same fake API as `cf_ban()`, not against
+  a live account; a failed unban leaves the ban `active` and retries next
+  sweep. Confirm with `edgeban.py sync` once, as for banning.
 
 ## Detection edges
 
