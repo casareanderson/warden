@@ -115,6 +115,7 @@ ui:
   cookie_secure: auto               # auto = Secure cookie when the proxy says X-Forwarded-Proto: https
   real_ip_header: ""                # e.g. CF-Connecting-IP behind Cloudflare; default = last X-Forwarded-For hop
   trust_proxy_user_header: Remote-User   # auth: proxy only
+  trust_proxy_insecure: false            # auth: proxy only — allow a non-loopback bind (the proxy MUST overwrite Remote-User and the port MUST be firewalled; otherwise warden refuses to start)
   basic_user: ""                    # auth: basic only
 api:
   enabled: true
