@@ -86,6 +86,8 @@ Measured on the author's running install (Ubuntu 24.04, Python 3.12, an LXC cont
 
 ## Quick start
 
+Full step-by-step setup, tested every week on a fresh machine: [docs/SETUP.md](docs/SETUP.md).
+
 ```sh
 git clone https://github.com/casareanderson/warden.git /opt/warden
 cd /opt/warden
