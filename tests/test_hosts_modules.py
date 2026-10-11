@@ -224,3 +224,58 @@ def test_cfsec_geo_guard_fails_closed(estate, monkeypatch, tmp_path):
     for unknown in (set(), None):                  # no geo DB / only private own IPs → refuse, don't guess
         monkeypatch.setattr(cfsec, "own_countries", lambda u=unknown: u)
         assert cfsec.apply_geo("tok", True, record=True) == 2 and not called
+
+
+def test_patcher_quotes_compose_labels(estate, monkeypatch):
+    """workdir/service/container come from docker compose LABELS, which anyone who can run a container on a
+    monitored host sets freely. They must never reach the docker host's root shell unquoted (that would be
+    command injection on approve). Regression for the 2026-10 review finding."""
+    import sqlite3
+    import subprocess
+    import time
+    import patcher
+
+    cmds = []
+
+    def fake_docker_sh(t, cmd, timeout=1800):
+        cmds.append(cmd)
+        if "echo READABLE" in cmd:
+            return 0, "READABLE"
+        if "State.Status" in cmd:
+            return 0, "running sha256:new"
+        if ".Image" in cmd:
+            return 0, "sha256:old"
+        return 0, "ok"
+
+    monkeypatch.setattr(patcher, "docker_sh", fake_docker_sh)
+    monkeypatch.setattr(patcher, "decide_timing", lambda *a, **k: ("now", "test"))
+    monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(patcher.notify, "post", lambda *a, **k: "mid")
+    monkeypatch.setattr(patcher.notify, "react", lambda *a, **k: None)
+    monkeypatch.setattr(patcher.notify, "send", lambda *a, **k: None)
+
+    payload = "x; touch /tmp/pwned #"
+    t = {"target": "ctr:nas:app", "kind": "container", "name": "app", "host": "img:nas",
+         "container": payload, "workdir": payload, "service": payload, "action": "pull",
+         "image": "img:1", "kev": 1, "crit": 0}
+    con = sqlite3.connect(":memory:")
+    con.row_factory = sqlite3.Row
+    con.execute("create table patch_jobs(id integer primary key, target text, status text, requested_by text, "
+                "message_id text, plan text, result text, finished text, timing text, run_after text, "
+                "timing_why text, n_pkgs int, n_remove int, decided text)")
+    con.execute("insert into patch_jobs(id,target,status,requested_by,message_id) "
+                "values(1,'ctr:nas:app','running','me','mid')")
+    job = {"id": 1, "message_id": "mid", "requested_by": "me"}
+
+    patcher.make_plan_container(con, job, t)
+    patcher.execute_container(con, job, t)
+
+    assert cmds, "no docker commands were captured"
+    q = patcher.sh_quote(payload)
+    ran_label = [c for c in cmds if payload in c]
+    assert ran_label, "the label never appeared in a command"
+    for c in ran_label:
+        assert q in c, f"label used unquoted in: {c!r}"
+        # with every quoted copy removed, the raw injection must not survive
+        assert "touch /tmp/pwned" not in c.replace(q, ""), f"injection escapes quoting in: {c!r}"
