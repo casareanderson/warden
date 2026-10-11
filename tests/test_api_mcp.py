@@ -288,3 +288,9 @@ def test_console_payload_cache_drops_on_write(env, tmp_path):
     v.invalidate()
     assert v.payload_cached()["kpi"]["events_24h"] == a["kpi"]["events_24h"] + 1
     assert v.payload_cached(max_age=0) is not a
+
+
+def test_world_map_file_and_widget(env):
+    st, w = call(env["url"] + "/world.json")
+    assert st == 200 and len(w["shapes"]) > 150 and "SG" in w["points"]
+    assert "map" in env["views"].WIDGETS and call(env["url"] + "/api")[1]["layout"]["widgets"][0] == "map"

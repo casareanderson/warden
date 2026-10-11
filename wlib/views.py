@@ -454,16 +454,18 @@ WIDGETS = {
     "approvals": {"title": "Waiting for your decision", "type": "approvals", "size": 2},
     "top":       {"title": "Top addresses · 30 days", "type": "top", "size": 4},
     "hosthealth": {"title": "Host health · Beszel", "type": "hosthealth", "size": 2},
+    "map":       {"title": "Where traffic comes from · 30 days", "type": "map", "size": 4},
 }
 
 
 def auto_widgets():
-    """Widgets that switch themselves on with their integration (shown once; removing one in Customise sticks)."""
-    return ["hosthealth"] if (config.get("beszel") or {}).get("enabled") else []
+    """New widgets that turn up by themselves once (a saved layout would never show them otherwise); an integration's
+    widget only while it is enabled. Removing one in Customise sticks (layout "seen")."""
+    return ["map"] + (["hosthealth"] if (config.get("beszel") or {}).get("enabled") else [])
 KPIS = ["events_24h", "ips_7d", "edge_24h", "red_hits_7d", "findings_open", "bans", "hosts", "vuln_kev", "vuln_fixable",
         "ids_24h", "integrity_open", "approvals"]
 DEFAULT_LAYOUT = {"kpis": ["events_24h", "ips_7d", "edge_24h", "red_hits_7d", "findings_open", "bans", "hosts"],
-                  "widgets": ["kind", "source", "country", "edge", "tl30", "findings", "top"]}
+                  "widgets": ["map", "kind", "source", "country", "edge", "tl30", "findings", "top"]}
 
 
 def _rw():
