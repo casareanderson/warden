@@ -459,9 +459,12 @@ html[data-density=compact] nav button{padding:7px 10px}
 </section>
 
 <!-- SETTINGS -->
-<section class="tab" id="t-settings">
-  <h2>Waiting for you <span class="hint">what warden proposed — same as reacting ✅ / ❌ in your chat channel</span></h2>
+<section class="tab" id="t-review">
+  <h2>Waiting for you <span class="hint">everything that needs your ✅ / ❌ right now — same as reacting in your chat channel</span></h2>
   <div id="appr"></div>
+</section>
+
+<section class="tab" id="t-settings">
   <h2>Setup <span class="hint" id="setup-score"></span></h2>
   <div class="wrap"><table id="setup"></table></div>
   <h2>Settings <span class="hint" id="ovr-note">the ones that are safe to change from a browser — the rest live in warden.yml</span></h2>
@@ -552,7 +555,7 @@ const ago = ts => { if (!ts) return "—"; const d = (Date.now() - new Date(ts.r
 const selfB = r => r.self ? ' <span class="b acc" title="our own address (self-ips.txt / warden.yml allow) — excluded from counts">self</span>' : "";
 const ccCell = (cc, red) => cc ? `<span class="flag">${flag(cc)}</span>${esc(cc)}${red ? ' <span class="b red">red list</span>' : ""}` : '<span class="q">—</span>';
 
-const GROUPS = [["Monitor", [["overview","Overview"],["detections","Detections"],["incidents","Incidents"],["edge","Edge · Cloudflare"],["network","Network"],["agents","Agents"],["search","Search"]]],
+const GROUPS = [["Monitor", [["overview","Overview"],["review","Waiting for you"],["detections","Detections"],["incidents","Incidents"],["edge","Edge · Cloudflare"],["network","Network"],["agents","Agents"],["search","Search"]]],
                 ["Exposure", [["surface","Attack surface"],["geo","Geo & red list"]]],
                 ["Assets", [["vulns","Vulnerabilities"],["endpoints","Endpoints"]]],
                 ["Hub", [["health","Health"],["connect","Connect"],["settings","Settings"],["account","Account"]]]];
@@ -829,7 +832,7 @@ function openWaiting() {
   const go = (tab, label) => `<button class="btn ghost sm" onclick="closeDrawer();show('${tab}')">${label} →</button>`;
   const decide = w.ap.length
     ? `<h3>Needs ✅ / ❌ now (${w.ap.length})</h3>` + w.ap.map(a => `<div class="appr" style="margin-bottom:6px"><pre>${esc(a.text.split("\n").slice(0, 2).join("\n"))}</pre></div>`).join("")
-      + `<div class="note">Decide here, or react in your alerts channel — same effect. ${go("settings", "Open Settings")}</div>`
+      + `<div class="note">Decide here, or react in your alerts channel — same effect. ${go("review", "Open Waiting for you")}</div>`
     : '<h3>Needs ✅ / ❌ now</h3><div class="empty">Nothing in the approval queue. 🎉</div>';
   const also = [
     w.integ ? [`${w.integ} integrity change${w.integ === 1 ? "" : "s"} to accept or reject`, "endpoints", "Endpoints"] : null,
@@ -1273,7 +1276,7 @@ function kpiDefs(d, edgeBlind) {
     vuln_fixable: ["Fixable CVEs", V.fixable || 0, `${V.crit || 0} critical`, V.crit ? "red" : V.fixable ? "amb" : "grn", "vulns"],
     ids_24h: ["IDS alerts 24 h", N.ids_24h || 0, `${N.intel_24h || 0} threat-intel hits`, N.ids_24h ? "amb" : "grn", "network"],
     integrity_open: ["Integrity changes", integ, "open, not yet accepted", integ ? "amb" : "grn", "endpoints"],
-    approvals: ["Waiting for you", ap, "approve in Settings or chat", ap ? "amb" : "grn", "settings"],
+    approvals: ["Waiting for you", ap, "approve here or in chat", ap ? "amb" : "grn", "review"],
   };
 }
 const KPI_TITLES = {events_24h: "Detections 24 h", ips_7d: "Scored IPs 30 d", edge_24h: "Edge blocks 24 h", red_hits_7d: "Red-list hits",
@@ -1307,7 +1310,7 @@ function renderOverview(d, edgeBlind) {
     } else if (w.type === "approvals") {
       const ap = d.approvals || [];
       el.innerHTML = ap.length ? ap.slice(0, 5).map(a => `<div class="q" style="margin-bottom:6px">${esc(a.text.split("\n")[0]).slice(0, 140)}</div>`).join("") +
-        `<div class="note"><a href="#settings" onclick="show('settings');return false">decide →</a></div>` : '<div class="empty">Nothing waiting. 🎉</div>';
+        `<div class="note"><a href="#review" onclick="show('review');return false">decide →</a></div>` : '<div class="empty">Nothing waiting. 🎉</div>';
     } else if (w.type === "hosthealth") hostHealth(el, d.hosthealth);
     else if (w.type === "map") worldMap(el, d.geo);
     else if (w.type === "top") {
@@ -1627,7 +1630,7 @@ let SET = null;
 async function loadSettings() {
   try { SET = await getj("api/settings"); if (SET.error) return; } catch { return; }
   const ap = SET.approvals || [];
-  badge("settings", ap.length, false);
+  badge("review", ap.length, false);
   $("#appr").innerHTML = ap.length ? ap.map(a => { const ch = JSON.parse(a.choices || "[]");
     return `<div class="appr"><pre>${esc(a.text)}</pre><div style="display:flex;flex-direction:column;gap:6px">${ch.map(c =>
       `<button class="btn ${c === "❌" ? "ghost" : ""} sm" data-appr="${esc(a.id)}" data-c="${c}">${c} ${{"✅": "approve", "❌": "reject", "⚡": "approve, now"}[c] || ""}</button>`).join("")}</div></div>`; }).join("")
