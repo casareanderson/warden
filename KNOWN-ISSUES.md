@@ -62,8 +62,11 @@ roll-up and edge-ban logic are general.
   auth in front of it — don't expose it without some.
 - **Large estates make big MCP answers.** Tool results are capped at 200 KB and
   say so when truncated; ask narrower questions (a target, an IP, fewer hours).
-- **Vulnerability matching depends on OSV.dev being reachable.** If it isn't, the scan errors per target and
-  keeps the previous results; advisories already fetched are cached locally. Alpine falls back to its cached secdb.
+- **Vulnerability matching needs OSV.dev to see new advisories.** When it is unreachable the scan no longer
+  errors per target: it matches against the advisories already fetched into the local cache and marks the
+  target `stale` (Alpine also falls back to its cached secdb). What a `stale` result cannot show is an
+  advisory never fetched — a new CVE, or a package first seen that day — so it can under-report until OSV
+  is reachable again.
 - **Package types not read inside images:** Java jars, Ruby gems, PHP composer, .NET, and Go binaries older than
   Go 1.18 (counted in the target's note). Rust binaries are read only when built with `cargo auditable`.
 - **Renamed forks are invisible.** A fork published under a new name (e.g. `unclecode-litellm`, a litellm 1.81 fork)
