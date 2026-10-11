@@ -276,6 +276,7 @@ html[data-density=compact] nav button{padding:7px 10px}
 .subnav .count.bad{background:var(--red);color:#fff}
 .count.dot{min-width:9px;width:9px;height:9px;padding:0;border-radius:50%;background:var(--amb);text-indent:-999px;overflow:hidden}
 .count.dot.bad{background:var(--red)}
+.fld label .fkey{display:block;font-size:10px;color:var(--faint);font-weight:400;margin-top:2px;font-family:var(--mono)}
 </style>
 
 <header>
@@ -488,22 +489,6 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="card" id="cfg"></div>
 </section>
 
-<section class="tab" id="t-connect">
-  <div class="banner ok" style="margin-bottom:16px"><b>warden is the hub; your tools plug into it.</b> Everything here is read-only for the tool you connect:
-    a token can read what this console shows and nothing more — it can't ban, block, patch or approve.</div>
-  <div class="grid g2">
-    <div class="card"><h3>1 · Make a token</h3>
-      <div class="row"><input id="tok-name" placeholder="who it's for, e.g. home-assistant" maxlength="60"><button class="btn" id="tok-new">New token</button></div>
-      <div id="tok-once"></div><div class="wrap" style="border:0"><table id="toks"></table></div></div>
-    <div class="card"><h3>2 · Your endpoints</h3><div id="endpoints-info"></div></div>
-  </div>
-  <h2>3 · Plug in a tool <span class="hint">copy, replace $WARDEN_TOKEN with the token from step 1</span></h2>
-  <div class="grid g3 intg" id="intg"></div>
-  <h2>Put warden behind your VPN <span class="hint">the console has no reason to be on the open internet — pick what you already run</span></h2>
-  <div class="grid g3 intg" id="vpn"></div>
-  <div class="note">Whatever sits in front must pass <code>/mcp</code> and <code>/api/v1</code> straight through (no login page) — the bearer token is the auth there. Everything else can sit behind your SSO.</div>
-</section>
-
 <section class="tab" id="t-account">
   <div class="banner warn" id="must-change" hidden style="margin-bottom:16px"><b>Pick your own password first.</b> You signed in with a one-time password; the rest of warden opens once you've changed it.</div>
   <div class="grid g3">
@@ -518,6 +503,21 @@ html[data-density=compact] nav button{padding:7px 10px}
       </form><div class="msg" id="pw-msg"></div></div>
     <div class="card" id="tf-card"><h3>Two-factor sign-in</h3><div id="tf-body"></div><div class="msg" id="tf-msg"></div></div>
   </div>
+  <h2 style="margin-top:22px">Connect a tool or agent</h2>
+  <div class="banner ok" style="margin-bottom:16px"><b>warden is the hub; your tools plug into it.</b> Everything here is read-only for the tool you connect:
+    a token can read what this console shows and nothing more — it can't ban, block, patch or approve.</div>
+  <div class="grid g2">
+    <div class="card"><h3>1 · Make a token</h3>
+      <div class="row"><input id="tok-name" placeholder="who it's for, e.g. home-assistant" maxlength="60"><button class="btn" id="tok-new">New token</button></div>
+      <div id="tok-once"></div><div class="wrap" style="border:0"><table id="toks"></table></div></div>
+    <div class="card"><h3>2 · Your endpoints</h3><div id="endpoints-info"></div></div>
+  </div>
+  <h2>3 · Plug in a tool <span class="hint">copy, replace $WARDEN_TOKEN with the token from step 1</span></h2>
+  <div class="grid g3 intg" id="intg"></div>
+  <h2>Put warden behind your VPN <span class="hint">the console has no reason to be on the open internet — pick what you already run</span></h2>
+  <div class="grid g3 intg" id="vpn"></div>
+  <div class="note">Whatever sits in front must pass <code>/mcp</code> and <code>/api/v1</code> straight through (no login page) — the bearer token is the auth there. Everything else can sit behind your SSO.</div>
+
   <div id="users-wrap" hidden>
     <h2>Users <span class="hint">viewer = look · approver = also approve bans/patches · admin = also settings, tokens, users</span></h2>
     <div class="card">
@@ -579,7 +579,7 @@ const NAV = [
   {id:"threats",  label:"Threats",  kids:[["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["incidents","Incidents"],["geo","Geo & red list"]]},
   {id:"agents",   label:"Agents"},
   {id:"posture",  label:"Posture",  kids:[["surface","Attack surface"],["vulns","Vulnerabilities"],["endpoints","Endpoints"],["health","Health"]]},
-  {id:"hub",      label:"Settings", kids:[["settings","Settings"],["connect","Connect"],["account","Account"]]},
+  {id:"hub",      label:"Settings", kids:[["settings","Settings"],["account","Account"]]},
 ];
 const KIDS = {}, CHILD_OF = {}, SUBLABEL = {};
 NAV.forEach(n => { if (n.kids) { KIDS[n.id] = n.kids.map(k => k[0]); n.kids.forEach(([cid,lbl]) => { CHILD_OF[cid] = n.id; SUBLABEL[cid] = lbl; }); } });
@@ -1637,12 +1637,18 @@ document.addEventListener("click", e => {
 
 // ── Settings: editable config + write-only secrets ──────────────────────────
 let FID = 0;
+const FIELD_LABELS = {
+  "estate.name": "Estate name", "estate.domain": "Domain", "estate.timezone": "Time zone",
+  "notify.backend": "Alerts channel", "notify.channel": "Channel ID", "notify.ntfy_url": "ntfy server URL",
+  "api.enabled": "REST API + MCP", "api.public_url": "Public URL", "cloudflare.zone_id": "Cloudflare Zone ID",
+  "patch.night": "Overnight patch time", "patch.expire_hours": "Approval expires after (hours)",
+};
 function field(f) {
   const id = "cfg-" + (++FID), v = f.value ?? "";
   const input = Array.isArray(f.type) ? `<select id="${id}">${f.type.map(o => `<option${o === v ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`
     : f.type === "bool" ? `<select id="${id}"><option value="true"${v ? " selected" : ""}>on</option><option value="false"${v ? "" : " selected"}>off</option></select>`
     : `<input id="${id}" value="${esc(v)}" ${f.type === "int" ? 'inputmode="numeric"' : ""} placeholder="not set">`;
-  return `<div class="fld"><label for="${id}">${esc(f.key)}</label>${input}<button class="btn sm" data-save-key="${esc(f.key)}">Save</button></div>`;
+  return `<div class="fld"><label for="${id}">${esc(FIELD_LABELS[f.key] || f.key)}<span class="fkey">${esc(f.key)}</span></label>${input}<button class="btn sm" data-save-key="${esc(f.key)}">Save</button></div>`;
 }
 // Grouped by the prefix before the first dot (cloudflare.*, incidents.*, …) — a tidy section per subsystem.
 const CFG_GROUP_TITLES = {cloudflare: "Cloudflare edge", incidents: "Incident brain", agents: "Agents", geo: "Geo & red list",
@@ -1721,7 +1727,7 @@ document.addEventListener("click", async e => {
 async function load() {
   try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); renderAgents(D.agents);
         const a = document.activeElement;   // don't wipe a half-typed setting/token on the 60-s refresh
-        if (!(a && /INPUT|SELECT/.test(a.tagName) && a.closest("#t-settings,#t-connect"))) loadSettings(); }
+        if (!(a && /INPUT|SELECT/.test(a.tagName) && a.closest("#t-settings,#t-account"))) loadSettings(); }
   catch (e) { console.error("warden render:", e); $("#updated").textContent = "⚠ refresh failed"; }
 }
 
