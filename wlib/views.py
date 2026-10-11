@@ -381,6 +381,7 @@ def agents_payload():
         return {"agents": [], "conns": [], "alerts": [], "findings": [], "runs": [], "perms": [], "dests": []}
     has_bytes = "bytes_recv" in {r["name"] for r in q("pragma table_info(agent_conns)")}
     bcol = "bytes_recv" if has_bytes else "0 bytes_recv"
+    bagg = "bytes_recv" if has_bytes else "0"   # aggregate form: max(0) is valid, max(0 bytes_recv) is not
     bad_ips = {r["dest_ip"] for r in q("select distinct dest_ip from agent_alerts")} if has("agent_alerts") else set()
     bad_dests = {r["dest"] for r in q("select distinct dest from agent_alerts")} if has("agent_alerts") else set()
 
@@ -391,7 +392,7 @@ def agents_payload():
 
     # Destination history across ALL agents: one row per destination, known-bad first, with totals and who reached it.
     dests = q(f"""select dest, dest_ip, max(domain) domain, group_concat(distinct agent) agents, count(distinct agent) n_agents,
-                  min(first_seen) first_seen, max(last_seen) last_seen, sum(hits) hits, max({bcol}) bytes_recv
+                  min(first_seen) first_seen, max(last_seen) last_seen, sum(hits) hits, max({bagg}) bytes_recv
                   from agent_conns group by dest order by hits desc""")
     for d in dests:
         d["bad"] = d["dest_ip"] in bad_ips or d["dest"] in bad_dests
