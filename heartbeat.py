@@ -45,6 +45,7 @@ KEEP_SELF_DAYS = 2         # warden's own sign-ins are kept only as counts per p
 
 UPTIME = "cat /proc/uptime"
 NODE_BEAT = "cat /proc/uptime; echo @@lxc; pvesh get /nodes/localhost/lxc --output-format json 2>/dev/null || echo '[]'"
+DOCKER_BEAT = "cat /proc/uptime; echo @@docker; docker ps -a --format '{{.Names}}|{{.State}}' 2>/dev/null || echo ''"
 LOGINS = r'''export LC_ALL=C
 S=${SINCE:-2592000}
 # keep EVERY sign-in that isn't ours, but only the newest 200 made with this box's own keys ($SELF) — on a box
@@ -201,15 +202,46 @@ def split_sections(text):
 
 
 # ── heartbeat ────────────────────────────────────────────────────────────────
+def docker_watch():
+    """Docker hosts that declare containers to watch (`watch_containers:` in their hosts: entry) as synthetic
+    'host'-kind beat targets carrying the ssh/vmid/local needed to reach their docker daemon."""
+    out = []
+    for h in hosts.declared():
+        containers = [str(c) for c in (h.get("watch_containers") or [])]
+        if not containers:
+            continue
+        name = h.get("name") or ""
+        img = next((t for t in hosts.targets(discover=False)
+                    if t["kind"] == "images" and t["target"] == f"img:{name}"), None)
+        if not img:
+            continue
+        ip = img.get("ssh", "").split("@")[-1] or name
+        out.append({"target": "host:local" if img.get("local") else f"host:{ip}", "kind": "host",
+                    "name": name, "node": ip, "ssh": img.get("ssh"), "vmid": img.get("vmid"),
+                    "local": img.get("local"), "docker": True, "containers": containers})
+    return out
+
+
 def beat_targets():
-    """Nodes and plain hosts (containers are answered for by their node)."""
-    return [t for t in hosts.targets(discover=False) if t["kind"] in ("node", "host", "local")]
+    """Nodes, plain hosts and docker hosts (containers are answered for by their host)."""
+    base = [dict(t, containers=[]) for t in hosts.targets(discover=False)
+            if t["kind"] in ("node", "host", "local")]
+    have = {t["target"] for t in base}
+    for d in docker_watch():
+        if d["target"] in have:      # a linux/local host with docker:true already has a host: entry: attach containers
+            for t in base:
+                if t["target"] == d["target"]:
+                    t["containers"], t["docker"], t["node"] = d["containers"], True, d["node"]
+        else:                        # a `kind: docker` host has no host: entry of its own: add one
+            base.append(d)
+    return base
 
 
 def _beat(t):
     t0 = time.time()
+    cmd = DOCKER_BEAT if t.get("containers") else NODE_BEAT if t["kind"] == "node" else UPTIME
     try:
-        rc, out, err = hosts.remote(t, NODE_BEAT if t["kind"] == "node" else UPTIME, timeout=25)
+        rc, out, err = hosts.remote(t, cmd, timeout=25)
     except Exception as e:  # noqa: BLE001
         rc, out, err = -1, "", str(e)
     return t, rc, out or "", (err or "").strip()[:160], int((time.time() - t0) * 1000)
@@ -234,25 +266,41 @@ def beat(con=None):
         record(con, t["target"], t["name"], t["kind"], t.get("node"), "up" if ok else "down", ts, ms if ok else None,
                up_s, "" if ok else (err or f"exit {rc}"))
         seen.append(t["target"])
-        if t["kind"] != "node":
+        if t["kind"] == "node":
+            if not ok:          # can't see inside a node that doesn't answer: its containers are unknown, not down
+                for r in con.execute("select target from hb where node=? and kind='ct'", (t["node"],)).fetchall():
+                    con.execute("update hb set state='unknown', last_try=?, note=? where target=?",
+                                (ts, f"node {t['name']} not answering", r["target"]))
+                    seen.append(r["target"])
+                continue
+            try:
+                cts = json.loads(out.split("@@lxc", 1)[1])
+            except (IndexError, ValueError):
+                cts = []
+            for c in cts:
+                tid = f"ct:{c.get('vmid')}"
+                if tid in ignore:
+                    continue
+                running = c.get("status") == "running"
+                record(con, tid, c.get("name") or tid, "ct", t["node"], "up" if running else "stopped", ts,
+                       None, int(c.get("uptime") or 0) if running else None,
+                       "" if running else c.get("status") or "stopped")
+                seen.append(tid)
             continue
-        if not ok:          # can't see inside a node that doesn't answer: its containers are unknown, not down
-            for r in con.execute("select target from hb where node=? and kind='ct'", (t["node"],)).fetchall():
-                con.execute("update hb set state='unknown', last_try=?, note=? where target=?",
-                            (ts, f"node {t['name']} not answering", r["target"]))
-                seen.append(r["target"])
-            continue
-        try:
-            cts = json.loads(out.split("@@lxc", 1)[1])
-        except (IndexError, ValueError):
-            cts = []
-        for c in cts:
-            tid = f"ct:{c.get('vmid')}"
+        docker = dict(line.split("|", 1) for line in out.split("@@docker", 1)[1].splitlines() if "|" in line) \
+            if "@@docker" in out else {}
+        for c in t.get("containers") or []:      # docker hosts: the declared containers, answered for by their host
+            tid = f"ctr:{t['name']}:{c}"
             if tid in ignore:
                 continue
-            running = c.get("status") == "running"
-            record(con, tid, c.get("name") or tid, "ct", t["node"], "up" if running else "stopped", ts,
-                   None, int(c.get("uptime") or 0) if running else None, "" if running else c.get("status") or "stopped")
+            if not ok:                            # can't see inside a host that doesn't answer: unknown, not down
+                con.execute("update hb set state='unknown', last_try=?, note=? where target=?",
+                            (ts, f"host {t['name']} not answering", tid))
+                seen.append(tid)
+                continue
+            running = docker.get(c) == "running"
+            record(con, tid, c, "ctr", t["node"], "up" if running else "stopped", ts, None, None,
+                   "" if running else f"docker {docker.get(c, 'missing')}")
             seen.append(tid)
     # a container that vanished from its node's list (destroyed / migrated) stops being tracked
     for r in con.execute("select target from hb where kind='ct'").fetchall():
@@ -262,6 +310,12 @@ def beat(con=None):
             con.execute("delete from hb where target=?", (r["target"],))
             con.execute("insert into hb_events(ts,target,event,detail) values(?,?,?,?)",
                         (ts, r["target"], "gone", "no longer listed on its node"))
+    # a docker container no longer declared by its host stops being tracked
+    for r in con.execute("select target from hb where kind='ctr'").fetchall():
+        if r["target"] not in seen:
+            con.execute("delete from hb where target=?", (r["target"],))
+            con.execute("insert into hb_events(ts,target,event,detail) values(?,?,?,?)",
+                        (ts, r["target"], "gone", "no longer declared"))
     con.execute("delete from hb_events where ts < datetime('now', ?)", (f"-{KEEP_DAYS} days",))
     con.commit()                       # commit BEFORE any notify call (patcher reply-loop lesson)
     alerts(con)
