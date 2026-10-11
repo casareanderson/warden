@@ -469,40 +469,77 @@ def _blocklist_ips(expr):
     return [t for t in m.group(1).split() if t] if m else []
 
 
-def cf_ban(ip, note, cfg):
-    """Block at the Cloudflare edge via a WAF custom rule — Cloudflare's current
-    equivalent of the retired firewall APIs. Appends the address to the zone's
-    `warden: blocklist` rule (the same one edgeban.py manages)."""
+def _cf_adjust(ip, cfg, add):
+    """Append (add=True) or drop (add=False) one address in the zone's
+    `warden: blocklist` WAF custom rule — the shared read-modify-write behind
+    cf_ban and cf_unban. Returns (ok, message)."""
     tok = secrets.get(config.get("cloudflare.token_secret") or "CF_API_TOKEN")
     zone = config.get("cloudflare.zone_id") or os.environ.get("CLOUDFLARE_ZONE_ID")
     if not tok or not zone:
         return False, "no CF credentials (zone_id / token) in config"
     base = f"https://api.cloudflare.com/client/v4/zones/{zone}"
     entry = f"{base}/rulesets/phases/http_request_firewall_custom/entrypoint"
-    try:
-        ep = _cf_call(entry, tok)
-        rules = ep.get("rules", [])
-        keep = [r for r in rules if (r.get("description") or "") != DESC]
-        cur = next((r for r in rules if (r.get("description") or "") == DESC), None)
-        ips = _blocklist_ips(cur.get("expression") if cur else None)
-        if ip not in ips:
-            ips.append(ip)
-        expr = "(ip.src in {" + " ".join(ips) + "})" if ips else None
-        if expr and not cur and len(keep) >= 5:
+    ep = _cf_call(entry, tok)
+    rules = ep.get("rules", [])
+    keep = [r for r in rules if (r.get("description") or "") != DESC]
+    cur = next((r for r in rules if (r.get("description") or "") == DESC), None)
+    ips = _blocklist_ips(cur.get("expression") if cur else None)
+    if add:
+        if ip in ips:
+            return True, "cf WAF blocklist unchanged"
+        ips.append(ip)
+        if not cur and len(keep) >= 5:
             return False, "free plan allows 5 custom rules and all 5 are used"
-        new = [{"action": r["action"], "expression": r["expression"],
-                "description": r.get("description", ""), "enabled": r.get("enabled", True)} for r in keep]
-        if expr:
-            new.append({"action": "block", "expression": expr, "description": DESC, "enabled": True})
-        _cf_call(f"{base}/rulesets/{ep['id']}", tok, "PUT", {"rules": new})
-        back = _cf_call(entry, tok)
-        got = next((r.get("expression") for r in back.get("rules", [])
-                    if r.get("description") == DESC), None)
-        if got != expr:
-            return False, "read-back mismatch"
-        return True, "cf WAF blocklist updated"
+    else:
+        if ip not in ips:
+            return True, "cf WAF blocklist unchanged"
+        ips.remove(ip)
+    expr = "(ip.src in {" + " ".join(ips) + "})" if ips else None
+    new = [{"action": r["action"], "expression": r["expression"],
+            "description": r.get("description", ""), "enabled": r.get("enabled", True)} for r in keep]
+    if expr:
+        new.append({"action": "block", "expression": expr, "description": DESC, "enabled": True})
+    _cf_call(f"{base}/rulesets/{ep['id']}", tok, "PUT", {"rules": new})
+    back = _cf_call(entry, tok)
+    got = next((r.get("expression") for r in back.get("rules", [])
+                if r.get("description") == DESC), None)
+    if got != expr:
+        return False, "read-back mismatch"
+    return True, "cf WAF blocklist updated"
+
+
+def cf_ban(ip, note, cfg):
+    """Block at the Cloudflare edge via a WAF custom rule — Cloudflare's current
+    equivalent of the retired firewall APIs. Appends the address to the zone's
+    `warden: blocklist` rule (the same one edgeban.py manages)."""
+    try:
+        return _cf_adjust(ip, cfg, add=True)
     except Exception as e:
         return False, str(e)[:150]
+
+
+def cf_unban(ip, cfg):
+    """Drop an address from the `warden: blocklist` rule once its ban has
+    lapsed — the missing unban path for `enforce: true` bans."""
+    try:
+        return _cf_adjust(ip, cfg, add=False)
+    except Exception as e:
+        return False, str(e)[:150]
+
+
+def expire_lapsed(con, cfg):
+    """Unban enforce-mode bans whose window has lapsed. On success the row is
+    marked 'lapsed'; on failure it stays 'active' so the next run retries.
+    Returns the number of bans actually removed from the Cloudflare rule."""
+    n = 0
+    for r in con.execute("select * from bans where state='active' and expires < datetime('now')").fetchall():
+        ok, msg = cf_unban(r["ip"], cfg)
+        if ok:
+            con.execute("update bans set state='lapsed', note='cf-edge unblocked' where id=?", (r["id"],))
+            n += 1
+        else:
+            con.execute("update bans set note=? where id=?", (f"unban failed: {msg}", r["id"]))
+    return n
 
 # ------------------------------------------------------------------ main ---
 def main():
@@ -610,6 +647,7 @@ def main():
                     (now, net, d["score"], reasons, state,
                      f"+{cfg['ban_hours']} hours", note))
         proposed += 1
+    expire_lapsed(con, cfg)
     con.commit()
 
     print(f"warden: {total_new} scored events, {proposed} ban(s) "
