@@ -145,11 +145,17 @@ def wm_set(con, src, pos):
 #     npm:         {ssh: me@nas, container: npmplus,  log: /data/nginx/logs/access.log}
 #     authelia:    {ssh: me@nas, container: crowdsec, log: /acquis/authelia.log}
 #     cloudflared: {ssh: me@nas, container: cloudflared}
+#     caddy:       {ssh: me@nas, container: caddy,     log: /var/log/caddy/access.log}
+#     traefik:     {ssh: me@nas, container: traefik,   log: /var/log/traefik/access.log}
+#     authentik:   {ssh: me@nas, container: authentik-server}   # stdout, not a file
 # `ssh: local` reads on this box; no `container` reads the file on the host itself.
 # A source that is not configured is skipped (0 lines), never an error.
 LEGACY = {"npm": {"container": "npmplus", "log": "/data/nginx/logs/access.log"},
           "authelia": {"container": "crowdsec", "log": "/acquis/authelia.log"},
-          "cloudflared": {"container": "cloudflared"}}
+          "cloudflared": {"container": "cloudflared"},
+          "caddy": {"container": "caddy", "log": "/var/log/caddy/access.log"},
+          "traefik": {"container": "traefik", "log": "/var/log/traefik/access.log"},
+          "authentik": {"container": "authentik-server"}}
 
 
 def source_conf(name):
@@ -214,6 +220,25 @@ CFD_RE = re.compile(r'dest=https?://(?P<host>[^/\s]+)(?P<path>\S*)')
 def collect_authelia(con):
     return tail_log(con, "authelia")
 
+def collect_caddy(con):
+    return tail_log(con, "caddy")
+
+def collect_traefik(con):
+    return tail_log(con, "traefik")
+
+def collect_authentik(con):
+    """Authentik writes to the container's stdout, not a file, so read
+    `docker logs`. Same real timestamp watermark as cloudflared: a fixed
+    lookback re-reads half of every run and double-counts each attack."""
+    src = source_conf("authentik")
+    if not src or not src.get("container"):
+        return [], 0
+    since = wm_get(con, "authentik") or "10m"
+    started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out = src_sh(src, f"docker logs {src['container']} --since {since} 2>&1 | tail -400", in_container=False)
+    wm_set(con, "authentik", started)
+    return out.splitlines(), len(out)
+
 def collect_cloudflared(con):
     """The tunnel's own log — the ONLY place that sees hostnames routed direct
     to an origin, bypassing NPMplus. Nothing else in the estate reads it.
@@ -254,6 +279,7 @@ HOSTILE_UA = re.compile(
 NPM_TS = re.compile(r'^\[(\d{2})/(\w{3})/(\d{4}):(\d{2}:\d{2}:\d{2})')
 AUTH_TS = re.compile(r'time="([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8})')
 CFD_TS = re.compile(r'^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8})Z')
+TRAEFIK_TS = re.compile(r'\[(\d{2})/(\w{3})/(\d{4}):(\d{2}:\d{2}:\d{2})')
 MONTHS = {m: i + 1 for i, m in enumerate(
     "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split())}
 
@@ -274,9 +300,39 @@ def event_time(src, line):
             m = CFD_TS.match(line)
             if m:
                 return m.group(1).replace("T", " ")
+        elif src == "traefik":
+            m = TRAEFIK_TS.search(line)
+            if m:
+                d, mon, y, t = m.groups()
+                return f"{y}-{MONTHS[mon]:02d}-{d} {t}"
+        elif src in ("caddy", "authentik"):
+            try:
+                d = json.loads(line)
+            except Exception:
+                return None
+            ts = d.get("ts") if src == "caddy" else d.get("timestamp")
+            if isinstance(ts, (int, float)):
+                return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            if isinstance(ts, str):
+                return ts.replace("T", " ")[:19]
     except Exception:
         pass
     return None
+
+
+def _score_request(ip, verb, host, path, status, ua):
+    hits, score = [], 0
+    for rx, pts, name in HOSTILE_PATH:
+        if rx.search(path):
+            score += pts; hits.append(name)
+    if HOSTILE_UA.search(ua or ""):
+        score += 5; hits.append("hostile-user-agent")
+    if str(status) in ("404", "403", "401") and score == 0:
+        score += 1; hits.append("4xx")
+    if not hits:
+        return None
+    return dict(ip=ip, kind=",".join(hits), score=score,
+                detail=f'{verb} {host}{path} -> {status} ua={(ua or "")[:60]}')
 
 
 def score_npm(line):
@@ -284,18 +340,61 @@ def score_npm(line):
     if not m:
         return None
     d = m.groupdict()
-    hits, score = [], 0
-    for rx, pts, name in HOSTILE_PATH:
-        if rx.search(d["path"]):
-            score += pts; hits.append(name)
-    if HOSTILE_UA.search(d["ua"]):
-        score += 5; hits.append("hostile-user-agent")
-    if d["status"] in ("404", "403", "401") and score == 0:
-        score += 1; hits.append("4xx")
-    if not hits:
+    return _score_request(d["ip"], d["verb"], d["host"], d["path"], d["status"], d["ua"])
+
+
+# Traefik's default access log is its extended Common Log Format. Unlike NPMplus,
+# the client IP is the FIRST field and the vhost isn't logged at all.
+TRAEFIK_RE = re.compile(
+    r'^(?P<ip>\S+)\s+\S+\s+\S+\s+\[(?P<ts>[^\]]+)\]\s+'
+    r'"(?P<verb>\S+)\s+(?P<path>\S+)\s+\S+"\s+'
+    r'(?P<status>\d{3})\s+\S+\s+"[^"]*"\s+"(?P<ua>[^"]*)"')
+
+
+def score_traefik(line):
+    m = TRAEFIK_RE.match(line)
+    if not m:
         return None
-    return dict(ip=d["ip"], kind=",".join(hits), score=score,
-                detail=f'{d["verb"]} {d["host"]}{d["path"]} -> {d["status"]} ua={d["ua"][:60]}')
+    d = m.groupdict()
+    return _score_request(d["ip"], d["verb"], "", d["path"], d["status"], d["ua"])
+
+
+def score_caddy(line):
+    # Caddy's default access log is JSON (one object per line); the `request`
+    # object carries the client, method, host and URI.
+    try:
+        d = json.loads(line)
+    except Exception:
+        return None
+    if d.get("msg") != "handled request":
+        return None
+    req = d.get("request") or {}
+    headers = req.get("headers") or {}
+    ua = ""
+    if isinstance(headers, dict):
+        for key in ("User-Agent", "user-agent", "User-agent"):
+            v = headers.get(key)
+            if v:
+                ua = v[0] if isinstance(v, list) and v else str(v)
+                break
+    return _score_request(req.get("remote_ip") or req.get("client_ip") or "",
+                          req.get("method") or "", req.get("host") or "",
+                          req.get("uri") or "", d.get("status"), ua)
+
+
+def score_authentik(line):
+    # Authentik's `login_failed` event is logged to stdout as "Created Event"
+    # with `action` and `client_ip` (see authentik/events/models.py).
+    try:
+        d = json.loads(line)
+    except Exception:
+        return None
+    if d.get("action") != "login_failed":
+        return None
+    ip = d.get("client_ip")
+    if not ip:
+        return None
+    return dict(ip=str(ip), kind="auth-failure", score=3, detail=line[:180])
 
 def score_authelia(line):
     # Authelia v4 writes "Unsuccessful 1FA authentication attempt" (and 2FA variants);
@@ -360,6 +459,9 @@ def main():
         ("npm", collect_npm, score_npm),
         ("authelia", collect_authelia, score_authelia),
         ("cloudflared", collect_cloudflared, score_cloudflared),
+        ("caddy", collect_caddy, score_caddy),
+        ("traefik", collect_traefik, score_traefik),
+        ("authentik", collect_authentik, score_authentik),
     ):
         lines, nbytes = collect(con)
         parsed = 0
