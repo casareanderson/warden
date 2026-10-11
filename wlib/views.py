@@ -172,6 +172,15 @@ def warm_cache(every=CACHE_SECONDS - 15):
     threading.Thread(target=loop, daemon=True, name="payload-warm").start()
 
 
+def _hosthealth():
+    """Beszel's verdict per host (optional integration, None when off). Never breaks the page."""
+    try:
+        from . import hosthealth  # noqa: PLC0415
+        return hosthealth.fetch()
+    except Exception as e:  # noqa: BLE001
+        return {"enabled": True, "error": f"{type(e).__name__}: {str(e)[:160]}", "hosts": [], "summary": None}
+
+
 def payload():
     red = redlist()
     watch = red["watch"]
@@ -224,6 +233,7 @@ def payload():
 
     return {
         "mode": enforce_mode(),
+        "hosthealth": _hosthealth(),
         "kpi": {
             "events_24h": sum(1 for r in ev7 if r["ts"] > day_ago),
             "events_self_24h": sum(1 for r in ev_all if r["self"] and r["ts"] > day_ago),
@@ -443,7 +453,13 @@ WIDGETS = {
     "findings":  {"title": "Open attack-surface findings", "type": "findings", "size": 2},
     "approvals": {"title": "Waiting for your decision", "type": "approvals", "size": 2},
     "top":       {"title": "Top addresses · 30 days", "type": "top", "size": 4},
+    "hosthealth": {"title": "Host health · Beszel", "type": "hosthealth", "size": 2},
 }
+
+
+def auto_widgets():
+    """Widgets that switch themselves on with their integration (shown once; removing one in Customise sticks)."""
+    return ["hosthealth"] if (config.get("beszel") or {}).get("enabled") else []
 KPIS = ["events_24h", "ips_7d", "edge_24h", "red_hits_7d", "findings_open", "bans", "hosts", "vuln_kev", "vuln_fixable",
         "ids_24h", "integrity_open", "approvals"]
 DEFAULT_LAYOUT = {"kpis": ["events_24h", "ips_7d", "edge_24h", "red_hits_7d", "findings_open", "bans", "hosts"],
@@ -456,27 +472,38 @@ def _rw():
     return con
 
 
-def layout():
-    """Saved layout, else warden.yml `dashboard.widgets`, else the default. Unknown ids are dropped,
-    so a widget removed in a later version cannot break the page."""
-    saved = None
+def _saved_layout():
     try:
         with _rw() as con:
             r = con.execute("select v from ui_settings where k='layout'").fetchone()
-        saved = json.loads(r[0]) if r else None
+        return json.loads(r[0]) if r else None
     except (sqlite3.Error, ValueError):
-        saved = None
+        return None
+
+
+def layout():
+    """Saved layout, else warden.yml `dashboard.widgets`, else the default. Unknown ids are dropped,
+    so a widget removed in a later version cannot break the page. An integration's widget (auto_widgets) appears
+    by itself the first time it is enabled, and is hidden again when it is turned off."""
+    saved = _saved_layout()
     if not saved and isinstance(config.get("dashboard.widgets"), list):
         saved = {"kpis": DEFAULT_LAYOUT["kpis"], "widgets": config.get("dashboard.widgets")}
     lay = saved or DEFAULT_LAYOUT
+    auto = auto_widgets()
+    widgets = [w for w in lay.get("widgets", []) if w in WIDGETS and (w not in ("hosthealth",) or w in auto)]
+    seen = set(lay.get("seen") or [])
+    for w in auto:
+        if w not in widgets and w not in seen:
+            widgets.insert(0, w)
     return {"kpis": [k for k in lay.get("kpis", []) if k in KPIS] or DEFAULT_LAYOUT["kpis"],
-            "widgets": [w for w in lay.get("widgets", []) if w in WIDGETS],
-            "custom": bool(saved)}
+            "widgets": widgets, "custom": bool(saved)}
 
 
 def save_layout(lay):
     clean = {"kpis": [k for k in (lay.get("kpis") or []) if k in KPIS][:16],
              "widgets": [w for w in dict.fromkeys(lay.get("widgets") or []) if w in WIDGETS][:24]}
+    # an auto widget on screen while this layout was edited has been "seen": if it was left out, it stays out
+    clean["seen"] = sorted(set((_saved_layout() or {}).get("seen") or []) | set(auto_widgets()))
     with _rw() as con:
         con.execute("insert into ui_settings(k, v, updated) values('layout', ?, datetime('now')) "
                     "on conflict(k) do update set v=excluded.v, updated=excluded.updated", (json.dumps(clean),))
@@ -509,7 +536,8 @@ def summary():
         k["approvals"] = len(notify.pending())
     except Exception:  # noqa: BLE001
         k["approvals"] = 0
-    return {"estate": config.get("estate.name"), "mode": p["mode"], "kpi": k, "health": p["health"]}
+    return {"estate": config.get("estate.name"), "mode": p["mode"], "kpi": k, "health": p["health"],
+            "host_health": (p.get("hosthealth") or {}).get("summary")}
 
 
 def detections(hours=24, limit=100, min_score=0, ip="", include_self=False):

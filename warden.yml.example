@@ -122,6 +122,18 @@ api:
 dashboard:
   widgets: null                     # null = default; the Customise button saves your own
 
+# optional: a "Host health" card from Beszel (wlib/hosthealth.py). warden only reads Beszel's verdict.
+# beszel:
+#   enabled: true
+#   snapshot: /var/lib/beszel-snapshot/hosts.json   # A) on the hub box: tools/beszel-snapshot.py on a 1-min timer
+#   # url: http://beszel.lan:8090                   # B) or the hub API as a user with Beszel's read-only role
+#   # user: warden@example.com
+#   # password_secret: BESZEL_PASSWORD
+#   link: http://beszel.lan:8090                    # "Open Beszel" on the card
+#   stale_s: 300
+#   ignore_hosts: []                                # still registered in Beszel but gone on purpose
+#   ignore_alerts: {}                               # e.g. {nas: [Disk]} for a read-only root that always reads 100%
+
 # optional: which containers the internet reaches (wlib/exposure.py) — reads your reverse proxy's routes
 # exposure:
 #   npm: {url: "https://192.168.1.10:81", user_secret: NPM_USER, pass_secret: NPM_PASSWORD, verify_tls: false}
