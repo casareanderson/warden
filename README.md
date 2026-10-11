@@ -310,6 +310,10 @@ Known limits (full list in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)): the Cloudflare W
 
 - **Cloud connectors:** read-only posture checks for your own cloud accounts.
 - **An evolve agent:** watches security advisories and tool trends, and proposes improvements to warden's own rules with the same ✅ / ❌ flow.
+- **Inbound AI-crawler tracking (edge):** on the Edge·Cloudflare view, identify AI crawlers hitting your own
+  public sites by their declared user-agent (GPTBot, ClaudeBot, CCBot, PerplexityBot, Google-Extended, Bytespider,
+  Amazonbot, …) and show which bot crawled which hostname, how often, and whether it honoured robots.txt — the
+  outbound-agent view's mirror image, for the AI traffic coming *at* you rather than *from* your agents.
 
 ## Support and licence
 
