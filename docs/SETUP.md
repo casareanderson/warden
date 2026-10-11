@@ -5,6 +5,11 @@ estate. The blocks marked as tested below run on a fresh Ubuntu runner every wee
 [`setup-check`](../.github/workflows/setup-check.yml). The real install needs your machines, logs and accounts,
 so CI can't prove those steps; they're the ones without a test mark.
 
+
+![What a passing run looks like on a fresh machine (excerpt from `setup-check` on 11 October 2026). Secrets in the output are masked](setup-run.png)
+
+*What a passing run looks like on a fresh machine (excerpt from `setup-check` on 11 October 2026). Secrets in the output are masked.*
+
 ## What you need
 
 - Linux with systemd and Python 3. Tested on Ubuntu 24.04 (Python 3.12) and Debian 13 (Python 3.13), x86_64.
