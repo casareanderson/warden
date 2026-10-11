@@ -256,7 +256,7 @@ def collect_authentik(con):
         return [], 0
     since = wm_get(con, "authentik") or "10m"
     started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    out = src_sh(src, f"docker logs {src['container']} --since {since} 2>&1 | tail -400", in_container=False)
+    out = src_sh(src, f"docker logs {src['container']} --since {since} 2>&1", in_container=False)
     wm_set(con, "authentik", started)
     return out.splitlines(), len(out)
 
@@ -273,7 +273,7 @@ def collect_cloudflared(con):
         return [], 0
     since = wm_get(con, "cloudflared") or "10m"
     started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    out = src_sh(src, f"docker logs {src['container']} --since {since} 2>&1 | tail -400", in_container=False)
+    out = src_sh(src, f"docker logs {src['container']} --since {since} 2>&1", in_container=False)
     wm_set(con, "cloudflared", started)
     return out.splitlines(), len(out)
 

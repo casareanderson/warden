@@ -111,6 +111,38 @@ def test_source_commands(home, monkeypatch):
     assert seen[0] == ["sh", "-c", "wc -c < /var/log/authelia.log"]
 
 
+def test_docker_logs_collector_is_uncapped(home, monkeypatch):
+    (home / "warden.yml").write_text("sources:\n  cloudflared: {ssh: local, container: cloudflared}\n")
+    w = load("warden")
+    seen = []
+
+    class P:
+        returncode, stdout = 0, ""
+
+    def fake(argv, **k):
+        seen.append(argv)
+        return P()
+    monkeypatch.setattr(subprocess, "run", fake)
+    con = w.db()
+    w.collect_cloudflared(con)
+    cmd = seen[0][2]
+    assert "--since" in cmd
+    assert "tail" not in cmd
+
+
+def test_docker_logs_collector_keeps_every_line(home, monkeypatch):
+    (home / "warden.yml").write_text("sources:\n  cloudflared: {ssh: local, container: cloudflared}\n")
+    w = load("warden")
+    big = "\n".join(
+        "2026-10-11T12:00:00Z INF dest=https://example.com/wp-login.php ip=198.41.1.1"
+        for _ in range(1000)
+    )
+    monkeypatch.setattr(w, "src_sh", lambda *a, **k: big)
+    con = w.db()
+    lines, _ = w.collect_cloudflared(con)
+    assert len(lines) == 1000
+
+
 # ── warden.py cf_ban: the current Cloudflare enforcement API ────────────────
 class FakeResp:
     def __init__(self, payload):
