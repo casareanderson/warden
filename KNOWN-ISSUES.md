@@ -37,9 +37,10 @@ enforcement caveats below apply. Read this before you flip `enforce: true`.
 ## Coupling
 
 The collectors are configurable (`sources:` in warden.yml: SSH target, container,
-log path) but the **parsers** assume three formats: NGINX/NPMplus access logs,
-Authelia, and cloudflared. Other proxies or SSO portals need a parser; the
-scoring, timestamp handling, dedup, /24 roll-up and edge-ban logic are general.
+log path) but the **parsers** assume six formats: NGINX/NPMplus access logs,
+Authelia, cloudflared, Caddy (JSON), Traefik (CLF) and Authentik. Other proxies
+or SSO portals need a parser; the scoring, timestamp handling, dedup, /24
+roll-up and edge-ban logic are general.
 
 ## v2: API, MCP and approvals
 

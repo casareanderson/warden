@@ -43,6 +43,9 @@ sources:
   authelia:    {ssh: admin@192.168.1.5, container: authelia, log: /config/authelia.log}
   cloudflared: {ssh: admin@192.168.1.5, container: cloudflared}
   crowdsec:    {ssh: root@192.168.1.6}            # optional: alerts from a CrowdSec LAPI host
+  # caddy:     {ssh: admin@192.168.1.5, container: caddy, log: /var/log/caddy/access.log}      # JSON access log
+  # traefik:   {ssh: admin@192.168.1.5, container: traefik, log: /var/log/traefik/access.log}  # CLF access log
+  # authentik: {ssh: admin@192.168.1.5, container: authentik-server}                            # stdout, not a file
 
 # ── machines (vulnerability scans, patch proposals, integrity, hardening) ──
 # Reached over SSH with a key; nothing is installed on them. See wlib/hosts.py.
