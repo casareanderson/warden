@@ -50,6 +50,16 @@ section.tab{display:none} section.tab.on{display:block}
 .grid.ov{grid-template-columns:repeat(4,minmax(0,1fr))}
 .ov .s2{grid-column:span 2}.ov .s4{grid-column:1/-1}
 .wmap{width:100%;height:auto;display:block;max-height:520px}
+.topo{width:100%;height:auto;display:block}
+.topo .bx{fill:var(--panel2);stroke:var(--line2)} .topo .sn{fill:none;stroke:var(--line2);stroke-dasharray:4 3}
+.topo .ln{stroke:var(--line2);stroke-width:1.5;fill:none} .topo .tn{stroke:var(--vio);stroke-width:1.5;stroke-dasharray:6 4;fill:none}
+.topo text{fill:var(--fg);font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.topo .t2{fill:var(--dim);font-size:11px} .topo .t3{fill:var(--faint);font-size:10.5px} .topo .mono{font-family:var(--mono);font-size:10.5px}
+.topo .up{fill:var(--grn)} .topo .down{fill:var(--red)} .topo .unknown{fill:var(--amb)} .topo .stopped,.topo .none{fill:var(--faint)}
+.topo .pill{fill:var(--panel);stroke:var(--line)} .topo .pill.down{stroke:var(--red-line);fill:var(--red-bg)}
+.topo .chip{fill:var(--acc-bg);stroke:var(--acc-line)} .topo .tag{fill:var(--vio)}
+.topo [data-kind],.topo [data-goto]{cursor:pointer} .topo [data-kind]:hover rect,.topo [data-goto]:hover rect{stroke:var(--acc)}
+.topo .bad{fill:var(--red)}
 .wmap path{stroke:var(--bg);stroke-width:.5}
 .wmap [data-cc]{cursor:pointer}
 .wmap path[data-cc]:hover,.wmap circle[data-cc]:hover{stroke:var(--fg);stroke-width:1}
@@ -328,6 +338,11 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="kpis" id="ep-kpis"></div>
   <h2>Boxes <span class="hint">agentless integrity sweep hourly (deep daily 04:10) · Lynis hardening weekly (Sun 05:00) — nothing stays installed</span></h2>
   <div class="wrap"><table id="ep"></table></div>
+  <h2>Sign-ins · 7 days <span class="hint">sshd log + console on every box; warden's own key is left out · <b>new</b> = a user, address and key that box had never seen</span></h2>
+  <div class="tbl-tools"><input data-filter="logins" placeholder="filter: box, user, address, failed…"><span class="n" id="logins-n"></span></div>
+  <div class="wrap"><table id="logins"></table></div>
+  <h2>Up · down · reboots <span class="hint">heartbeat every 5 min — one call per Proxmox node covers all its containers</span></h2>
+  <div class="wrap"><table id="hbev"></table></div>
   <h2>Integrity findings <span class="hint">✅ (chat or Settings) accepts a change into the baseline</span></h2>
   <div class="tbl-tools"><input data-filter="epf" placeholder="filter…"><span class="n" id="epf-n"></span></div>
   <div class="wrap"><table id="epf"></table></div>
@@ -351,6 +366,8 @@ html[data-density=compact] nav button{padding:7px 10px}
 
 <!-- NETWORK -->
 <section class="tab" id="t-network">
+  <div class="card" style="margin-bottom:12px"><h3>Network map <span class="q" id="topo-h"></span></h3><div id="topo"></div>
+    <div class="note" style="margin:6px 0 0">Drawn from what warden already knows — router, line health, the hosts in <code>warden.yml</code>, the heartbeat and the device inventory — so it changes when the network does. Click a server for Endpoints, a device kind to filter the list below.</div></div>
   <div class="grid g4">
     <div class="card"><h3>LAN alerts · 30 days</h3><div id="ch-net"></div></div>
     <div class="card"><h3>Last sweep</h3><div id="netrun"></div></div>
@@ -479,6 +496,7 @@ function show(id) {
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id));
   if (location.hash !== "#" + id) history.replaceState(null, "", "#" + id);
   try { localStorage.setItem("warden-tab", id); } catch {}
+  if (id === "network" && D) drawTopo(D.topology);      // laid out at the tab's real width, which is 0 while hidden
 }
 function badge(id, n, bad) { const el = $("#c-" + id); if (!el) return; el.hidden = !n; el.textContent = n; el.classList.toggle("bad", !!bad); }
 
@@ -668,6 +686,7 @@ function render() {
   badge("geo", k.red_hits_7d, k.red_hits_7d);
 
   // network
+  drawTopo(d.topology);
   donut($("#ch-net"), d.charts.net_alerts, {unit: "alerts", q: x => "type:net-alert kind:" + x.k});
   const nr = (d.net_runs || [])[0] || {};
   $("#netrun").innerHTML = `<div class="kpi" style="border:0;padding:0"><div class="v">${nr.hosts ?? "—"}</div><div class="s">hosts answered in the last hour · ${ago(nr.last_run)}</div></div>`;
@@ -788,16 +807,24 @@ function renderEndpoints(E, N) {
   const I = E.integrity || [];
   const open = I.reduce((a, r) => a + (r.open || 0), 0), avg = (E.harden || []).filter(h => h.idx != null);
   const mean = avg.length ? Math.round(avg.reduce((a, h) => a + h.idx, 0) / avg.length) : "—";
+  const HB = E.heartbeat || [], B = Object.fromEntries(HB.map(h => [h.target, h]));
+  const hbDown = HB.filter(h => h.state === "down" || h.state === "unknown").length, hbUp = HB.filter(h => h.state === "up").length;
+  const failed = HB.reduce((a, h) => a + (h.failed_24h || 0), 0);
   $("#ep-kpis").innerHTML = [
+    ...(HB.length ? [["Up now", `${hbUp}/${HB.length}`, hbDown ? `${hbDown} not answering` : "heartbeat every 5 min", hbDown ? "red" : "grn"],
+                     ["Failed sign-ins 24 h", failed, "wrong password / unknown user", failed ? "amb" : "grn"]] : []),
     ["Boxes watched", I.length, "integrity sweep", ""], ["Open drift", open, "needs ✅/❌", open ? "amb" : "grn"],
     ["Avg hardening", mean, "Lynis index /100", typeof mean === "number" && mean < 60 ? "amb" : ""],
     ["Lynis warnings", avg.reduce((a, h) => a + JSON.parse(h.warnings || "[]").length, 0), "across all boxes", ""],
     ["IDS alerts 24 h", N ? N.ids_24h : 0, "Suricata", N && N.ids_24h ? "amb" : "grn"],
     ["Intel hits 24 h", N ? N.intel_24h : 0, "bad domains / IPs / red list", N && N.intel_24h ? "red" : "grn"],
   ].map(([t, v, s2, c]) => `<div class="kpi ${c}"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${s2}</div></div>`).join("");
-  const rows = I.map(r => ({...r, h: H[r.target] || {}}));
+  const rows = I.map(r => ({...r, h: H[r.target] || {}, hb: B[r.target]}))
+    .concat(HB.filter(b => !I.some(r => r.target === b.target)).map(b => ({target: b.target, name: b.name, h: {}, hb: b})))
+    .map(r => r.hb && (!r.name || r.name === r.target) ? {...r, name: r.hb.name} : r);
   table("ep", [{h: "Box", f: r => `<b>${esc(r.name)}</b> <span class="q mono">${esc(r.target)}</span>`},
-    {h: "Sweep", f: r => `<span class="b ${r.status === "ok" ? "ok" : "red"}">${esc(r.status)}</span> <span class="q">${ago(r.ts)}</span>`},
+    {h: "Heartbeat", f: r => hbCell(r.hb)}, {h: "Last login", f: r => loginCell(r.hb)},
+    {h: "Sweep", f: r => r.status ? `<span class="b ${r.status === "ok" ? "ok" : "red"}">${esc(r.status)}</span> <span class="q">${ago(r.ts)}</span>` : '<span class="q">—</span>'},
     {h: "Facts", k: "facts", cls: "num"}, {h: "Open drift", f: r => r.open ? `<span class="b amb">${r.open}</span>` : '<span class="q">0</span>', cls: "num"},
     {h: "Hardening", f: r => r.h.idx == null ? '<span class="q">—</span>' : `<b class="${r.h.idx < 60 ? "n" : r.h.idx < 70 ? "" : "y"}">${r.h.idx}</b>` + (r.h.prev_idx != null && r.h.prev_idx !== r.h.idx ? ` <span class="q">(was ${r.h.prev_idx})</span>` : "")},
     {h: "Lynis warnings", f: r => r.h.warnings ? JSON.parse(r.h.warnings).length : '<span class="q">—</span>', cls: "num"},
@@ -808,8 +835,121 @@ function renderEndpoints(E, N) {
     {h: "Item", k: "item", cls: "mono det", title: 1}, {h: "Now", k: "new", cls: "det mono", title: 1},
     {h: "Status", f: r => `<span class="b ${r.status === "open" ? "amb" : "acc"}">${esc(r.status)}</span>`}, {h: "Note", k: "note", cls: "det"}],
     E.findings, "No findings.");
-  badge("endpoints", open + (N ? N.intel_24h : 0), !!(N && N.intel_24h));
+  table("logins", [{h: "When", f: r => ago(r.ts), cls: "ts"}, {h: "Box", f: r => `<b>${esc(r.name)}</b> <span class="q mono">${esc(r.target)}</span>`},
+    {h: "User", k: "user", cls: "mono"}, {h: "From", f: r => esc(r.src), cls: "mono"},
+    {h: "How", f: r => esc(r.method) + (r.key_label ? ` <span class="b acc">${esc(r.key_label)}</span>` : r.key_fp ? ` <span class="q mono" title="${esc(r.key_fp)}">${esc(r.key_fp.slice(7, 15))}…</span>` : "")},
+    {h: "Result", f: r => (r.ok ? '<span class="b ok">signed in</span>' : '<span class="b red">failed</span>') + (r.new ? ' <span class="b amb">new</span>' : "")}],
+    E.logins || [], HB.length ? "No sign-ins in 7 days apart from warden's own." : "heartbeat.py has not run yet.");
+  table("hbev", [{h: "When", f: r => ago(r.ts), cls: "ts"}, {h: "Box", k: "target", cls: "mono"},
+    {h: "Event", f: r => `<span class="b ${{down: "red", stopped: "", back: "ok", rebooted: "amb", gone: ""}[r.event] ?? ""}">${esc(r.event)}</span>`},
+    {h: "Detail", k: "detail", cls: "det", title: 1}], E.hb_events || [], "Nothing has gone down, stopped or rebooted.");
+  badge("endpoints", open + hbDown + (N ? N.intel_24h : 0), !!(hbDown || (N && N.intel_24h)));
   window._harden = H;
+}
+// ── network map: internet → (Cloudflare → tunnel) → router → subnets → servers (containers) + devices by kind ──
+function drawTopo(T) {
+  const el = $("#topo"); if (!el) return;
+  if (!T || (!T.servers.length && !T.subnets.length)) { el.innerHTML = '<div class="empty">Add hosts to warden.yml or run devices.py to draw the map.</div>'; return; }
+  const W = Math.max(340, Math.min(1000, el.clientWidth || 1000)), narrow = W < 700, P = narrow ? 8 : 16, svg = [], st = s => s === "up" ? "up" : s === "down" ? "down" : s === "unknown" ? "unknown" : s === "stopped" ? "stopped" : "none";
+  const box = (x, y, w, h, cls = "bx", r = 8) => `<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}"/>`;
+  const txt = (x, y, t, cls = "", anchor = "start") => `<text class="${cls}" x="${x}" y="${y}" text-anchor="${anchor}">${esc(t)}</text>`;
+  const fit = (t, n) => (t = String(t ?? "")).length > n ? t.slice(0, n - 1) + "…" : t;
+  const L = T.line, E = T.edge, cx = W / 2;
+  // row 1: internet (+ Cloudflare)
+  const iw = narrow ? (E.cloudflare ? (W - 2 * P - 16) / 2 : W - 2 * P) : 230, ix = narrow ? P : E.cloudflare ? cx - iw - 30 : cx - iw / 2;
+  const cut = Math.floor((iw - 28) / 6.4);
+  svg.push(box(ix, P, iw, 52), txt(ix + 14, P + 22, "Internet"),
+    txt(ix + 14, P + 40, fit(L ? `${L.wan_ms != null ? Math.round(L.wan_ms) + " ms" : "—"} · ${Math.round(L.wan_loss || 0)}% loss${L.rx_mbps != null ? ` · ↓${L.rx_mbps} ↑${L.tx_mbps} Mbit/s` : ""}` : "line health: netwatch not running", cut), "t2"));
+  if (L) svg.push(`<circle class="${L.state === "ok" ? "up" : L.state === "down" ? "down" : "unknown"}" cx="${ix + iw - 16}" cy="${P + 17}" r="5"/>`);
+  let cf = null;
+  if (E.cloudflare) {
+    cf = narrow ? {x: ix + iw + 16, y: P, w: iw} : {x: cx + 30, y: P, w: 250};
+    svg.push(box(cf.x, P, cf.w, 52), `<circle class="tag" cx="${cf.x + 16}" cy="${P + 17}" r="5"/>`, txt(cf.x + 28, P + 22, "Cloudflare edge"),
+      txt(cf.x + 14, P + 40, fit(`${E.domain || "your domain"}${E.sso ? " · SSO in front" : ""}`, narrow ? cut : 36), "t2"),
+      `<line class="ln" x1="${ix + iw}" y1="${P + 26}" x2="${cf.x}" y2="${P + 26}"/>`);
+  }
+  // row 2: router
+  const ry = P + 92, rw = narrow ? iw : 230, rx = narrow ? ix : ix + (iw - rw) / 2;
+  svg.push(`<line class="ln" x1="${rx + rw / 2}" y1="${P + 52}" x2="${rx + rw / 2}" y2="${ry}"/>`,
+    box(rx, ry, rw, 52), txt(rx + 14, ry + 22, "Router"),
+    txt(rx + 14, ry + 40, `${T.gateway.ip || "gateway unknown"}${L && L.gw_ms != null ? ` · ${L.gw_ms < 1 ? "<1" : Math.round(L.gw_ms)} ms` : ""}`, "t2 mono"));
+  // subnets, stacked: servers (containers inside) then device kinds
+  let y = ry + 52 + 34; const trunk = rx + rw / 2, srvPos = {};
+  const SW = narrow ? W - 2 * P - 28 : 300, PW = (SW - 28) / 2, PH = 22, GAP = 12, pcut = Math.floor((PW - 24) / 6.2);
+  for (const g of T.subnets) {
+    const srv = T.servers.filter(s => s.subnet === g.cidr);
+    const top = y; let yy = y + 30, col = 0, rowH = 0;
+    const parts = [];
+    for (const s of srv) {
+      const tags = [s.ip === E.tunnel && "tunnel", s.ip === E.proxy && "reverse proxy", s.docker && "docker"].filter(Boolean).join(" · ");
+      const per = 2, rows = Math.ceil(s.cts.length / per), th = tags ? 15 : 0, h = 46 + th + rows * (PH + 6) + (rows ? 4 : 0);
+      if (P + 14 + col * (SW + GAP) + SW > W - P) { col = 0; yy += rowH + GAP; rowH = 0; }
+      const x = P + 14 + col * (SW + GAP);
+      srvPos[s.ip] = {x, y: yy, w: SW};
+      parts.push(`<g data-goto="endpoints"><title>${esc(s.name)} — ${esc(s.state || "no heartbeat yet")}${s.uptime_s ? ", up " + dur(s.uptime_s) : ""}</title>`,
+        box(x, yy, SW, h), `<circle class="${st(s.state)}" cx="${x + 14}" cy="${yy + 17}" r="5"/>`,
+        txt(x + 26, yy + 21, fit(s.name, 22)), txt(x + SW - 12, yy + 21, s.kind === "proxmox" ? "Proxmox" : s.kind, "t3", "end"),
+        txt(x + 26, yy + 37, `${s.ip}${s.uptime_s ? " · up " + dur(s.uptime_s) : ""}`, "t2 mono"),
+        tags ? `<text class="t3" x="${x + 26}" y="${yy + 52}" style="fill:var(--vio)">${esc(tags)}</text>` : "", "</g>");
+      s.cts.forEach((c, i) => {
+        const px = x + 10 + (i % per) * (PW + 8), py = yy + 46 + th + Math.floor(i / per) * (PH + 6);
+        parts.push(`<g data-goto="endpoints"><title>${esc(c.target)} ${esc(c.name)} — ${esc(c.state)}${c.uptime_s ? ", up " + dur(c.uptime_s) : ""}</title>`,
+          box(px, py, PW, PH, "pill" + (c.state === "down" ? " down" : ""), 5), `<circle class="${st(c.state)}" cx="${px + 10}" cy="${py + 11}" r="3.5"/>`,
+          txt(px + 19, py + 15, fit(`${c.target.split(":")[1]} ${c.name}`, pcut), "t2"), "</g>");
+      });
+      rowH = Math.max(rowH, h); col++;
+    }
+    if (srv.length) yy += rowH + 14;
+    // device kinds as chips
+    let kx = P + 14, ky = yy;
+    for (const k of g.kinds) {
+      const label = `${k.k} ${k.n}`, w = 16 + label.length * 6.6;
+      if (kx + w > W - P - 14) { kx = P + 14; ky += 30; }
+      parts.push(`<g data-kind="${esc(k.k)}"><title>${k.n} ${esc(k.k)} device(s) — click to list them</title>`, box(kx, ky, w, 22, "chip", 11),
+        txt(kx + w / 2, ky + 15, label, "t2", "middle"), "</g>");
+      kx += w + 8;
+    }
+    const bottom = (g.kinds.length ? ky + 22 : yy - 14) + 14;
+    svg.push(box(P, top, W - 2 * P, bottom - top, "sn", 10),
+      txt(P + 14, top + 19, `${g.cidr}${g.label ? " · " + g.label : ""}`, "mono"),
+      narrow ? "" : txt(W - P - 14, top + 19, `${srv.length} server${srv.length === 1 ? "" : "s"} · ${g.devices} device${g.devices === 1 ? "" : "s"}`, "t3", "end"),
+      `<line class="ln" x1="${trunk}" y1="${y === ry + 86 ? ry + 52 : top - 34}" x2="${trunk}" y2="${top}"/>`, ...parts);
+    y = bottom + 34;
+  }
+  // the way in from the edge: Cloudflare → tunnel → the box running cloudflared
+  const t = cf && E.tunnel && srvPos[E.tunnel];
+  // narrow: down the right-hand gutter and into the box's side, so it never crosses another server's containers
+  if (t) svg.push(narrow ? `<path class="tn" d="M${cf.x + cf.w - 20} ${P + 52} V ${ry + 26} H ${W - P - 5} V ${t.y + 20} H ${t.x + t.w}"/>`
+      : `<path class="tn" d="M${cf.x + cf.w - 40} ${P + 52} C ${cf.x + cf.w - 40} ${t.y - 60}, ${t.x + t.w - 30} ${t.y - 60}, ${t.x + t.w - 30} ${t.y}"/>`,
+    txt(narrow ? cf.x + cf.w - 52 : cf.x + cf.w - 34, P + 70, "tunnel", "t3"));
+  const H = y - 34 + P;
+  el.innerHTML = `<svg class="topo" viewBox="0 0 ${W} ${H}" role="img" aria-label="network map">${svg.join("")}</svg>`;
+  const n = T.servers.reduce((a, s) => a + 1 + s.cts.length, 0), bad = T.servers.reduce((a, s) => a + (s.state === "down") + s.cts.filter(c => c.state === "down").length, 0);
+  $("#topo-h").textContent = `${n} managed box${n === 1 ? "" : "es"} · ${T.subnets.reduce((a, g) => a + g.devices, 0)} devices` + (bad ? ` · ${bad} down` : "");
+}
+let topoT = null;
+addEventListener("resize", () => { clearTimeout(topoT); topoT = setTimeout(() => D && drawTopo(D.topology), 150); });
+document.addEventListener("click", e => {
+  const k = e.target.closest(".topo [data-kind]");
+  if (k) { const i = document.querySelector('[data-filter="hosts"]'); i.value = k.dataset.kind; i.dispatchEvent(new Event("input", {bubbles: true}));
+           i.scrollIntoView({behavior: "smooth", block: "center"}); return; }
+  const g = e.target.closest(".topo [data-goto]"); if (g) show(g.dataset.goto);
+});
+const dur = s => s == null ? "" : s >= 86400 ? `${Math.floor(s / 86400)}d ${Math.floor(s % 86400 / 3600)}h` : s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m` : `${Math.floor(s / 60)}m`;
+function hbCell(b) {
+  if (!b) return '<span class="q" title="heartbeat.py has not seen this box">—</span>';
+  const st = {up: "ok", down: "red", unknown: "amb", stopped: ""}[b.state] ?? "";
+  const tip = b.state === "up" ? `answered ${ago(b.last_try)}${b.rtt_ms ? " in " + b.rtt_ms + " ms" : ""}` : (b.note || "") + (b.last_ok ? ` · last answered ${ago(b.last_ok)}` : "");
+  return `<span style="white-space:nowrap"><span class="b ${st}" title="${esc(tip)}">${esc(b.state)}</span> <span class="q">${b.state === "up" ? dur(b.uptime_s) : b.last_ok ? "since " + ago(b.last_ok) : ""}</span></span>`;
+}
+function loginCell(b) {
+  if (!b) return '<span class="q">—</span>';
+  const l = b.last_login, f = b.failed_24h ? ` <span class="b red" title="failed sign-ins in the last 24 h">${b.failed_24h} failed</span>` : "";
+  const tip = `24 h: ${b.logins_24h} sign-in(s), ${b.failed_24h} failed, ${b.self_24h} by warden's own key`;
+  if (!l) return `<span class="q" title="${esc(tip)}">nobody but warden</span>${f}`;
+  const who = l.method === "console" ? `${esc(l.user)} <span class="q">· console (${esc(l.src)})</span>` : `${esc(l.user)}@${esc(l.src)}`;
+  return `<span style="white-space:nowrap"><span class="mono" title="${esc(tip)}">${who}</span> <span class="q">${ago(l.ts)}${l.method && l.method !== "console" ? " · " + esc(l.method) : ""}</span></span>`
+    + (l.key_label ? ` <span class="b acc">${esc(l.key_label)}</span>` : "") + (l.new ? ' <span class="b amb">new</span>' : "") + f;
 }
 function renderNetsec(N) {
   if (!N) return;
