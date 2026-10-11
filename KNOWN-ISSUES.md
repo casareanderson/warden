@@ -138,7 +138,9 @@ is added it will follow these rules:
   write a sign-in line, so a session started that way never shows up.
 - **A shared key hides its users.** "Self" is any key that lives on the warden box. If another job on that box signs <!-- steward: skip (advice, design or upstream; not for the coding agent) -->
   in with the same key, it is left out too. Give jobs their own keys and name them in `logins.known_keys`.
-- **Container sign-ins and heartbeats need Proxmox** (`pct`, `pvesh`). Containers on other hypervisors are not seen.
+- **Container sign-ins still need Proxmox** (`pct exec`). Docker containers are now heartbeat-checked — a `docker`
+  host's running and stopped containers are seen, and a restart reads as a reboot — but sign-ins *inside* containers
+  are only read from LXC over `pct exec`; a container on another hypervisor shows up/down yet its sign-ins are not.
 
 ## Hermes agent tracking
 

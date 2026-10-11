@@ -45,6 +45,8 @@ KEEP_SELF_DAYS = 2         # warden's own sign-ins are kept only as counts per p
 
 UPTIME = "cat /proc/uptime"
 NODE_BEAT = "cat /proc/uptime; echo @@lxc; pvesh get /nodes/localhost/lxc --output-format json 2>/dev/null || echo '[]'"
+DOCKER_BEAT = ("cat /proc/uptime; echo @@ctr; docker ps -aq 2>/dev/null | xargs -r docker inspect "
+               "--format '{{.Name}}|{{.State.Status}}|{{.State.StartedAt}}' 2>/dev/null || true")
 LOGINS = r'''export LC_ALL=C
 S=${SINCE:-2592000}
 # keep EVERY sign-in that isn't ours, but only the newest 200 made with this box's own keys ($SELF) — on a box
@@ -202,17 +204,83 @@ def split_sections(text):
 
 # ── heartbeat ────────────────────────────────────────────────────────────────
 def beat_targets():
-    """Nodes and plain hosts (containers are answered for by their node)."""
+    """Nodes, plain hosts and the local box — plus docker-capable boxes, whose containers are answered for by the box."""
+    ts = [t for t in hosts.targets(discover=False) if t["kind"] in ("node", "host", "local")]
+    for h in hosts.declared():
+        kind, ssh = h.get("kind", "linux"), h.get("ssh", "")
+        if kind != "docker" and not h.get("docker"):
+            continue
+        ip = ssh.split("@", 1)[-1] if ssh else "local"
+        tid = f"host:{ip}"
+        box = next((t for t in ts if t["target"] == tid), None)
+        if box is not None:              # a linux/local box that already heartbeats: also report its docker containers
+            box["docker"] = True
+            box["node"] = ip
+        else:                            # a pure docker box (kind: docker) has no host target yet
+            ts.append({"target": tid, "kind": "host", "name": h.get("name") or ip, "node": ip, "ssh": ssh,
+                       "docker": True, "local": not ssh})
+    return ts
+
+
+def login_targets():
+    """Boxes whose own sign-ins are read (a node's session reads all its containers inside _collect)."""
     return [t for t in hosts.targets(discover=False) if t["kind"] in ("node", "host", "local")]
 
 
 def _beat(t):
     t0 = time.time()
+    cmd = NODE_BEAT if t["kind"] == "node" else DOCKER_BEAT if t.get("docker") else UPTIME
     try:
-        rc, out, err = hosts.remote(t, NODE_BEAT if t["kind"] == "node" else UPTIME, timeout=25)
+        rc, out, err = hosts.remote(t, cmd, timeout=25)
     except Exception as e:  # noqa: BLE001
         rc, out, err = -1, "", str(e)
     return t, rc, out or "", (err or "").strip()[:160], int((time.time() - t0) * 1000)
+
+
+def _containers(t, out):
+    """A box's batched output → container rows (target, name, kind, running, uptime)."""
+    if t.get("docker"):
+        return _docker_containers(t, out)
+    cts = []
+    try:
+        raw = json.loads(out.split("@@lxc", 1)[1])
+    except (IndexError, ValueError):
+        return cts
+    for c in raw:
+        running = c.get("status") == "running"
+        cts.append({"target": f"ct:{c.get('vmid')}", "name": c.get("name") or f"ct:{c.get('vmid')}", "kind": "ct",
+                    "running": running, "uptime": int(c.get("uptime") or 0) if running else None})
+    return cts
+
+
+def _docker_containers(t, out):
+    """`docker inspect` lines (`/name|status|startedAt`) → container rows; uptime from StartedAt, not CreatedAt."""
+    cts = []
+    try:
+        body = out.split("@@ctr", 1)[1]
+    except IndexError:
+        return cts
+    for line in body.splitlines():
+        name, sep, rest = line.partition("|")
+        if not sep:
+            continue
+        status, sep2, started = rest.partition("|")
+        name = name.lstrip("/").strip()
+        if not name:
+            continue
+        running = status.strip() == "running"
+        up = None
+        if running and sep2:
+            try:
+                # docker prints RFC3339Nano (9 fractional digits); fromisoformat wants at most 6
+                iso = re.sub(r"\.(\d{6})\d+", r".\1", started.strip().replace("Z", "+00:00"))
+                st = datetime.fromisoformat(iso)
+                up = int(time.time() - st.timestamp())
+            except ValueError:
+                up = None
+        cts.append({"target": f"ctr:{t['node']}:{name}", "name": name, "kind": "ctr",
+                    "running": running, "uptime": up})
+    return cts
 
 
 def beat(con=None):
@@ -224,7 +292,7 @@ def beat(con=None):
     ts = now()
     for t, rc, out, err, ms in results:
         up_s = None
-        head = out.split("@@lxc")[0].split()
+        head = out.split("@@", 1)[0].split()
         if rc == 0 and head:
             try:
                 up_s = int(float(head[0]))
@@ -234,31 +302,25 @@ def beat(con=None):
         record(con, t["target"], t["name"], t["kind"], t.get("node"), "up" if ok else "down", ts, ms if ok else None,
                up_s, "" if ok else (err or f"exit {rc}"))
         seen.append(t["target"])
-        if t["kind"] != "node":
+        if t.get("node") is None:          # a plain host/local: no containers under it
             continue
-        if not ok:          # can't see inside a node that doesn't answer: its containers are unknown, not down
-            for r in con.execute("select target from hb where node=? and kind='ct'", (t["node"],)).fetchall():
+        if not ok:          # can't see inside a box that doesn't answer: its containers are unknown, not down
+            for r in con.execute("select target from hb where node=? and kind in ('ct','ctr')", (t["node"],)).fetchall():
                 con.execute("update hb set state='unknown', last_try=?, note=? where target=?",
                             (ts, f"node {t['name']} not answering", r["target"]))
                 seen.append(r["target"])
             continue
-        try:
-            cts = json.loads(out.split("@@lxc", 1)[1])
-        except (IndexError, ValueError):
-            cts = []
-        for c in cts:
-            tid = f"ct:{c.get('vmid')}"
-            if tid in ignore:
+        for c in _containers(t, out):
+            if c["target"] in ignore:
                 continue
-            running = c.get("status") == "running"
-            record(con, tid, c.get("name") or tid, "ct", t["node"], "up" if running else "stopped", ts,
-                   None, int(c.get("uptime") or 0) if running else None, "" if running else c.get("status") or "stopped")
-            seen.append(tid)
-    # a container that vanished from its node's list (destroyed / migrated) stops being tracked
-    for r in con.execute("select target from hb where kind='ct'").fetchall():
+            record(con, c["target"], c["name"], c["kind"], t["node"], "up" if c["running"] else "stopped", ts,
+                   None, c["uptime"] if c["running"] else None, "" if c["running"] else "stopped")
+            seen.append(c["target"])
+    # a container that vanished from its box's list (destroyed / migrated) stops being tracked
+    for r in con.execute("select target from hb where kind in ('ct','ctr')").fetchall():
         if r["target"] not in seen and not con.execute(
-                "select 1 from hb h join hb n on n.node=h.node and n.kind='node' where h.target=? and n.state!='up'",
-                (r["target"],)).fetchone():
+                "select 1 from hb h join hb n on n.node=h.node and n.kind in ('node','host','local') "
+                "where h.target=? and n.state!='up'", (r["target"],)).fetchone():
             con.execute("delete from hb where target=?", (r["target"],))
             con.execute("insert into hb_events(ts,target,event,detail) values(?,?,?,?)",
                         (ts, r["target"], "gone", "no longer listed on its node"))
@@ -357,7 +419,7 @@ def logins(con=None):
     keys = own_keys()
     ts = now()
     jobs = []
-    for t in beat_targets():
+    for t in login_targets():
         # a node's session reads all its containers: give it the widest window any of them needs
         tids = [t["target"]] + ([r["target"] for r in con.execute("select target from hb where node=? and kind='ct'",
                                                                     (t["node"],))] if t["kind"] == "node" else [])

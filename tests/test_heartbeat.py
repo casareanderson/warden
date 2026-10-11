@@ -36,6 +36,29 @@ def hb(tmp_path, monkeypatch):
     return heartbeat
 
 
+@pytest.fixture()
+def hb_docker(tmp_path, monkeypatch):
+    monkeypatch.setenv("WARDEN_DATA", str(tmp_path))
+    monkeypatch.setenv("WARDEN_CONF", str(tmp_path / "warden.yml"))
+    (tmp_path / "warden.yml").write_text(
+        "estate: {name: test, lan: [10.0.0.0/24], domain: example.com}\nnotify: {backend: none}\n"
+        "hosts:\n  - {name: pve, kind: proxmox, ssh: root@10.0.0.2}\n  - {name: nas, kind: linux, ssh: admin@10.0.0.5}\n"
+        "  - {name: dock, kind: docker, ssh: admin@10.0.0.9}\n"
+        "cloudflare: {zone_id: z1}\nsources: {cloudflared: {ssh: admin@10.0.0.5}}\n")
+    import wlib.config as c
+    importlib.reload(c)
+    import wlib.hosts, wlib.notify, wlib.views  # noqa: E401
+    for m in (wlib.hosts, wlib.notify, wlib.views):
+        importlib.reload(m)
+    import heartbeat
+    importlib.reload(heartbeat)
+    sent = []
+    monkeypatch.setattr(heartbeat, "send", lambda t: sent.append(t))
+    monkeypatch.setattr(heartbeat, "own_keys", lambda: {SELF: "this box (id_ed25519)"})
+    heartbeat.sent = sent
+    return heartbeat
+
+
 def test_parse_formats_and_self(hb):
     text = "\n".join([
         f"1791722973.0 pve sshd-session[1]: Accepted publickey for root from 10.0.0.9 port 1 ssh2: ED25519 {SELF}",
@@ -113,6 +136,38 @@ def test_beat_node_covers_containers_and_alerts(hb, monkeypatch):
     answers["host:10.0.0.5"] = "60.0 1"
     hb.beat(con)
     assert any("is back" in m and "rebooted" in m for m in hb.sent)
+
+
+def test_beat_docker_host_covers_containers(hb_docker, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    started = (datetime.now(timezone.utc) - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%S.%f") + "000Z"
+    docker_out = f"800.0 1\n@@ctr\n/web|running|{started}\n/db|exited|0001-01-01T00:00:00Z\n"
+    lxc = json.dumps([{"vmid": 101, "name": "web", "status": "running", "uptime": 5000}])
+    calls = []
+
+    def remote(t, cmd, **kw):
+        calls.append(t["target"])
+        if t.get("docker"):
+            return (0, docker_out, "")
+        if t["kind"] == "node":
+            return (0, f"100.0 1\n@@lxc\n{lxc}", "")
+        return (0, "800.0 1", "")
+    monkeypatch.setattr(hb_docker.hosts, "remote", remote)
+    con = hb_docker.db()
+    hb_docker.beat(con)
+    st = {r["target"]: r["state"] for r in con.execute("select target,state from hb")}
+    assert st["host:10.0.0.9"] == "up" and st["ctr:10.0.0.9:web"] == "up" and st["ctr:10.0.0.9:db"] == "stopped"
+    up = con.execute("select uptime_s from hb where target='ctr:10.0.0.9:web'").fetchone()[0]
+    assert 4 * 3600 <= up <= 6 * 3600                                            # StartedAt parsed (RFC3339Nano)
+    assert sorted(calls) == ["host:10.0.0.5", "host:10.0.0.9", "node:10.0.0.2"]   # ONE call per docker host
+    # docker host stops answering: its containers are unknown, not down
+    answers = {"node:10.0.0.2": (0, f"100.0 1\n@@lxc\n{lxc}", ""), "host:10.0.0.5": (0, "800.0 1", ""),
+               "host:10.0.0.9": (255, "", "ssh: connect to host 10.0.0.9: No route to host")}
+    monkeypatch.setattr(hb_docker.hosts, "remote", fake_remote(answers))
+    for _ in range(3):
+        hb_docker.beat(con)
+    st = {r["target"]: r["state"] for r in con.execute("select target,state from hb")}
+    assert st["host:10.0.0.9"] == "down" and st["ctr:10.0.0.9:web"] == "unknown"
 
 
 def test_node_down_marks_containers_unknown_not_down(hb, monkeypatch):
