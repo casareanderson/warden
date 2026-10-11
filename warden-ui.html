@@ -49,6 +49,13 @@ section.tab{display:none} section.tab.on{display:block}
 .g3{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
 .grid.ov{grid-template-columns:repeat(4,minmax(0,1fr))}
 .ov .s2{grid-column:span 2}.ov .s4{grid-column:1/-1}
+.wmap{width:100%;height:auto;display:block;max-height:520px}
+.wmap path{stroke:var(--bg);stroke-width:.5}
+.wmap [data-cc]{cursor:pointer}
+.wmap path[data-cc]:hover,.wmap circle[data-cc]:hover{stroke:var(--fg);stroke-width:1}
+.wmap-legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin-top:8px;font-size:12px;color:var(--dim)}
+.wmap-legend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.wmap-legend button{background:none;border:0;color:var(--fg);cursor:pointer;font:inherit;padding:0}
 footer{color:var(--faint);font-size:11.5px;text-align:center;padding:20px}
 
 /* ── 4 · components ────────────────────────────────────────────────────────── */
@@ -329,6 +336,7 @@ html[data-density=compact] nav button{padding:7px 10px}
 <!-- GEO -->
 <section class="tab" id="t-geo">
   <div id="geo-banner"></div>
+  <div class="card" style="margin-bottom:12px"><h3>Where traffic comes from · 30 days <span class="q" id="map-h"></span></h3><div id="geo-map"></div></div>
   <div class="grid g2">
     <div class="card"><h3>Traffic by country · 30 days</h3><div class="wrap" style="border:0"><table id="geo"></table></div></div>
     <div class="card"><h3>Red list · country block <span class="q" id="rl-src"></span></h3>
@@ -652,6 +660,8 @@ function render() {
     {h: "Edge", k: "edge", cls: "num", num: 1}, {h: "IPs", k: "ips", cls: "num", num: 1},
     {h: "Status", f: r => r.blocked ? (ruleOn ? '<span class="b block">blocked</span>' : '<span class="b red">block pending</span>') : r.red ? '<span class="b red">red list</span>' : ""}],
     d.geo, "No located traffic in 30 days.");
+  worldMap($("#geo-map"), d.geo);
+  $("#map-h").textContent = (d.geo || []).length ? `· ${d.geo.length} countries · darker = more hits · click one to search it` : "";
   $("#rl-src").textContent = RL.checked ? "source checked " + RL.checked : "";
   if (!GEO || !GEO.dirty) GEO = {on: RL.enabled, set: [...RL.chosen], dirty: false, orig: {on: RL.enabled, set: [...RL.chosen]}, watch: RL.watch};
   drawGeo();
@@ -926,6 +936,7 @@ function renderOverview(d, edgeBlind) {
       el.innerHTML = ap.length ? ap.slice(0, 5).map(a => `<div class="q" style="margin-bottom:6px">${esc(a.text.split("\n")[0]).slice(0, 140)}</div>`).join("") +
         `<div class="note"><a href="#settings" onclick="show('settings');return false">decide →</a></div>` : '<div class="empty">Nothing waiting. 🎉</div>';
     } else if (w.type === "hosthealth") hostHealth(el, d.hosthealth);
+    else if (w.type === "map") worldMap(el, d.geo);
     else if (w.type === "top") {
       el.innerHTML = '<div class="wrap" style="border:0"><table id="ov-top"></table></div>';
       table("ov-top", [
@@ -934,6 +945,45 @@ function renderOverview(d, edgeBlind) {
         {h: "Last seen", f: r => ago(r.last), cls: "ts"}], d.top, "No scored addresses in 30 days.");
     }
   }
+}
+
+// Attack map: country shapes shaded by hits (log scale) + a bubble per country, from payload.geo (30 days).
+// Location is country-level only (db-ip country lite), so nothing finer is drawn. Shapes: Natural Earth (public domain).
+let WORLD = null, WORLD_P = null;
+function worldMap(el, rows) {
+  if (!el) return;
+  if (!WORLD) {
+    el.innerHTML = '<div class="empty">Loading map…</div>';
+    WORLD_P = WORLD_P || fetch("world.json").then(r => r.ok ? r.json() : null).catch(() => null);
+    WORLD_P.then(w => { WORLD = w || {failed: 1}; worldMap(el, rows); });
+    return;
+  }
+  if (WORLD.failed) { el.innerHTML = '<div class="empty">Map unavailable (world.json missing).</div>'; return; }
+  rows = rows || [];
+  if (!rows.length) { el.innerHTML = '<div class="empty">No located traffic in 30 days.</div>'; return; }
+  const by = Object.fromEntries(rows.map(r => [r.cc, r])), tot = r => (r.log || 0) + (r.edge || 0);
+  const max = Math.max(1, ...rows.map(tot)), shade = n => (0.2 + 0.75 * Math.log1p(n) / Math.log1p(max)).toFixed(2);
+  const tip = r => `${cname(r.cc)}: ${tot(r)} hits · ${r.log} log · ${r.edge} edge · ${r.ips} IPs${r.blocked ? " · blocked" : r.red ? " · red list" : ""}`;
+  const shapes = WORLD.shapes.map(s => {
+    const r = by[s.cc];
+    if (!r) return `<path d="${s.d}" fill="var(--line2)" fill-opacity=".55"><title>${esc(s.n)}</title></path>`;
+    const col = r.blocked || r.red ? "var(--red)" : "var(--acc)";
+    return `<path d="${s.d}" data-cc="${esc(s.cc)}" fill="${col}" fill-opacity="${shade(tot(r))}"><title>${esc(tip(r))}</title></path>`;
+  }).join("");
+  const drawn = new Set(WORLD.shapes.map(s => s.cc)), missing = [];
+  const bubbles = rows.slice().sort((a, b) => tot(b) - tot(a)).map(r => {
+    const p = WORLD.points[r.cc];
+    if (!p) { if (!drawn.has(r.cc)) missing.push(r.cc); return ""; }
+    const rad = (2.5 + 15 * Math.sqrt(tot(r) / max)).toFixed(1), col = r.blocked || r.red ? "var(--red)" : "var(--amb)";
+    return `<circle cx="${p[0]}" cy="${p[1]}" r="${rad}" data-cc="${esc(r.cc)}" fill="${col}" fill-opacity=".5" stroke="${col}" stroke-width=".8"><title>${esc(tip(r))}</title></circle>`;
+  }).join("");
+  const top = rows.slice().sort((a, b) => tot(b) - tot(a)).slice(0, 6);
+  el.innerHTML = `<svg class="wmap" viewBox="0 0 ${WORLD.w} ${WORLD.h}" role="img" aria-label="Traffic by country, last 30 days">${shapes}${bubbles}</svg>
+    <div class="wmap-legend"><span><i class="sw" style="background:var(--acc);opacity:.35"></i>fewer</span><span><i class="sw" style="background:var(--acc)"></i>more hits</span>
+      <span><i class="sw" style="background:var(--red)"></i>red list / blocked</span><span>bubble = hits</span>
+      ${top.map(r => `<button data-cc="${esc(r.cc)}">${flag(r.cc)} ${esc(r.cc)} ${tot(r)}</button>`).join("")}
+      ${missing.length ? `<span class="q">not drawn: ${esc(missing.join(", "))}</span>` : ""}</div>`;
+  el.querySelectorAll("[data-cc]").forEach(x => x.onclick = () => runSearch("cc:" + x.dataset.cc));
 }
 
 function hostHealth(el, H) {
