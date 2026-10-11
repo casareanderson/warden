@@ -39,6 +39,7 @@ A much simpler console, and the database is now private at rest.
 - **Readable settings** — each editable field shows a plain-English label (e.g. "Cloudflare Zone ID") with the raw `warden.yml` key dimmed beneath it.
 - **Database private at rest** — `warden.db` and its WAL/journal are owner-only (`0600`), re-enforced on every start, so a shared host never leaks logs, session hashes or (in local auth) the TOTP seed. API tokens remain SHA-256, passwords scrypt, and secrets never touch the database.
 - A safe in-place deploy script (`tools/deploy.sh`) that never overwrites your config, secrets or data.
+- **Reads in any language** — the console is plain, labelled HTML, so your browser's built-in *Translate page* renders it in any language; commands, IPs and config keys are marked non-translatable so they're never mangled.
 
 ## What's new in v3.1
 

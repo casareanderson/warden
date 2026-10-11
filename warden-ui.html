@@ -1563,7 +1563,8 @@ document.addEventListener("change", async e => {
 });
 
 // ── Connect: tokens, endpoints, integrations, VPN recipes ───────────────────
-const snip = (title, body, note) => `<div class="snip-h"><span>${title}</span><button class="btn ghost sm" data-copy>copy</button></div><pre class="snip">${esc(body)}</pre>${note ? `<div class="note" style="margin-top:-4px">${note}</div>` : ""}`;
+function shieldCode(){try{document.querySelectorAll("pre,code,kbd,.mono,.ip,.num").forEach(e=>e.setAttribute("translate","no"))}catch(e){}}
+const snip = (title, body, note) => `<div class="snip-h"><span>${title}</span><button class="btn ghost sm" data-copy>copy</button></div><pre class="snip" translate="no">${esc(body)}</pre>${note ? `<div class="note" style="margin-top:-4px">${note}</div>` : ""}`;
 function renderConnect() {
   const here = location.origin + location.pathname.replace(/\/$/, "") + "/mcp";
   let mcp = /^https?:\/\//i.test(SET.mcp_url || "") ? SET.mcp_url : here, api = mcp.replace(/\/mcp$/, "/api/v1"), host;
@@ -1719,7 +1720,7 @@ async function loadSettings() {
     {h: "Last used", f: r => ago(r.last_used), cls: "ts"},
     {h: "", f: r => r.revoked ? '<span class="q">revoked</span>' : `<button class="btn ghost sm" data-revoke="${r.id}">revoke</button>`}],
     SET.tokens, "No tokens yet.");
-  renderConnect(); renderCfg();
+  renderConnect(); renderCfg(); shieldCode();
 }
 document.addEventListener("click", async e => {
   const a = e.target.closest("[data-appr]");
@@ -1735,7 +1736,7 @@ document.addEventListener("click", async e => {
 });
 
 async function load() {
-  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); renderAgents(D.agents);
+  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); renderAgents(D.agents); shieldCode();
         const a = document.activeElement;   // don't wipe a half-typed setting/token on the 60-s refresh
         if (!(a && /INPUT|SELECT/.test(a.tagName) && a.closest("#t-settings,#t-account"))) loadSettings(); }
   catch (e) { console.error("warden render:", e); $("#updated").textContent = "⚠ refresh failed"; }
