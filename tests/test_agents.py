@@ -78,9 +78,35 @@ def test_collect_parse(ag, monkeypatch):
     monkeypatch.setattr(ag.hosts, "remote", lambda t, cmd, **k: (0, SS, ""))
     meta, conns, procs = ag.collect({"target": "host:local", "kind": "local", "name": "x", "ssh": ""})
     assert meta["host"] == "box" and meta["root"] is True and meta["ss"] is True and meta["total"] == 3
-    assert ("1001", "8.8.8.8", "443") in conns and len(conns) == 3
+    assert ("1001", "8.8.8.8", "443", 0) in conns and len(conns) == 3   # 4th field is bytes_recv (0 when absent)
+    assert all(len(c) == 4 for c in conns)
     assert procs["1002"][1] == "docker-abc123def456"       # container from cgroup
     assert "hermes --profile scout" in procs["1001"][3]
+
+
+# the collector now also carries bytes, permissions, sudo and sensitive-file facts
+SS2 = (
+    "@@meta\thost=box\troot=1\tss=1\n"
+    "@@total\t2\n"
+    "@@conn\t1001\t8.8.8.8\t443\t60123456\n"               # a real 57 MB download
+    "@@conn\t1002\t1.2.3.4\t443\t512\n"
+    "@@proc\t1001\t0\t\t/usr/bin/python3\thermes --profile scout -z go\n"
+    "@@perm\t1001\t0\t0\t000001ffffffffff\t\n"             # root, full caps
+    "@@perm\t1002\t1100\t1100\t0000000000000400\t1100 999\n"   # cap_net_bind_service, groups 1100 999
+    "@@sudo\t0\tUser root may run the following commands: (ALL : ALL) ALL\n"
+    "@@sudo\t1100\tnone or unknown\n"
+    "@@file\t/etc/secret.env\t0:0:600\n"
+)
+
+
+def test_collect_parse_bytes_perms_files(ag, monkeypatch):
+    monkeypatch.setattr(ag.hosts, "remote", lambda t, cmd, **k: (0, SS2, ""))
+    meta, conns, procs = ag.collect({"target": "host:local", "kind": "local", "name": "x", "ssh": ""})
+    assert ("1001", "8.8.8.8", "443", 60123456) in conns          # bytes carried through
+    assert meta["perms"]["1001"] == ("0", "0", "000001ffffffffff", "")
+    assert meta["perms"]["1002"] == ("1100", "1100", "0000000000000400", "1100 999")
+    assert "(ALL : ALL) ALL" in meta["sudo"]["0"] and meta["sudo"]["1100"] == "none or unknown"
+    assert meta["files"]["/etc/secret.env"] == "0:0:600"
 
 
 def test_no_root_is_honest(ag, monkeypatch):
@@ -135,3 +161,40 @@ def test_first_run_is_silent_baseline(ag, monkeypatch):
     assert con.execute("select count(*) from agent_findings").fetchone()[0] == 0
     assert con.execute("select count(*) from agent_alerts").fetchone()[0] == 0
     assert con.execute("select count(*) from agent_conns").fetchone()[0] == 2   # two internet dests recorded
+
+
+def test_classify_is_config_driven(ag, tmp_path, monkeypatch):
+    # owner names their own agents in warden.yml; $1 expands to a capture group; built-ins still work as a fallback
+    (tmp_path / "warden.yml").write_text(
+        "estate: {name: test}\nnotify: {backend: none}\n"
+        "agents:\n  patterns:\n    - {pattern: '\\bmuse\\b', name: 'muse'}\n"
+        "    - {pattern: 'mybot --role (\\w+)', name: 'mybot:$1'}\n")
+    import wlib.config as c
+    importlib.reload(c)
+    importlib.reload(ag)
+    assert ag.classify("node /opt/muse/run.js")[0] == "muse"
+    assert ag.classify("python3 mybot --role writer")[0] == "mybot:writer"
+    assert ag.classify("/usr/local/bin/hermes --profile sec -z x")[0] == "hermes:sec"   # built-in still matches
+    assert ag.classify("/usr/bin/weird", exe="/usr/bin/weird")[0] == "other:weird"
+
+
+def test_bad_pattern_is_skipped_not_fatal(ag, tmp_path, monkeypatch):
+    (tmp_path / "warden.yml").write_text(
+        "estate: {name: test}\nnotify: {backend: none}\n"
+        "agents:\n  patterns:\n    - {pattern: '(', name: 'broken'}\n    - {pattern: '\\bgood\\b', name: 'good'}\n")
+    import wlib.config as c
+    importlib.reload(c)
+    importlib.reload(ag)                                      # must not raise on the invalid regex
+    assert ag.classify("run good now")[0] == "good"
+
+
+def test_run_stores_bytes_perms_files(ag, monkeypatch):
+    monkeypatch.setattr(ag.hosts, "remote", lambda t, cmd, **k: (0, SS2, ""))
+    _prime(ag, monkeypatch)
+    ag.run(dry=False)
+    con = ag.db()
+    row = con.execute("select bytes_recv from agent_conns where dest='8.8.8.8'").fetchone()
+    assert row["bytes_recv"] == 60123456                      # the download volume was recorded
+    p = con.execute("select agent, root, caps from agent_perms where agent like 'hermes:%'").fetchone()
+    assert p and p["root"] == 1 and p["caps"] == "000001ffffffffff"
+    assert con.execute("select stat from agent_files where path='/etc/secret.env'").fetchone()["stat"] == "0:0:600"
