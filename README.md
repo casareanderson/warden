@@ -27,6 +27,19 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 - [Roadmap](#roadmap)
 - [Support and licence](#support-and-licence)
 
+## What's new in v3.2
+
+A much simpler console, and the database is now private at rest.
+
+![warden v3.2 console](docs/v32-console.png)
+
+- **Navigation simplified — 16 tabs became 6.** Overview, Review, Threats, Agents, Posture, Settings. Related views sit under a sub-nav; a primary tab shows a small dot when something inside needs you, and the detailed counts live where they have context.
+- **"Review"** is the renamed, dedicated approval queue (was "Waiting for you"), out of Settings and compact.
+- **Account consolidation** — your API/MCP tokens, endpoints, integration snippets and VPN guidance now live under **Settings → Account**.
+- **Readable settings** — each editable field shows a plain-English label (e.g. "Cloudflare Zone ID") with the raw `warden.yml` key dimmed beneath it.
+- **Database private at rest** — `warden.db` and its WAL/journal are owner-only (`0600`), re-enforced on every start, so a shared host never leaks logs, session hashes or (in local auth) the TOTP seed. API tokens remain SHA-256, passwords scrypt, and secrets never touch the database.
+- A safe in-place deploy script (`tools/deploy.sh`) that never overwrites your config, secrets or data.
+
 ## What's new in v3.1
 
 - **The incident brain, released.** Every detector — edge, logs, LAN, vulnerabilities, integrity, agents — is joined into one picture per entity, and in **shadow mode** the model writes down what it *would* do and how sure it is, and never carries it out. Now its own **Incidents** tab, so you can watch what it gets right before you ever let it act. ([more](#incidents-shadow-mode))
