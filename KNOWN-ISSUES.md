@@ -101,3 +101,15 @@ is added it will follow these rules:
 - **A service-egress allowlist** (published ranges such as GitHub's meta API for Actions and webhooks, your uptime
   checkers, ACME validation) is never banned. This also applies to today's edge-ban proposals.
 - **No range wider than a /24,** never a whole ASN or cloud provider.
+
+## Heartbeat and sign-ins (v3)
+
+- **Containers inside Docker are not heartbeat-checked one by one.** A stopped container on a box that is up still
+  looks fine. On the author's estate a host OS update left three `unless-stopped` containers (the reverse proxy among
+  them) stopped after the reboot, because the update had run `docker stop` on them, and nothing in warden flagged it.
+  Watching declared containers is the next step.
+- **Only sign-ins that sshd or `last` record are seen.** `pct exec`, `lxc-attach` and the Proxmox web console don't
+  write a sign-in line, so a session started that way never shows up.
+- **A shared key hides its users.** "Self" is any key that lives on the warden box. If another job on that box signs
+  in with the same key, it is left out too. Give jobs their own keys and name them in `logins.known_keys`.
+- **Container sign-ins and heartbeats need Proxmox** (`pct`, `pvesh`). Containers on other hypervisors are not seen.
