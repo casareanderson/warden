@@ -190,7 +190,11 @@ def source_conf(name):
 
 def src_sh(src, cmd, timeout=60, in_container=True):
     """Run a simple command where the source lives. Complex quoting breaks over
-    an SSH hop, so callers keep the commands they pass simple. "" on failure."""
+    an SSH hop, so callers keep the commands they pass simple.
+
+    Returns stdout on success, "" when the source has no SSH hop (unconfigured),
+    and None when the connection/command failed — so a broken SSH hop is not
+    mistaken for a source that simply had nothing new to read."""
     if not src or not src.get("ssh"):
         return ""
     if in_container and src.get("container"):
@@ -199,28 +203,47 @@ def src_sh(src, cmd, timeout=60, in_container=True):
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", src["ssh"], cmd])
     try:
         p = subprocess.run(argv, capture_output=True, stdin=subprocess.DEVNULL, text=True, timeout=timeout)
-        return p.stdout if p.returncode == 0 else ""
+        return p.stdout if p.returncode == 0 else None
     except Exception:
-        return ""
+        return None
+
+
+def _blind_note(src):
+    """The `runs` note for a source whose connection just failed — the BLIND
+    prefix is what the Health tab and warden-facts.py read as 'not reading'."""
+    host = src.get("ssh")
+    if host == "local":
+        return "BLIND: local command failed"
+    return f"BLIND: ssh to {host} failed"
 
 
 def tail_log(con, name):
-    """Byte-offset watermark over one log file; resets on rotation."""
+    """Byte-offset watermark over one log file; resets on rotation.
+
+    Returns (lines, nbytes, note): note is None on success and a "BLIND: ..."
+    string when the connection to the log host failed — the difference between
+    "quiet" and "unreachable". On failure the watermark is NOT advanced, so the
+    unread lines are not lost."""
     src = source_conf(name)
     if not src or not src.get("log"):
-        return [], 0
-    size = src_sh(src, f"wc -c < {src['log']}").strip()
+        return [], 0, None
+    out = src_sh(src, f"wc -c < {src['log']}")
+    if out is None:
+        return [], 0, _blind_note(src)
+    size = out.strip()
     if not size.isdigit():
-        return [], 0
+        return [], 0, None
     size = int(size)
     pos = int(wm_get(con, name) or 0)
     if size < pos:            # rotated
         pos = 0
     if size == pos:
-        return [], 0
+        return [], 0, None
     chunk = src_sh(src, f"tail -c +{pos+1} {src['log']}")
+    if chunk is None:
+        return [], 0, _blind_note(src)
     wm_set(con, name, size)
-    return chunk.splitlines(), size - pos
+    return chunk.splitlines(), size - pos, None
 
 
 def collect_npm(con):
@@ -253,12 +276,14 @@ def collect_authentik(con):
     lookback re-reads half of every run and double-counts each attack."""
     src = source_conf("authentik")
     if not src or not src.get("container"):
-        return [], 0
+        return [], 0, None
     since = wm_get(con, "authentik") or "10m"
     started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     out = src_sh(src, f"docker logs {src['container']} --since {since} 2>&1", in_container=False)
+    if out is None:
+        return [], 0, _blind_note(src)
     wm_set(con, "authentik", started)
-    return out.splitlines(), len(out)
+    return out.splitlines(), len(out), None
 
 def collect_cloudflared(con):
     """The tunnel's own log — the ONLY place that sees hostnames routed direct
@@ -270,12 +295,14 @@ def collect_cloudflared(con):
     """
     src = source_conf("cloudflared")
     if not src or not src.get("container"):
-        return [], 0
+        return [], 0, None
     since = wm_get(con, "cloudflared") or "10m"
     started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     out = src_sh(src, f"docker logs {src['container']} --since {since} 2>&1", in_container=False)
+    if out is None:
+        return [], 0, _blind_note(src)
     wm_set(con, "cloudflared", started)
-    return out.splitlines(), len(out)
+    return out.splitlines(), len(out), None
 
 # ------------------------------------------------------------------ rules --
 HOSTILE_PATH = [
@@ -557,7 +584,7 @@ def main():
         ("traefik", collect_traefik, score_traefik),
         ("authentik", collect_authentik, score_authentik),
     ):
-        lines, nbytes = collect(con)
+        lines, nbytes, note = collect(con)
         parsed = 0
         for ln in lines:
             ev = scorer(ln)
@@ -577,7 +604,7 @@ def main():
                         (ets, src, ev["ip"], ev["kind"], ev["detail"], ev["score"]))
         total_new += parsed
         con.execute("insert into runs(ts,source,lines,parsed,note) values(?,?,?,?,?)",
-                    (now, src, len(lines), parsed, f"{nbytes}B"))
+                    (now, src, len(lines), parsed, note or f"{nbytes}B"))
     con.execute("delete from seen where ts < datetime('now','-7 days')")
     con.commit()
 

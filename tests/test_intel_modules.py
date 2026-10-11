@@ -82,12 +82,12 @@ def test_unconfigured_sources_are_skipped(home, monkeypatch):
     w = load("warden")
     no_subprocess(monkeypatch)
     con = w.db()
-    assert w.collect_npm(con) == ([], 0)
-    assert w.collect_authelia(con) == ([], 0)
-    assert w.collect_cloudflared(con) == ([], 0)
-    assert w.collect_caddy(con) == ([], 0)
-    assert w.collect_traefik(con) == ([], 0)
-    assert w.collect_authentik(con) == ([], 0)
+    assert w.collect_npm(con) == ([], 0, None)
+    assert w.collect_authelia(con) == ([], 0, None)
+    assert w.collect_cloudflared(con) == ([], 0, None)
+    assert w.collect_caddy(con) == ([], 0, None)
+    assert w.collect_traefik(con) == ([], 0, None)
+    assert w.collect_authentik(con) == ([], 0, None)
 
 
 def test_source_commands(home, monkeypatch):
@@ -139,8 +139,55 @@ def test_docker_logs_collector_keeps_every_line(home, monkeypatch):
     )
     monkeypatch.setattr(w, "src_sh", lambda *a, **k: big)
     con = w.db()
-    lines, _ = w.collect_cloudflared(con)
+    lines, _, _ = w.collect_cloudflared(con)
     assert len(lines) == 1000
+
+
+def test_broken_ssh_is_blind_not_quiet(home, monkeypatch):
+    (home / "warden.yml").write_text("sources:\n  npm: {ssh: me@nas}\n")
+    w = load("warden")
+
+    class Fail:
+        returncode, stdout = 1, ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: Fail())
+    con = w.db()
+    lines, nbytes, note = w.collect_npm(con)
+    assert (lines, nbytes) == ([], 0)
+    assert note == "BLIND: ssh to me@nas failed"
+
+
+def test_quiet_source_is_not_blind(home, monkeypatch):
+    (home / "warden.yml").write_text("sources:\n  npm: {ssh: me@nas}\n")
+    w = load("warden")
+
+    class Ok:
+        returncode, stdout = 0, "10\n"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: Ok())
+    con = w.db()
+    w.wm_set(con, "npm", 10)            # watermark already at the end of the file
+    assert w.collect_npm(con) == ([], 0, None)
+
+
+def test_failed_tail_does_not_advance_watermark(home, monkeypatch):
+    (home / "warden.yml").write_text("sources:\n  npm: {ssh: me@nas}\n")
+    w = load("warden")
+
+    class Ok:
+        returncode, stdout = 0, "10\n"
+
+    class Fail:
+        returncode, stdout = 1, ""
+
+    def fake(argv, **k):
+        return Ok() if "wc -c" in argv[-1] else Fail()
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    con = w.db()
+    lines, nbytes, note = w.collect_npm(con)
+    assert note == "BLIND: ssh to me@nas failed"
+    assert w.wm_get(con, "npm") is None       # unread lines are not dropped
 
 
 # ── warden.py cf_ban: the current Cloudflare enforcement API ────────────────
