@@ -85,12 +85,14 @@ documented in [warden.yml.example](../warden.yml.example). If you'd rather edit 
 
 ```sh setup-check
 cp warden.yml.example /tmp/warden-check.yml
-WARDEN_CONF=/tmp/warden-check.yml ./warden-setup check
+WARDEN_CONF=/tmp/warden-check.yml ./warden-setup check || echo "check exit code $?"
 WARDEN_CONF=/tmp/warden-check.yml ./warden-setup units
 ```
 
-(That tested block only proves the example file loads and the checks run; your own file goes at
-`/opt/warden/warden.yml`.)
+That tested block only proves the example file loads and the checks run; your own file goes at
+`/opt/warden/warden.yml`. `check` exits `1` while anything required is still ✗, and with the untouched example
+it is: the example sends alerts to Discord, so it wants a `DISCORD_BOT_TOKEN` (`✗ Alerts via discord`). On your
+real install, a `0` from `check` means every required line is ✓, which makes it a handy line for a script.
 
 Secrets never go in `warden.yml`, only their names. Store a value with:
 
