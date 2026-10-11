@@ -147,6 +147,8 @@ If your reverse proxy has a login page, let `/mcp` and `/api/v1` straight throug
 
 Press **Customise** on the Overview. Tick the numbers and charts you want, use ↑ ↓ to order them, and **Save layout**. Fifteen charts and tables and twelve headline numbers are available, including fixable CVEs, known-exploited CVEs, IDS alerts, threat-intel hits, integrity changes and decisions waiting for you. The layout is stored in warden's database, so it survives upgrades, and **Back to default** undoes it. It works on a phone too (no sideways scrolling at 390 px).
 
+**Host health (optional).** If you already run [Beszel](https://github.com/henrygd/beszel) for CPU, RAM, disk and temperature, set `beszel.enabled: true` and a **Host health · Beszel** card appears on the Overview: all OK, or which machines are over their Beszel thresholds or not reporting. warden doesn't rebuild Beszel. It reads Beszel's verdict, either from a snapshot file (`tools/beszel-snapshot.py`, run on the hub box, reads the hub database read-only) or from the hub's API as a user with Beszel's read-only role. The card shows up once on its own; if you remove it in Customise it stays removed. `warden_summary` (MCP/REST) gains a `host_health` line too.
+
 ## Approvals
 
 warden proposes; you decide. Patch plans, edge-block proposals and integrity changes each arrive as a message with ✅ / ❌ (and ⚡ "do it now" for patches).

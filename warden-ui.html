@@ -925,7 +925,8 @@ function renderOverview(d, edgeBlind) {
       const ap = d.approvals || [];
       el.innerHTML = ap.length ? ap.slice(0, 5).map(a => `<div class="q" style="margin-bottom:6px">${esc(a.text.split("\n")[0]).slice(0, 140)}</div>`).join("") +
         `<div class="note"><a href="#settings" onclick="show('settings');return false">decide →</a></div>` : '<div class="empty">Nothing waiting. 🎉</div>';
-    } else if (w.type === "top") {
+    } else if (w.type === "hosthealth") hostHealth(el, d.hosthealth);
+    else if (w.type === "top") {
       el.innerHTML = '<div class="wrap" style="border:0"><table id="ov-top"></table></div>';
       table("ov-top", [
         {h: "Address", k: "ip", cls: "ip", ip: 1}, {h: "Country", f: r => ccCell(r.cc, r.red)}, {h: "Score", k: "score", cls: "num", num: 1},
@@ -933,6 +934,21 @@ function renderOverview(d, edgeBlind) {
         {h: "Last seen", f: r => ago(r.last), cls: "ts"}], d.top, "No scored addresses in 30 days.");
     }
   }
+}
+
+function hostHealth(el, H) {
+  if (!H) { el.innerHTML = '<div class="empty">Off — set <code>beszel.enabled: true</code> in warden.yml.</div>'; return; }
+  const link = /^https?:\/\//.test(H.link || "") ? `<a href="${esc(H.link)}" target="_blank" rel="noopener">Open Beszel ↗</a>` : "";
+  if (H.error || !H.summary) { el.innerHTML = `<div class="empty">⚠ ${esc(H.error || "no data")}</div>${link ? `<div class="note">${link}</div>` : ""}`; return; }
+  const s = H.summary, bad = H.hosts.filter(h => h.state !== "ok");
+  const facts = h => h.state === "stale" ? "last seen " + ago(h.last_seen) :
+    [h.cpu != null ? "CPU " + Math.round(h.cpu) + "%" : "", h.mem_pct != null ? "RAM " + Math.round(h.mem_pct) + "%" : "",
+     h.disk_pct != null ? "disk " + Math.round(h.disk_pct) + "%" : "", h.temp_c ? Math.round(h.temp_c) + "°C" : ""].filter(Boolean).join(" · ");
+  el.innerHTML = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span class="pill ${s.stale ? "bad" : s.hot ? "warn" : "ok"}">${
+      bad.length ? `${bad.length} of ${s.total} need a look` : `all ${s.total} hosts OK`}</span><span class="q">${s.ok} ok · ${s.hot} over a threshold · ${s.stale} not reporting</span></div>` +
+    (bad.length ? `<table>${bad.map(h => `<tr><td><span class="b ${h.state === "stale" ? "red" : "amb"}">${h.state === "stale" ? "not reporting" : esc(h.alerts.join(", "))}</span></td>
+      <td class="mono">${esc(h.name)}</td><td class="wrapd q">${esc(facts(h))}</td></tr>`).join("")}</table>` : '<div class="empty">Every host is under its Beszel thresholds. 🎉</div>') +
+    `<div class="note">${link}${(H.hidden || []).length ? (link ? " · " : "") + "hidden: " + esc(H.hidden.join(", ")) : ""}</div>`;
 }
 
 function openEditor() {

@@ -53,6 +53,9 @@ DEFAULTS = {
            "trust_proxy_user_header": "Remote-User"},
     # home-page layout; None = the built-in default (see warden-ui.py WIDGETS)
     "dashboard": {"widgets": None},
+    # optional: host health from Beszel (see wlib/hosthealth.py). Off unless enabled.
+    "beszel": {"enabled": False, "snapshot": "", "url": "", "user": "", "password_secret": "BESZEL_PASSWORD",
+               "link": "", "stale_s": 300, "ignore_hosts": [], "ignore_alerts": {}},
 }
 
 OVERRIDES = DATA / "overrides.yml"   # what the console's Settings editor changed (the UI can't write warden.yml)
