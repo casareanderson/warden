@@ -180,6 +180,39 @@ def test_cf_ban_needs_credentials(home):
     assert not ok and "credentials" in msg
 
 
+def test_cf_unban_removes_address(home, monkeypatch):
+    w, client = _cf_home(home, monkeypatch)
+    assert w.cf_ban("203.0.113.9", "sqli", {})[0]
+    assert w.cf_ban("198.51.100.0/24", "spread", {})[0]
+    ok, msg = w.cf_unban("203.0.113.9", {})
+    assert ok and "updated" in msg
+    puts = [c for c in client.calls if c[0] == "PUT"]
+    block = next(r for r in puts[-1][2]["rules"] if r["description"] == w.DESC)
+    assert block["expression"] == "(ip.src in {198.51.100.0/24})"
+
+
+def test_expire_lapsed_unbans_only_expired(home, monkeypatch):
+    w, client = _cf_home(home, monkeypatch)
+    client.rules.append({"id": "b", "action": "block",
+                         "expression": "(ip.src in {203.0.113.9 198.51.100.4})",
+                         "description": w.DESC, "enabled": True})
+    con = w.db()
+    con.execute("insert into bans(ts,ip,score,reasons,state,expires,note) "
+                "values(datetime('now'), '203.0.113.9', 20, 'sqli', 'active', "
+                "datetime('now','-1 hour'), 'cf-edge blocked')")
+    con.execute("insert into bans(ts,ip,score,reasons,state,expires,note) "
+                "values(datetime('now'), '198.51.100.4', 20, 'traversal', 'active', "
+                "datetime('now','+1 hour'), 'cf-edge blocked')")
+    con.commit()
+    assert w.expire_lapsed(con, w.load_conf()) == 1
+    states = {r["ip"]: r["state"] for r in con.execute("select ip, state from bans")}
+    assert states["203.0.113.9"] == "lapsed"
+    assert states["198.51.100.4"] == "active"
+    puts = [c for c in client.calls if c[0] == "PUT"]
+    block = next(r for r in puts[-1][2]["rules"] if r["description"] == w.DESC)
+    assert block["expression"] == "(ip.src in {198.51.100.4})"
+
+
 # ── the extra log formats (Caddy JSON, Traefik CLF, Authentik JSON) ─────────
 CADDY = ('{"level":"info","ts":1704067200.0,"logger":"http.log.access","msg":"handled request",'
          '"request":{"remote_ip":"203.0.113.5","remote_port":"4321","proto":"HTTP/2.0",'
