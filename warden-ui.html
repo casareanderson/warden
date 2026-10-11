@@ -266,6 +266,16 @@ html[data-density=compact] nav button{padding:7px 10px}
 @media(max-width:1100px){.grid.ov{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.grid.ov{grid-template-columns:1fr}.ov .s2{grid-column:1/-1}.fld{grid-template-columns:1fr}}
 @media(max-width:600px){.bar{padding:10px 14px}main{padding:14px}.g2,.g3{grid-template-columns:1fr}.updated{display:none}}
+
+/* sub-navigation under a primary tab */
+.subnav{display:flex;gap:6px;flex-wrap:wrap;padding:14px 20px 0;margin:0}
+.subnav button{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line2);color:var(--dim);border-radius:999px;padding:5px 13px;font-size:12.5px;cursor:pointer}
+.subnav button:hover{color:var(--fg);border-color:var(--acc-line)}
+.subnav button.on{background:var(--acc-bg);border-color:var(--acc-line);color:var(--fg)}
+.subnav .count{background:var(--line2);color:var(--fg);border-radius:999px;padding:0 6px;font-size:11px;line-height:16px}
+.subnav .count.bad{background:var(--red);color:#fff}
+.count.dot{min-width:9px;width:9px;height:9px;padding:0;border-radius:50%;background:var(--amb);text-indent:-999px;overflow:hidden}
+.count.dot.bad{background:var(--red)}
 </style>
 
 <header>
@@ -290,6 +300,8 @@ html[data-density=compact] nav button{padding:7px 10px}
 <nav id="nav"></nav>
 
 <main>
+<div id="subnav" class="subnav" hidden></div>
+
 <!-- OVERVIEW -->
 <section class="tab" id="t-overview">
   <div class="ov-head"><span class="hint">last 30 days · click a slice to search it</span>
@@ -560,26 +572,61 @@ const ago = ts => { if (!ts) return "—"; const d = (Date.now() - new Date(ts.r
 const selfB = r => r.self ? ' <span class="b acc" title="our own address (self-ips.txt / warden.yml allow) — excluded from counts">self</span>' : "";
 const ccCell = (cc, red) => cc ? `<span class="flag">${flag(cc)}</span>${esc(cc)}${red ? ' <span class="b red">red list</span>' : ""}` : '<span class="q">—</span>';
 
-const GROUPS = [["Monitor", [["overview","Overview"],["review","Waiting for you"],["detections","Detections"],["incidents","Incidents"],["edge","Edge · Cloudflare"],["network","Network"],["agents","Agents"],["search","Search"]]],
-                ["Exposure", [["surface","Attack surface"],["geo","Geo & red list"]]],
-                ["Assets", [["vulns","Vulnerabilities"],["endpoints","Endpoints"]]],
-                ["Hub", [["health","Health"],["connect","Connect"],["settings","Settings"],["account","Account"]]]];
-const TABS = GROUPS.flatMap(g => g[1]);
+// ── primary navigation: 6 top-level tabs; related views live under a sub-nav (kids) ──
+const NAV = [
+  {id:"overview", label:"Overview"},
+  {id:"review",   label:"Waiting for you"},
+  {id:"threats",  label:"Threats",  kids:[["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["incidents","Incidents"],["geo","Geo & red list"]]},
+  {id:"agents",   label:"Agents"},
+  {id:"posture",  label:"Posture",  kids:[["surface","Attack surface"],["vulns","Vulnerabilities"],["endpoints","Endpoints"],["health","Health"]]},
+  {id:"hub",      label:"Settings", kids:[["settings","Settings"],["connect","Connect"],["account","Account"]]},
+];
+const KIDS = {}, CHILD_OF = {}, SUBLABEL = {};
+NAV.forEach(n => { if (n.kids) { KIDS[n.id] = n.kids.map(k => k[0]); n.kids.forEach(([cid,lbl]) => { CHILD_OF[cid] = n.id; SUBLABEL[cid] = lbl; }); } });
+const SECTIONS = new Set([...document.querySelectorAll("section.tab")].map(s => s.id.slice(2)));
+const navigable = id => SECTIONS.has(id) || !!KIDS[id];
+const CUR_SUB = {};   // remembers the last child viewed under each parent
 let D = null;
 
 function nav() {
-  $("#nav").innerHTML = GROUPS.map(([g, tabs]) => `<div class="grp">${g}</div>` +
-    tabs.map(([id, label]) => `<button data-tab="${id}">${label}<span class="count" id="c-${id}" hidden></span></button>`).join("")).join("");
-  $("#nav").onclick = e => { const b = e.target.closest("button"); if (b) show(b.dataset.tab); };
+  $("#nav").innerHTML = NAV.map(n =>
+    `<button data-nav="${n.id}">${n.label}<span class="count" id="c-${n.id}" hidden></span></button>`).join("");
+  $("#nav").onclick = e => { const b = e.target.closest("button"); if (b) show(b.dataset.nav); };
+}
+function renderSub(parent) {
+  const sn = $("#subnav");
+  if (!parent || !KIDS[parent]) { sn.hidden = true; sn.innerHTML = ""; return; }
+  sn.hidden = false;
+  const active = CUR_SUB[parent];
+  sn.innerHTML = NAV.find(n => n.id === parent).kids.map(([id, label]) =>
+    `<button data-sub="${id}" class="${id === active ? "on" : ""}">${label}<span class="count" id="c-${id}" hidden></span></button>`).join("");
+  KIDS[parent].forEach(applyCount);
 }
 function show(id) {
-  document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "t-" + id));
-  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id));
-  if (location.hash !== "#" + id) history.replaceState(null, "", "#" + id);
-  try { localStorage.setItem("warden-tab", id); } catch {}
-  if (id === "network" && D) drawTopo(D.topology);      // laid out at the tab's real width, which is 0 while hidden
+  let primary, section;
+  if (CHILD_OF[id]) { primary = CHILD_OF[id]; section = id; CUR_SUB[primary] = id; }
+  else if (KIDS[id]) { primary = id; section = CUR_SUB[id] || KIDS[id][0]; CUR_SUB[id] = section; }
+  else { primary = id; section = id; }
+  if (!SECTIONS.has(section)) section = SECTIONS.has(id) ? id : "overview";
+  document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "t-" + section));
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.nav === primary));
+  renderSub(KIDS[primary] ? primary : null);
+  if (location.hash !== "#" + section) history.replaceState(null, "", "#" + section);
+  try { localStorage.setItem("warden-tab", section); } catch {}
+  if (section === "network" && D) drawTopo(D.topology);
 }
-function badge(id, n, bad) { const el = $("#c-" + id); if (!el) return; el.hidden = !n; el.textContent = n; el.classList.toggle("bad", !!bad); }
+const COUNTS = {};
+function applyCount(id) { const el = $("#c-" + id); if (!el) return; const c = COUNTS[id] || {n: 0}; el.hidden = !c.n; el.textContent = c.n; el.className = "count" + (c.bad ? " bad" : ""); }
+function applyParent(p) {                              // a parent tab shows a dot (not a noisy catalog sum) when a child needs attention
+  const el = $("#c-" + p); if (!el) return;
+  const anyN = KIDS[p].some(k => (COUNTS[k] || {}).n), anyBad = KIDS[p].some(k => (COUNTS[k] || {}).bad);
+  el.textContent = ""; el.hidden = !anyN; el.className = "count dot" + (anyBad ? " bad" : "");
+}
+function badge(id, n, bad) {
+  COUNTS[id] = {n, bad};
+  if (CHILD_OF[id]) { applyCount(id); applyParent(CHILD_OF[id]); }
+  else applyCount(id);                                 // a standalone primary (Overview, Waiting for you, Agents) keeps its number
+}
 
 function donut(el, data, opts = {}) {
   if (!data || !data.length) { el.innerHTML = '<div class="empty">' + (opts.empty || "No data in this window.") + "</div>"; return; }
@@ -1719,9 +1766,9 @@ document.addEventListener("keydown", e => { if (e.key === "/" && document.active
 
 nav();
 let start = location.hash.slice(1);
-if (!TABS.some(t => t[0] === start)) { try { start = localStorage.getItem("warden-tab") || "overview"; } catch { start = "overview"; } }
-show(TABS.some(t => t[0] === start) ? start : "overview");
-window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (TABS.some(t => t[0] === h)) show(h); });
+if (!navigable(start)) { try { start = localStorage.getItem("warden-tab") || "overview"; } catch { start = "overview"; } }
+show(navigable(start) ? start : "overview");
+window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (navigable(h)) show(h); });
 loadAccount(); load(); setInterval(load, 60000);
 </script>
 </html>
