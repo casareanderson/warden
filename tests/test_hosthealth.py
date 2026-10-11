@@ -46,7 +46,7 @@ def snapshot(path, age_s=10, hosts=None):
 
 def test_off_by_default(load):
     hh, views = load("")
-    assert hh.fetch() is None and views.auto_widgets() == []
+    assert hh.fetch() is None and views.auto_widgets() == ["map"]
     assert "hosthealth" not in views.layout()["widgets"]
 
 

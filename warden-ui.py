@@ -40,6 +40,7 @@ from wlib import auth, config, mcp, notify, secrets, setup, tokens, views  # noq
 
 PAGE = Path(__file__).with_name("warden-ui.html")
 LOGIN_PAGE = Path(__file__).with_name("warden-login.html")
+WORLD = Path(__file__).with_name("world.json")    # country shapes for the attack map (tools/make-world-map.py)
 # which role each write needs (viewer < approver < admin). A write not listed here is refused.
 NEEDS = {"/api/approvals": "approver", "/api/patch": "approver", "/api/accept": "approver",
          "/api/layout": "admin", "/api/tokens": "admin", "/api/geo": "admin", "/api/config": "admin",
@@ -237,6 +238,10 @@ class H(BaseHTTPRequestHandler):
             return self.send({"users": auth.users(), "log": auth.recent_log(50)})
         if u.path in ("/", "/index.html"):
             self.send(PAGE.read_bytes(), "text/html; charset=utf-8")
+        elif u.path == "/world.json":
+            if not WORLD.exists():
+                return self.send({"error": "world.json missing"}, status=404)
+            self.send(WORLD.read_bytes())
         elif u.path == "/api":
             p = dict(views.payload_cached())        # shallow copy: the cached dict is shared between requests
             p["layout"], p["widgets"], p["approvals"] = views.layout(), views.WIDGETS, notify.pending()
