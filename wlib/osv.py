@@ -372,6 +372,7 @@ class OSV:
         self.s.headers.update(UA)
         self.fetched = 0
         self.failed = 0                     # advisories that could not be fetched → the target is stored "partial"
+        self.degraded = 0                   # query() calls answered from cache instead of OSV → results are stale
         self._secdb = {}
 
     @staticmethod
@@ -428,24 +429,49 @@ class OSV:
         return out
 
     def query(self, queries):
-        """[{package:{ecosystem,name}, version}] → per query [(id, modified)]. Follows page tokens."""
+        """[{package:{ecosystem,name}, version}] → per query [(id, modified)]. Follows page tokens.
+        If OSV is unreachable the last cached mapping is used instead (self.degraded += 1) so a scan
+        still reports what its cached advisories know rather than erroring out."""
         out = [[] for _ in queries]
         pending = list(range(len(queries)))
         tokens = {}
-        while pending:
-            nxt = []
-            for k in range(0, len(pending), 1000):
-                chunk = pending[k:k + 1000]
-                body = {"queries": [dict(queries[i], **({"page_token": tokens[i]} if i in tokens else {}))
-                                    for i in chunk]}
-                res = self._post("/querybatch", body)["results"]
-                for i, r in zip(chunk, res):
-                    out[i] += [(v["id"], v.get("modified", "")) for v in r.get("vulns") or []]
-                    if r.get("next_page_token"):
-                        tokens[i] = r["next_page_token"]
-                        nxt.append(i)
-            pending = nxt
+        try:
+            while pending:
+                nxt = []
+                for k in range(0, len(pending), 1000):
+                    chunk = pending[k:k + 1000]
+                    body = {"queries": [dict(queries[i], **({"page_token": tokens[i]} if i in tokens else {}))
+                                        for i in chunk]}
+                    res = self._post("/querybatch", body)["results"]
+                    for i, r in zip(chunk, res):
+                        out[i] += [(v["id"], v.get("modified", "")) for v in r.get("vulns") or []]
+                        if r.get("next_page_token"):
+                            tokens[i] = r["next_page_token"]
+                            nxt.append(i)
+                pending = nxt
+        except (requests.RequestException, RuntimeError, ValueError, KeyError):
+            self.degraded += 1
+            return self._query_from_cache(queries)
         return out
+
+    def _query_from_cache(self, queries):
+        """Rebuild query results from cached advisory bodies when OSV is unreachable: any cached body whose
+        `affected` names a package is a hit for that package, at its cached `modified` stamp. Stale, but a
+        scan still reports what it already knows instead of erroring per target."""
+        rows = self.con.execute("select id, modified, body from osv_vulns where modified!='missing'").fetchall()
+        index, mod = {}, {}
+        for i, m, b in rows:
+            try:
+                body = json.loads(b)
+            except (ValueError, TypeError):
+                continue
+            mod[i] = m
+            for a in body.get("affected") or []:
+                p = a.get("package") or {}
+                if p.get("ecosystem") and p.get("name"):
+                    index.setdefault((p["ecosystem"], p["name"]), set()).add(i)
+        return [sorted((i, mod.get(i, "")) for i in index.get((q["package"]["ecosystem"], q["package"]["name"]), ()))
+                for q in queries]
 
     def get(self, pairs):
         """{id: modified} → {id: body}, fetching only ids that are new or changed since the cached copy."""

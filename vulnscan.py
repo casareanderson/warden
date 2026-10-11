@@ -346,9 +346,18 @@ def store(con, t, os_, rows, status, note, extra=None, pkgs=None):
 
 
 def scan_one(con, t, kev):
-    before = osv_client().failed
+    cli = osv_client()
+    before = cli.failed
+    degraded_before = cli.degraded
     r = _scan_one(con, t, kev)
-    lost = osv_client().failed - before
+    lost = cli.failed - before
+    if cli.degraded > degraded_before:
+        # OSV.dev was unreachable: the scan fell back to cached advisories instead of erroring out.
+        con.execute("update vuln_targets set status='stale', note=trim(coalesce(note,'') || ' · ' || ?) "
+                    "where target=?", ("OSV.dev unreachable — results from cached advisories, may be stale",
+                                       t["target"]))
+        con.commit()
+        return "stale (OSV unreachable, cached advisories)"
     if lost and r == "ok":
         # some advisories could not be downloaded: say so instead of quietly under-reporting
         con.execute("update vuln_targets set status='partial', note=trim(coalesce(note,'') || ' · ' || ?) "
