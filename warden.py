@@ -570,6 +570,7 @@ def expire_lapsed(con, cfg):
 
 # ------------------------------------------------------------------ main ---
 def main():
+    os.umask(0o077)                      # created files (DB WAL/journal, snapshots) stay owner-only
     cfg = load_conf()
     allow = allow_extra(cfg)
     con = db()

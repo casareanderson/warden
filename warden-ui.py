@@ -533,6 +533,7 @@ def _guard_proxy_bind(host):
 def main():
     host, port = config.get("ui.host") or "127.0.0.1", int(config.get("ui.port") or 8792)
     import os  # noqa: PLC0415
+    os.umask(0o077)                      # DB WAL/journal and anything we create stay owner-only
     host = os.environ.get("WARDEN_UI_HOST", host)
     port = int(os.environ.get("WARDEN_UI_PORT", port))
     _guard_proxy_bind(host)
