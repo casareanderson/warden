@@ -477,7 +477,7 @@ html[data-density=compact] nav button{padding:7px 10px}
 
 <!-- SETTINGS -->
 <section class="tab" id="t-review">
-  <h2>Waiting for you <span class="hint">everything that needs your ✅ / ❌ right now — same as reacting in your chat channel</span></h2>
+  <h2>Review <span class="hint">everything that needs your ✅ / ❌ right now — same as reacting in your chat channel</span></h2>
   <div id="appr"></div>
 </section>
 
@@ -575,7 +575,7 @@ const ccCell = (cc, red) => cc ? `<span class="flag">${flag(cc)}</span>${esc(cc)
 // ── primary navigation: 6 top-level tabs; related views live under a sub-nav (kids) ──
 const NAV = [
   {id:"overview", label:"Overview"},
-  {id:"review",   label:"Waiting for you"},
+  {id:"review",   label:"Review"},
   {id:"threats",  label:"Threats",  kids:[["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["incidents","Incidents"],["geo","Geo & red list"]]},
   {id:"agents",   label:"Agents"},
   {id:"posture",  label:"Posture",  kids:[["surface","Attack surface"],["vulns","Vulnerabilities"],["endpoints","Endpoints"],["health","Health"]]},
@@ -876,7 +876,7 @@ function renderWaiting(d) {
   const agRev = ((d.agents || {}).findings || []).filter(f => f.verdict == null && f.decision === "review").length;
   const pill = $("#waiting"); if (!pill) return;
   pill.hidden = !(ap.length || integ || inc || agRev);
-  pill.textContent = ap.length ? `⏳ ${ap.length} waiting for you` : `⏳ ${integ + inc + agRev} to review`;
+  pill.textContent = ap.length ? `⏳ ${ap.length} to review` : `⏳ ${integ + inc + agRev} to review`;
   window._waiting = {ap, integ, inc, agRev};
 }
 function openWaiting() {
@@ -884,14 +884,14 @@ function openWaiting() {
   const go = (tab, label) => `<button class="btn ghost sm" onclick="closeDrawer();show('${tab}')">${label} →</button>`;
   const decide = w.ap.length
     ? `<h3>Needs ✅ / ❌ now (${w.ap.length})</h3>` + w.ap.map(a => `<div class="appr" style="margin-bottom:6px"><pre>${esc(a.text.split("\n").slice(0, 2).join("\n"))}</pre></div>`).join("")
-      + `<div class="note">Decide here, or react in your alerts channel — same effect. ${go("review", "Open Waiting for you")}</div>`
+      + `<div class="note">Decide here, or react in your alerts channel — same effect. ${go("review", "Open Review")}</div>`
     : '<h3>Needs ✅ / ❌ now</h3><div class="empty">Nothing in the approval queue. 🎉</div>';
   const also = [
     w.integ ? [`${w.integ} integrity change${w.integ === 1 ? "" : "s"} to accept or reject`, "endpoints", "Endpoints"] : null,
     w.inc ? [`${w.inc} incident${w.inc === 1 ? "" : "s"} the model would act on`, "incidents", "Incidents"] : null,
     w.agRev ? [`${w.agRev} new agent destination${w.agRev === 1 ? "" : "s"} to review`, "agents", "Agents"] : null,
   ].filter(Boolean);
-  openDrawer("Waiting for you", decide + (also.length
+  openDrawer("Review", decide + (also.length
     ? "<h3>Also worth a look</h3>" + also.map(([t, tab, label]) => `<div class="appr" style="margin-bottom:6px"><span style="flex:1">${esc(t)}</span>${go(tab, label)}</div>`).join("")
     : ""));
 }
@@ -1328,12 +1328,12 @@ function kpiDefs(d, edgeBlind) {
     vuln_fixable: ["Fixable CVEs", V.fixable || 0, `${V.crit || 0} critical`, V.crit ? "red" : V.fixable ? "amb" : "grn", "vulns"],
     ids_24h: ["IDS alerts 24 h", N.ids_24h || 0, `${N.intel_24h || 0} threat-intel hits`, N.ids_24h ? "amb" : "grn", "network"],
     integrity_open: ["Integrity changes", integ, "open, not yet accepted", integ ? "amb" : "grn", "endpoints"],
-    approvals: ["Waiting for you", ap, "approve here or in chat", ap ? "amb" : "grn", "review"],
+    approvals: ["Review", ap, "approve here or in chat", ap ? "amb" : "grn", "review"],
   };
 }
 const KPI_TITLES = {events_24h: "Detections 24 h", ips_7d: "Scored IPs 30 d", edge_24h: "Edge blocks 24 h", red_hits_7d: "Red-list hits",
   findings_open: "Open findings", bans: "Ban proposals", hosts: "LAN hosts", vuln_kev: "Known-exploited CVEs", vuln_fixable: "Fixable CVEs",
-  ids_24h: "IDS alerts 24 h", integrity_open: "Integrity changes", approvals: "Waiting for you"};
+  ids_24h: "IDS alerts 24 h", integrity_open: "Integrity changes", approvals: "Review"};
 let LAYOUT = null, EDIT = null;
 
 function renderOverview(d, edgeBlind) {
