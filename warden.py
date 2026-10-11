@@ -14,7 +14,7 @@ exists ONLY in the HTTP layer (CF-Connecting-IP, which NPMplus logs as its
   - a local IP ban keyed on the attacker's address would never match a packet;
   - banning what DOES appear at L3 would ban Cloudflare and black-hole the
     entire estate.
-Enforcement therefore happens at the Cloudflare EDGE (IP Access Rules), before
+Enforcement therefore happens at the Cloudflare EDGE (a WAF custom rule), before
 traffic ever enters the tunnel. That is the only layer where the attacker's
 address is both visible and blockable.
 
@@ -30,6 +30,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import datetime, timezone
 from ipaddress import ip_address, ip_network
 from pathlib import Path
@@ -426,25 +427,60 @@ def score_cloudflared(line):
                 score=score, detail=f'{m.group("host")}{path[:120]}')
 
 # ------------------------------------------------------------- enforcement -
-def cf_ban(ip, note, cfg):
-    """Cloudflare IP Access Rule — block at the edge. Only layer that works."""
-    import urllib.request
-    tok = secrets.get("CLOUDFLARE_API_TOKEN")
-    acct = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or config.get("cloudflare.account_id")
-    if not tok or not acct:
-        return False, "no CF credentials in env"
-    # Cloudflare access rules use a different target keyword for a range.
-    target = "ip_range" if "/" in ip else "ip"
-    body = json.dumps({"mode": "block",
-                       "configuration": {"target": target, "value": ip},
-                       "notes": f"warden: {note}"[:200]}).encode()
+DESC = "warden: blocklist (owner-approved bans)"
+
+
+def _cf_call(url, tok, method="GET", body=None):
+    data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
-        f"https://api.cloudflare.com/client/v4/accounts/{acct}/firewall/access_rules/rules",
-        data=body, method="POST",
+        url, data=data, method=method,
         headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        d = json.load(r)
+    if not d.get("success"):
+        raise RuntimeError((d.get("errors") or [{"message": "HTTP error"}])[0].get("message"))
+    return d["result"]
+
+
+def _blocklist_ips(expr):
+    if not expr:
+        return []
+    m = re.search(r"\{([^}]*)\}", expr)
+    return [t for t in m.group(1).split() if t] if m else []
+
+
+def cf_ban(ip, note, cfg):
+    """Block at the Cloudflare edge via a WAF custom rule — Cloudflare's current
+    equivalent of the retired firewall APIs. Appends the address to the zone's
+    `warden: blocklist` rule (the same one edgeban.py manages)."""
+    tok = secrets.get(config.get("cloudflare.token_secret") or "CF_API_TOKEN")
+    zone = config.get("cloudflare.zone_id") or os.environ.get("CLOUDFLARE_ZONE_ID")
+    if not tok or not zone:
+        return False, "no CF credentials (zone_id / token) in config"
+    base = f"https://api.cloudflare.com/client/v4/zones/{zone}"
+    entry = f"{base}/rulesets/phases/http_request_firewall_custom/entrypoint"
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return json.load(r).get("success", False), "ok"
+        ep = _cf_call(entry, tok)
+        rules = ep.get("rules", [])
+        keep = [r for r in rules if (r.get("description") or "") != DESC]
+        cur = next((r for r in rules if (r.get("description") or "") == DESC), None)
+        ips = _blocklist_ips(cur.get("expression") if cur else None)
+        if ip not in ips:
+            ips.append(ip)
+        expr = "(ip.src in {" + " ".join(ips) + "})" if ips else None
+        if expr and not cur and len(keep) >= 5:
+            return False, "free plan allows 5 custom rules and all 5 are used"
+        new = [{"action": r["action"], "expression": r["expression"],
+                "description": r.get("description", ""), "enabled": r.get("enabled", True)} for r in keep]
+        if expr:
+            new.append({"action": "block", "expression": expr, "description": DESC, "enabled": True})
+        _cf_call(f"{base}/rulesets/{ep['id']}", tok, "PUT", {"rules": new})
+        back = _cf_call(entry, tok)
+        got = next((r.get("expression") for r in back.get("rules", [])
+                    if r.get("description") == DESC), None)
+        if got != expr:
+            return False, "read-back mismatch"
+        return True, "cf WAF blocklist updated"
     except Exception as e:
         return False, str(e)[:150]
 
