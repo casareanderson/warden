@@ -32,9 +32,6 @@ enforcement caveats below apply. Read this before you flip `enforce: true`.
 
 ## Detection edges
 
-- **Bursts are capped.** The tunnel collector reads `docker logs ... | tail -400`
-  per sweep; more than ~400 malicious lines inside one 5-minute window lose the
-  overflow. It undercounts (safe direction), never over-bans.
 - **A broken log connection looks like a quiet one.** If the SSH to the log host
   fails, the collector returns empty — indistinguishable, inside warden, from
   "nothing new". Watch the dashboard's per-source line counts; a healthy source
