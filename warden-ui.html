@@ -79,6 +79,7 @@ footer{color:var(--faint);font-size:11.5px;text-align:center;padding:20px}
 .pill.warn{color:var(--amb);border-color:var(--amb-line);background:var(--amb-bg)}
 .pill.bad{color:var(--red);border-color:var(--red-line);background:var(--red-bg)}
 .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+button.pill{font-family:inherit;cursor:pointer} button.pill:hover{filter:brightness(1.12)}
 /* search */
 .search{flex:1;min-width:240px;max-width:640px;display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:6px 10px}
 .search:focus-within{border-color:var(--acc)}
@@ -228,6 +229,28 @@ html[data-nav=top] nav{position:sticky;top:var(--hdr,58px);z-index:4;background:
 .pick .mv button{background:none;border:1px solid var(--line2);color:var(--dim);border-radius:4px;width:22px;height:20px;cursor:pointer;padding:0;line-height:1}
 .geo-ctl{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .intg .card h3 .b{margin-left:auto}
+/* search query builder */
+#qbuild{margin-bottom:12px}
+.qb-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.qb-row select,.qb-row input{background:var(--panel2);border:1px solid var(--line2);border-radius:6px;color:var(--fg);padding:5px 9px;font:inherit;font-size:var(--fs-sm)}
+.qb-row #qb-val{flex:1;min-width:160px}
+/* settings groups */
+.cfg-grp{margin-bottom:16px}
+.cfg-grp:last-child{margin-bottom:0}
+.cfg-grp h4{margin:0 0 4px;font-size:11px;color:var(--acc);text-transform:uppercase;letter-spacing:.06em;font-weight:600;border-bottom:1px solid var(--line);padding-bottom:5px}
+.cfg-grp h4 .q{font-family:var(--mono);text-transform:none;letter-spacing:0}
+/* agent permissions cards */
+.perm{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:11px 13px;margin-bottom:8px}
+.perm.hot{border-color:var(--amb-line)}
+.perm .ph{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.perm .ph b{font-family:var(--mono)} .perm .pf{color:var(--dim);font-size:var(--fs-sm);line-height:1.6}
+.perm .pf code{background:var(--panel2);padding:0 4px;border-radius:4px}
+.agmap text{fill:var(--fg);font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.agmap .t2{fill:var(--dim);font-size:10px}
+.agmap .node{fill:var(--panel2);stroke:var(--line2)} .agmap .node.bad{stroke:var(--red-line);fill:var(--red-bg)}
+.agmap .ag{fill:var(--acc-bg);stroke:var(--acc-line)}
+.agmap .ln{stroke:var(--line2);stroke-width:1;fill:none} .agmap .ln.bad{stroke:var(--red);stroke-width:1.4}
+.agmap g[data-agent]{cursor:pointer} .agmap g[data-agent]:hover rect{stroke:var(--acc)}
 
 /* ── 6 · density + responsive ─────────────────────────────────────────────── */
 html[data-density=compact]{--fs:12.5px;--fs-sm:11.5px;--pad-cell:3px 8px;--pad-card:9px 11px;--gap:8px;--kpi-v:19px;--pad-main:10px 12px 28px;--radius:7px;--donut:92px}
@@ -247,6 +270,7 @@ html[data-density=compact] nav button{padding:7px 10px}
       <span>warden<br><small>homelab security hub</small></span>
     </div>
     <span class="pill" id="mode"><span class="dot"></span>…</span>
+    <button class="pill warn" id="waiting" hidden title="Everything waiting for your ✅ / ❌ right now"></button>
     <label class="search">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b949e" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="q" placeholder="Search events, edge, hosts…  ip:  cc:RU  kind:sqli  src:npm  type:edge" autocomplete="off">
@@ -270,11 +294,17 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="grid g4 ov" id="ov-widgets"></div>
 </section>
 
-<!-- DETECTIONS -->
-<section class="tab" id="t-detections">
+<!-- INCIDENTS -->
+<section class="tab" id="t-incidents">
+  <div class="banner ok" style="margin-bottom:16px"><b>The incident brain.</b> Every detector — edge, logs, LAN, vulnerabilities, integrity, agents — is joined into one picture per entity. In <b>shadow mode</b> the model writes down what it <i>would</i> do and how sure it is; warden never carries it out. You can see what it got right before you ever let it act.</div>
   <h2>Incidents · shadow <span class="hint" id="inc-hint">signals from every detector joined up · the model's would-be action is recorded, never carried out</span></h2>
   <div class="tbl-tools"><input data-filter="incidents" placeholder="filter: entity, action, owner…"><span class="n" id="incidents-n"></span></div>
   <div class="wrap"><table id="incidents"></table></div>
+  <div class="note">Click <b>Facts</b> on any row for the signals the incident was built from, each with its source and time. Shadow is the default; turning it to advisory or enforcing is a deliberate change in <code>warden.yml</code>, never a button.</div>
+</section>
+
+<!-- DETECTIONS -->
+<section class="tab" id="t-detections">
   <h2>Ban decisions <span class="hint" id="ban-hint"></span></h2>
   <div class="wrap"><table id="bans"></table></div>
   <h2>Edge blocklist <span class="hint">proposed hourly · you ✅/❌ in your alerts channel or Settings · enforced as ONE Cloudflare WAF rule · bans lapse after 30 days</span></h2>
@@ -393,22 +423,30 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="note">netscan is detect-only with no enforcement path: acting automatically against a LAN device has a far worse blast radius than a late alert.</div>
 </section>
 
-<!-- HERMES AGENTS -->
+<!-- AGENTS -->
 <section class="tab" id="t-agents">
+  <div class="banner ok" style="margin-bottom:16px"><b>Watch what your AI agents do.</b> Any autonomous agent on the estate — Hermes profiles, OpenCode, a ChatGPT/Muse bridge, a scraper, your own bot — is attributed to the process that made each outbound connection, so you can see where it reaches, what it can access, and whether it ever touched a known-bad host. Detect-only: warden reads <code>/proc</code> and sockets, never blocks or kills. Name your own agents with <code>agents.patterns</code> in <code>warden.yml</code>.</div>
   <div class="kpis" id="ag-kpis"></div>
-  <h2>Reached a known-bad destination <span class="hint">a Hermes agent connected to a host on a threat feed — detect-only, nothing was blocked</span></h2>
+  <h2>Reached a known-bad destination <span class="hint">an agent connected to a host on a threat feed — detect-only, nothing was blocked</span></h2>
   <div class="wrap"><table id="ag-alerts"></table></div>
-  <h2>Hermes agents <span class="hint">each autonomous agent and what it talks to; Claude Code and system noise are not tracked</span></h2>
+  <div class="card" style="margin:12px 0"><h3>Agent map <span class="q" id="ag-map-h"></span></h3><div id="ag-map"></div>
+    <div class="note" style="margin:6px 0 0">Each agent and the destinations it talks to, drawn from the egress warden has attributed. Known-bad destinations are red; click an agent to filter the tables below.</div></div>
+  <h2>What each agent can access <span class="hint">read-only: the user it runs as, its groups, Linux capabilities, sudo rights, and which configured secret files it could read · the riskiest first</span></h2>
+  <div id="ag-perms"></div>
+  <h2>Agents <span class="hint">each autonomous agent and what it talks to; interactive dev tools (Claude Code) and system noise are not tracked</span></h2>
   <div class="tbl-tools"><input data-filter="ag-agents" placeholder="filter: agent, host…"><span class="n" id="ag-agents-n"></span></div>
   <div class="wrap"><table id="ag-agents"></table></div>
-  <h2>Destinations</h2>
+  <h2>Destination history · all agents <span class="hint">every destination any agent has reached — known-bad first — with hits and best-effort bytes received</span></h2>
+  <div class="tbl-tools"><input data-filter="ag-dests" placeholder="filter: destination, ip, agent…"><span class="n" id="ag-dests-n"></span></div>
+  <div class="wrap"><table id="ag-dests"></table></div>
+  <h2>Destinations · per agent</h2>
   <div class="tbl-tools"><input data-filter="ag-conns" placeholder="filter: agent, destination, ip…"><span class="n" id="ag-conns-n"></span></div>
   <div class="wrap"><table id="ag-conns"></table></div>
   <h2>New-destination reviews <span class="hint">✅ expected, learn it · ❌ not expected</span></h2>
   <div class="wrap"><table id="ag-find"></table></div>
   <h2>Coverage</h2>
   <div class="wrap"><table id="ag-runs"></table></div>
-  <div class="note"><code>ss</code> is a snapshot every 10 minutes, so a connection that opens and closes between polls is missed. Without root on a host, only warden's own user's sockets are attributed — never guessed.</div>
+  <div class="note"><code>ss</code> is a snapshot every 10 minutes, so a connection that opens and closes between polls is missed, and bytes are that socket's lifetime at the moment it was sampled — a real download shows up big, but short transfers can be undercounted. Without root on a host, only warden's own user's sockets are attributed — never guessed.</div>
 </section>
 
 <!-- HEALTH -->
@@ -420,7 +458,7 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="wrap"><table id="suppressed"></table></div>
 </section>
 
-<!-- SEARCH -->
+<!-- SETTINGS -->
 <section class="tab" id="t-settings">
   <h2>Waiting for you <span class="hint">what warden proposed — same as reacting ✅ / ❌ in your chat channel</span></h2>
   <div id="appr"></div>
@@ -476,6 +514,20 @@ html[data-density=compact] nav button{padding:7px 10px}
 
 <section class="tab" id="t-search">
   <h2>Search <span class="hint" id="s-meta"></span></h2>
+  <div class="card" id="qbuild">
+    <div class="qb-row">
+      <select id="qb-field" title="field">
+        <option value="type">type</option><option value="kind">kind</option><option value="src">source</option>
+        <option value="ip">ip</option><option value="cc">country</option><option value="date">date</option>
+      </select>
+      <select id="qb-op" title="match"><option value="">is</option><option value="-">is not</option></select>
+      <input id="qb-val" list="qb-vals" placeholder="value — pick or type" autocomplete="off">
+      <datalist id="qb-vals"></datalist>
+      <button class="btn sm" id="qb-add">Add to query</button>
+      <button class="btn ghost sm" id="qb-clear" title="empty the search box">Clear</button>
+    </div>
+    <div class="note" style="margin:8px 0 0">Builds the query in the search box above — e.g. <code>type:edge -kind:challenge cc:RU</code>. No AI, just a shortcut: pick a field, choose <b>is</b> or <b>is&nbsp;not</b>, and the values fill in from what warden has seen. Free text works too; press Enter in the box to run.</div>
+  </div>
   <div class="chips" id="s-chips"></div>
   <div class="wrap" style="margin-top:10px"><table id="sres"></table></div>
 </section>
@@ -500,7 +552,7 @@ const ago = ts => { if (!ts) return "—"; const d = (Date.now() - new Date(ts.r
 const selfB = r => r.self ? ' <span class="b acc" title="our own address (self-ips.txt / warden.yml allow) — excluded from counts">self</span>' : "";
 const ccCell = (cc, red) => cc ? `<span class="flag">${flag(cc)}</span>${esc(cc)}${red ? ' <span class="b red">red list</span>' : ""}` : '<span class="q">—</span>';
 
-const GROUPS = [["Monitor", [["overview","Overview"],["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["agents","Hermes agents"],["search","Search"]]],
+const GROUPS = [["Monitor", [["overview","Overview"],["detections","Detections"],["incidents","Incidents"],["edge","Edge · Cloudflare"],["network","Network"],["agents","Agents"],["search","Search"]]],
                 ["Exposure", [["surface","Attack surface"],["geo","Geo & red list"]]],
                 ["Assets", [["vulns","Vulnerabilities"],["endpoints","Endpoints"]]],
                 ["Hub", [["health","Health"],["connect","Connect"],["settings","Settings"],["account","Account"]]]];
@@ -647,6 +699,8 @@ function render() {
     {h: "", f: r => `<button class="btn" data-inc="${r.id}">Facts</button>`}], IN.rows,
     IN.mode === "not run yet" ? "incidents.py has not run yet." : "No incidents.");
   window._inc = Object.fromEntries(IN.rows.map(r => [r.id, r]));
+  const incAsk = IN.rows.filter(r => r.status === "ok" && !r.owner_label && !["ignore_learn", "watch"].includes(r.action)).length;
+  badge("incidents", incAsk, incAsk > 0);
   $("#ban-hint").textContent = d.mode === "detect-only" ? "detect-only — these are what warden WOULD ban; nothing is applied" : "";
   table("bans", [{h: "When", k: "ts", cls: "ts"}, {h: "Address", k: "ip", cls: "ip", ip: 1}, {h: "Country", f: r => ccCell(r.cc, r.red)},
     {h: "Score", k: "score", cls: "num", num: 1}, {h: "State", f: r => `<span class="b ${r.state === "active" ? "red" : "amb"}">${esc(r.state)}</span>`},
@@ -756,7 +810,37 @@ function render() {
   badge("health", d.health.filter(h => (h.note || "").startsWith("BLIND") || !h.lines).length, true);
   table("suppressed", [{h: "When", k: "ts", cls: "ts"}, {h: "Kind", k: "kind", cls: "mono"}, {h: "Detail", k: "detail", cls: "det", title: 1}, {h: "Reason", k: "reason"}],
     d.suppressed, "Nothing suppressed.");
+  renderWaiting(d);
 }
+
+// ── "Waiting for you": one place for everything that needs your ✅ / ❌ right now ──
+function renderWaiting(d) {
+  const ap = d.approvals || [];
+  const integ = ((d.endpoints || {}).integrity || []).reduce((a, r) => a + (r.open || 0), 0);
+  const inc = ((d.incidents || {}).rows || []).filter(r => r.status === "ok" && !r.owner_label && !["ignore_learn", "watch"].includes(r.action)).length;
+  const agRev = ((d.agents || {}).findings || []).filter(f => f.verdict == null && f.decision === "review").length;
+  const pill = $("#waiting"); if (!pill) return;
+  pill.hidden = !(ap.length || integ || inc || agRev);
+  pill.textContent = ap.length ? `⏳ ${ap.length} waiting for you` : `⏳ ${integ + inc + agRev} to review`;
+  window._waiting = {ap, integ, inc, agRev};
+}
+function openWaiting() {
+  const w = window._waiting || {ap: [], integ: 0, inc: 0, agRev: 0};
+  const go = (tab, label) => `<button class="btn ghost sm" onclick="closeDrawer();show('${tab}')">${label} →</button>`;
+  const decide = w.ap.length
+    ? `<h3>Needs ✅ / ❌ now (${w.ap.length})</h3>` + w.ap.map(a => `<div class="appr" style="margin-bottom:6px"><pre>${esc(a.text.split("\n").slice(0, 2).join("\n"))}</pre></div>`).join("")
+      + `<div class="note">Decide here, or react in your alerts channel — same effect. ${go("settings", "Open Settings")}</div>`
+    : '<h3>Needs ✅ / ❌ now</h3><div class="empty">Nothing in the approval queue. 🎉</div>';
+  const also = [
+    w.integ ? [`${w.integ} integrity change${w.integ === 1 ? "" : "s"} to accept or reject`, "endpoints", "Endpoints"] : null,
+    w.inc ? [`${w.inc} incident${w.inc === 1 ? "" : "s"} the model would act on`, "incidents", "Incidents"] : null,
+    w.agRev ? [`${w.agRev} new agent destination${w.agRev === 1 ? "" : "s"} to review`, "agents", "Agents"] : null,
+  ].filter(Boolean);
+  openDrawer("Waiting for you", decide + (also.length
+    ? "<h3>Also worth a look</h3>" + also.map(([t, tab, label]) => `<div class="appr" style="margin-bottom:6px"><span style="flex:1">${esc(t)}</span>${go(tab, label)}</div>`).join("")
+    : ""));
+}
+$("#waiting").onclick = openWaiting;
 
 
 const SEVN = {4: "CRITICAL", 3: "HIGH", 2: "MEDIUM", 1: "LOW", 0: "UNKNOWN"};
@@ -992,25 +1076,38 @@ function loginCell(b) {
   return `<span style="white-space:nowrap"><span class="mono" title="${esc(tip)}">${who}</span> <span class="q">${ago(l.ts)}${l.method && l.method !== "console" ? " · " + esc(l.method) : ""}</span></span>`
     + (l.key_label ? ` <span class="b acc">${esc(l.key_label)}</span>` : "") + (l.new ? ' <span class="b amb">new</span>' : "") + f;
 }
+const bytes = n => { n = +n || 0; if (n < 1024) return n + " B"; const u = ["KB", "MB", "GB", "TB"]; let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1); return n.toFixed(n < 10 ? 1 : 0) + " " + u[i]; };
+const badDest = r => r.bad ? ' <span class="b red" title="on a threat feed">known-bad</span>' : "";
 function renderAgents(A) {
   if (!A) return;
   const open = (A.findings || []).filter(f => f.verdict == null && f.decision === "review").length;
   const bad = (A.alerts || []).length;
+  const priv = (A.perms || []).filter(p => p.privileged).length;
   $("#ag-kpis").innerHTML = [
-    ["Hermes agents", (A.agents || []).length, "autonomous agents seen talking out", ""],
+    ["Agents", (A.agents || []).length, "autonomous agents seen talking out", ""],
     ["Known-bad hits", bad, "matched a threat feed", bad ? "red" : "grn"],
+    ["Privileged agents", priv, "root, hot caps, sudo or a risky group", priv ? "amb" : "grn"],
     ["New to review", open, "destinations awaiting \u2705/\u274c", open ? "amb" : "grn"],
   ].map(([t, v, s, c]) => `<div class="kpi ${c}"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join("");
   table("ag-alerts", [{h: "When", f: r => ago(r.ts), cls: "ts"}, {h: "Agent", k: "agent", cls: "mono"}, {h: "Host", k: "host"},
     {h: "Kind", f: r => `<span class="b red">${esc(r.kind)}</span>`}, {h: "Destination", f: r => esc(r.dest), cls: "mono"},
-    {h: "Feed", k: "feed"}, {h: "Detail", k: "detail", cls: "det"}], A.alerts, "No Hermes agent has reached a known-bad destination. \ud83c\udf89");
+    {h: "Feed", k: "feed"}, {h: "Detail", k: "detail", cls: "det"}], A.alerts, "No agent has reached a known-bad destination. \ud83c\udf89");
+  drawAgentMap(A);
+  renderAgentPerms(A.perms || []);
   table("ag-agents", [{h: "Agent", f: r => `<b>${esc(r.agent)}</b>`}, {h: "Host", k: "host"},
     {h: "Destinations", k: "dests", cls: "num", num: 1}, {h: "Connections", k: "conns", cls: "num", num: 1},
     {h: "Last seen", f: r => ago(r.last_seen), cls: "ts"},
     {h: "Flags", f: r => r.alerts ? `<span class="b red">${r.alerts} alert${r.alerts > 1 ? "s" : ""}</span>` : '<span class="q">\u2014</span>'}],
     A.agents, "agents.py has not run yet.");
-  table("ag-conns", [{h: "Agent", k: "agent", cls: "mono"}, {h: "Destination", f: r => esc(r.domain || r.dest), cls: "mono"},
+  table("ag-dests", [{h: "Destination", f: r => esc(r.domain || r.dest) + badDest(r), cls: "mono"},
+    {h: "IP", k: "dest_ip", cls: "ip mono", ip: 1}, {h: "Agents", f: r => esc(r.agents || ""), cls: "det"},
+    {h: "Hits", k: "hits", cls: "num", num: 1}, {h: "Received", f: r => bytes(r.bytes_recv), cls: "num", num: 1},
+    {h: "First", f: r => ago(r.first_seen), cls: "ts"}, {h: "Last", f: r => ago(r.last_seen), cls: "ts"}],
+    A.dests || [], "No destinations recorded.");
+  table("ag-conns", [{h: "Agent", k: "agent", cls: "mono"}, {h: "Destination", f: r => esc(r.domain || r.dest) + badDest(r), cls: "mono"},
     {h: "IP", k: "dest_ip", cls: "ip mono", ip: 1}, {h: "Port", k: "port", cls: "num"}, {h: "Seen", k: "hits", cls: "num", num: 1},
+    {h: "Received", f: r => bytes(r.bytes_recv), cls: "num", num: 1},
     {h: "Last", f: r => ago(r.last_seen), cls: "ts"}, {h: "In", k: "container", cls: "det q"}], A.conns, "No destinations recorded.");
   table("ag-find", [{h: "When", f: r => ago(r.ts), cls: "ts"}, {h: "Agent", k: "agent", cls: "mono"}, {h: "Destination", k: "dest", cls: "mono"},
     {h: "Score", k: "score", cls: "num", num: 1}, {h: "Why", f: r => esc((JSON.parse(r.reasons || "[]")).slice(1).join("; ")), cls: "det", title: 1},
@@ -1021,6 +1118,72 @@ function renderAgents(A) {
     {h: "Last", f: r => ago(r.ts), cls: "ts"}, {h: "Note", k: "note", cls: "det"}], A.runs, "No agent-host runs yet.");
   badge("agents", bad + open, bad > 0);
 }
+// Agent map: a column of agents on the left, their destinations on the right, a line per edge. Known-bad = red.
+function drawAgentMap(A) {
+  const el = $("#ag-map"); if (!el) return;
+  const conns = A.conns || [], agents = [...new Set(conns.map(c => c.agent))];
+  if (!agents.length) { el.innerHTML = '<div class="empty">agents.py has not attributed any egress yet.</div>'; $("#ag-map-h").textContent = ""; return; }
+  const badIp = new Set((A.alerts || []).map(a => a.dest_ip));
+  // top destinations only, so the map stays readable (steer: lightweight)
+  const dcount = {}; conns.forEach(c => { dcount[c.dest] = (dcount[c.dest] || 0) + c.hits; });
+  const dests = Object.keys(dcount).sort((a, b) => dcount[b] - dcount[a]).slice(0, 24);
+  const di = Object.fromEntries(dests.map((d, i) => [d, i]));
+  const W = Math.max(360, Math.min(1000, el.clientWidth || 900)), rowH = 26, pad = 14;
+  const rows = Math.max(agents.length, dests.length), H = pad * 2 + rows * rowH;
+  const ax = pad, aw = Math.min(240, W * 0.34), dx = W - pad - Math.min(300, W * 0.4), dw = W - pad - dx;
+  const ay = i => pad + i * rowH + 9, dy = i => pad + i * rowH + 9;
+  const bad = d => conns.some(c => c.dest === d && (c.bad || badIp.has(c.dest_ip)));
+  let svg = "";
+  agents.forEach((a, i) => {
+    const mine = conns.filter(c => c.agent === a && di[c.dest] != null);
+    mine.forEach(c => { svg += `<line class="ln${bad(c.dest) ? " bad" : ""}" x1="${ax + aw}" y1="${ay(i) - 4}" x2="${dx}" y2="${dy(di[c.dest]) - 4}"/>`; });
+  });
+  const fit = (t, n) => (t = String(t ?? "")).length > n ? t.slice(0, n - 1) + "\u2026" : t;
+  agents.forEach((a, i) => {
+    const anyBad = conns.some(c => c.agent === a && bad(c.dest));
+    svg += `<g data-agent="${esc(a)}"><title>${esc(a)} \u2014 click to filter the tables</title>`
+      + `<rect class="ag${anyBad ? " bad" : ""}" x="${ax}" y="${ay(i) - 17}" width="${aw}" height="${rowH - 6}" rx="6"/>`
+      + `<text x="${ax + 9}" y="${ay(i)}">${esc(fit(a, Math.floor(aw / 7)))}</text></g>`;
+  });
+  dests.forEach((d, i) => {
+    svg += `<g><title>${esc(d)} \u00b7 ${dcount[d]} hits${bad(d) ? " \u00b7 known-bad" : ""}</title>`
+      + `<rect class="node${bad(d) ? " bad" : ""}" x="${dx}" y="${dy(i) - 17}" width="${dw}" height="${rowH - 6}" rx="6"/>`
+      + `<text class="t2" x="${dx + 9}" y="${dy(i)}">${esc(fit(d, Math.floor(dw / 6.4)))}</text></g>`;
+  });
+  el.innerHTML = `<svg class="agmap" viewBox="0 0 ${W} ${H}" role="img" aria-label="agent map" style="width:100%;height:auto">${svg}</svg>`;
+  $("#ag-map-h").textContent = `\u00b7 ${agents.length} agent${agents.length === 1 ? "" : "s"} \u00b7 ${dests.length} of ${Object.keys(dcount).length} destinations shown`;
+}
+function renderAgentPerms(perms) {
+  const el = $("#ag-perms"); if (!el) return;
+  if (!perms.length) { el.innerHTML = '<div class="empty">No access facts yet \u2014 agents.py records these as it attributes each agent (root on the host gives the fullest picture).</div>'; return; }
+  const sorted = perms.slice().sort((a, b) => (b.privileged - a.privileged) || a.agent.localeCompare(b.agent));
+  el.innerHTML = sorted.map(p => {
+    const tags = [];
+    if (p.root) tags.push('<span class="b red">runs as root</span>');
+    if (p.cap_full) tags.push('<span class="b red">all capabilities</span>');
+    (p.hot_groups || []).forEach(g => tags.push(`<span class="b amb">${esc(g)} group</span>`));
+    if (p.has_sudo) tags.push('<span class="b amb">sudo</span>');
+    (p.cap_hot || []).filter(c => c !== "(all)").forEach(c => tags.push(`<span class="b amb" title="Linux capability">cap_${esc(c)}</span>`));
+    const caps = (p.cap_names || []);
+    const reads = p.can_read || [];
+    return `<div class="perm${p.privileged ? " hot" : ""}"><div class="ph"><b>${esc(p.agent)}</b> <span class="q">on ${esc(p.host)}</span>
+        <span class="q">\u00b7 runs as ${esc(p.user || p.uid)}${p.group ? " \u00b7 " + esc(p.group) : ""}</span>${tags.join(" ")}</div>
+      <div class="pf">
+        ${(p.groups_list || []).length ? `Groups: ${p.groups_list.map(g => `<code>${esc(g)}</code>`).join(" ")}<br>` : ""}
+        Capabilities: ${p.cap_full ? "the full set (root-equivalent)" : caps.length ? caps.map(c => `<code>${esc(c)}</code>`).join(" ") : "none"}<br>
+        Sudo: ${p.has_sudo ? esc((p.sudo || "").slice(0, 160)) : '<span class="q">none it could use without a password, or not checkable here</span>'}<br>
+        Can read: ${reads.length ? reads.map(f => `<code>${esc(f)}</code>`).join(" ") : '<span class="q">none of the configured secret files</span>'}
+      </div></div>`;
+  }).join("");
+}
+document.addEventListener("click", e => {          // agent map: click an agent to filter the per-agent tables
+  const g = e.target.closest(".agmap [data-agent]"); if (!g) return;
+  ["ag-conns", "ag-agents", "ag-dests"].forEach(id => {
+    const i = document.querySelector(`[data-filter="${id}"]`);
+    if (i) { i.value = g.dataset.agent; i.dispatchEvent(new Event("input", {bubbles: true})); }
+  });
+  $("#ag-agents").scrollIntoView({behavior: "smooth", block: "center"});
+});
 function renderNetsec(N) {
   if (!N) return;
   donut($("#ch-ids"), N.ids_top.map(x => ({k: x.k, n: x.n, red: x.sev === 1})), {unit: "alerts", q: x => "type:ids " + x.k.split(" ").slice(0, 3).join(" ")});
@@ -1370,8 +1533,19 @@ function renderConnect() {
   --header "Authorization: Bearer $WARDEN_TOKEN"`)],
     ["Claude Desktop / Cursor / VS Code", "agent · MCP", snip("mcp.json", `{"mcpServers": {"warden": {"type": "http", "url": "${mcp}",
   "headers": {"Authorization": "Bearer \${WARDEN_TOKEN}"}}}}`)],
+    ["ChatGPT", "custom GPT · Action", snip("GPT → Actions → Authentication: API key (Bearer)", `Import an Action from:
+  ${api}/openapi.json
+Auth:  API Key · Bearer · paste the token from step 1
+Then ask it, e.g. "what is warden waiting on?" or "any known-exploited CVEs?"`, "Works the same for any assistant that imports an OpenAPI schema with a bearer key.")],
+    ["Any MCP client", "agent · MCP", snip("generic MCP server config", `name:    warden
+transport: http (streamable)
+url:     ${mcp}
+header:  Authorization: Bearer $WARDEN_TOKEN`, "Muse, LibreChat, Open WebUI, your own bot — anything that speaks MCP over HTTP. Tools: ask_warden + one per view.")],
     ["n8n / Node-RED / scripts", "REST", snip("HTTP request", `GET ${api}/summary
 Authorization: Bearer $WARDEN_TOKEN`)],
+    ["curl / anything", "REST", snip("terminal", `curl -s ${api}/summary \\
+  -H "Authorization: Bearer $WARDEN_TOKEN" | jq .
+# any view: /detections /vulns /approvals /ip/<addr> /search?q=cc:RU`)],
     ["Grafana / Homepage / Uptime Kuma", "dashboards · REST", snip("JSON API data source", `URL:    ${api}/summary
 Header: Authorization: Bearer $WARDEN_TOKEN
 Fields: kpi.events_24h · kpi.vuln_kev · kpi.ids_24h · mode`, "Uptime Kuma: an HTTP(s)-Json Query monitor on <code>kpi.vuln_kev == 0</code> turns red when a known-exploited CVE appears.")],
@@ -1415,8 +1589,18 @@ function field(f) {
     : `<input id="${id}" value="${esc(v)}" ${f.type === "int" ? 'inputmode="numeric"' : ""} placeholder="not set">`;
   return `<div class="fld"><label for="${id}">${esc(f.key)}</label>${input}<button class="btn sm" data-save-key="${esc(f.key)}">Save</button></div>`;
 }
+// Grouped by the prefix before the first dot (cloudflare.*, incidents.*, …) — a tidy section per subsystem.
+const CFG_GROUP_TITLES = {cloudflare: "Cloudflare edge", incidents: "Incident brain", agents: "Agents", geo: "Geo & red list",
+  api: "API & tokens", notify: "Alerts & notifications", patch: "Patching", vuln: "Vulnerabilities", ids: "Intrusion detection",
+  net: "Network", estate: "Estate", logins: "Sign-ins", beszel: "Host health"};
 function renderCfg() {
-  $("#cfg").innerHTML = (SET.editable || []).map(field).join("") + '<div class="msg" id="cfg-msg"></div>';
+  const eds = SET.editable || [];
+  if (!eds.length) { $("#cfg").innerHTML = '<div class="empty">Nothing is browser-editable in this setup — every setting lives in <code>warden.yml</code>.</div>'; return; }
+  const groups = {};
+  eds.forEach(f => { const g = (f.key.split(".")[0] || "other"); (groups[g] = groups[g] || []).push(f); });
+  $("#cfg").innerHTML = Object.keys(groups).sort().map(g =>
+    `<div class="cfg-grp"><h4>${esc(CFG_GROUP_TITLES[g] || g)} <span class="q">${esc(g)}.*</span></h4>${groups[g].map(field).join("")}</div>`).join("")
+    + '<div class="msg" id="cfg-msg"></div>';
 }
 document.addEventListener("click", async e => {
   const k = e.target.closest("[data-save-key]");
@@ -1496,6 +1680,28 @@ async function runSearch(text) {
 $("#s-chips").innerHTML = ["type:edge", "kind:auth-failure", "kind:sensitive-file", "src:authelia", "type:net-alert kind:NEW_DEVICE", "cc:RU", "cc:CN"]
   .map(c => `<button class="chip">${c}</button>`).join("");
 $("#s-chips").onclick = e => { if (e.target.classList.contains("chip")) runSearch(e.target.textContent); };
+// ── query builder: no AI, just field chips whose values come from what warden has seen ──
+function qbVals(field) {
+  const d = D || {}, c = d.charts || {};
+  if (field === "type") return ["log", "edge", "host", "net-alert", "vuln", "ids", "intel"];
+  if (field === "kind") return [...new Set([...(c.kind || []), ...(c.net_alerts || [])].map(x => x.k))].filter(Boolean);
+  if (field === "src") return (c.source || []).map(x => x.k).filter(Boolean);
+  if (field === "cc") return (d.geo || []).map(x => x.cc).filter(Boolean);
+  if (field === "date") { const a = []; for (let i = 0; i < 10; i++) a.push(new Date(Date.now() - i * 864e5).toISOString().slice(0, 10)); return a; }
+  return [];
+}
+function qbFill() { $("#qb-vals").innerHTML = qbVals($("#qb-field").value).slice(0, 80).map(v => `<option value="${esc(v)}">`).join(""); }
+$("#qb-field").addEventListener("change", qbFill);
+$("#qb-val").addEventListener("focus", qbFill);
+$("#qb-val").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("#qb-add").click(); } });
+$("#qb-add").onclick = () => {
+  const v = $("#qb-val").value.trim(); if (!v) { $("#qb-val").focus(); return; }
+  const tok = $("#qb-op").value + $("#qb-field").value + ":" + v, cur = $("#q").value.trim();
+  $("#q").value = (cur ? cur + " " : "") + tok; $("#qb-val").value = "";
+  runSearch($("#q").value.trim());
+};
+$("#qb-clear").onclick = () => { $("#q").value = ""; $("#qb-val").value = ""; $("#s-meta").textContent = ""; table("sres", [], [], "Cleared — build a new query above."); badge("search", 0, false); };
+qbFill();
 $("#q").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.value.trim()) runSearch(e.target.value.trim()); if (e.key === "Escape") e.target.blur(); });
 document.addEventListener("keydown", e => { if (e.key === "/" && document.activeElement.tagName !== "INPUT") { e.preventDefault(); $("#q").focus(); } });
 
