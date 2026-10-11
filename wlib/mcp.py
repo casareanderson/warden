@@ -93,6 +93,17 @@ TOOLS = [
     {"name": "warden_integrity",
      "description": "File-integrity baselines and open changes per box, plus hardening (Lynis) scores.",
      "inputSchema": _obj(), "fn": lambda a: views.integrity()},
+    {"name": "warden_heartbeat",
+     "description": "Is every box up right now (heartbeat every 5 min: up / down / stopped / unknown, uptime), who last "
+                    "signed in to each one over SSH or the console (warden's own key left out), failed sign-ins in 24 h, "
+                    "the last 7 days of sign-ins (new = a user/address/key that box had never seen) and recent "
+                    "down/back/reboot events.",
+     "inputSchema": _obj(), "fn": lambda a: views.heartbeat_payload()},
+    {"name": "warden_topology",
+     "description": "The network as warden sees it: line health, the router, the Cloudflare edge and tunnel host, each "
+                    "subnet with the managed servers (containers under their Proxmox node, heartbeat state) and every "
+                    "other device counted by kind.",
+     "inputSchema": _obj(), "fn": lambda a: views.topology()},
     {"name": "warden_health",
      "description": "Is warden itself working: last run of each collector in 24 h, lines read/scored, and "
                     "alerts that were suppressed and why.",
