@@ -19,6 +19,15 @@ CONF = Path(os.environ.get("WARDEN_CONF") or HOME / "warden.yml")
 DATA = Path(os.environ.get("WARDEN_DATA") or HOME / "data")
 DB = str(DATA / "warden.db")
 
+# Keep the database private at rest — it holds logs, session hashes and (in local auth) the TOTP seed.
+# Re-applied on every import so a recreated DB never lingers world-readable.
+try:
+    for _f in (DB, DB + "-wal", DB + "-shm", DB + "-journal"):
+        if os.path.exists(_f):
+            os.chmod(_f, 0o600)
+except OSError:
+    pass
+
 DEFAULTS = {
     # detection / scoring (warden.py)
     "enforce": False, "ban_threshold": 12, "max_bans_per_run": 3, "window_minutes": 60,
