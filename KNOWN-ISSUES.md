@@ -16,9 +16,13 @@ enforcement caveats below apply. Read this before you flip `enforce: true`.
   Detect-only does not call `cf_ban()`.
 - **An allowlist that is stale is worse than no allowlist.** `net_overlaps_allow()`
   is what stops a `/24` roll-up from containing your own WAN address and banning
-  you at the edge. It is tested (own `/24`, own `/16`, RFC1918 and Cloudflare's
-  ranges are all refused; a genuinely hostile `/24` is still bannable) — but it
-  can only refuse addresses you told it about. On a dynamic WAN lease, refresh it.
+  you at the edge, and the log-side roll-up now reads `self-ips.txt` too — the
+  same "addresses that are us" set edgeban already honours — so a `/24` holding
+  an address you listed there is refused, not just one in `warden.yml allow`. It
+  is tested (own `/24`, own `/16`, RFC1918 and Cloudflare's ranges are all
+  refused; a genuinely hostile `/24` is still bannable). What remains: nothing
+  discovers your WAN address for you, so on a dynamic lease you must keep
+  `self-ips.txt` current.
 - **A ban never expires in practice.** `ban_hours` and an `expires` timestamp
   are written to the database, but nothing removes the Cloudflare rule when the
   window lapses — there is no unban path yet. Edge rules accumulate until you
