@@ -233,9 +233,15 @@ def image_packages(files):
         body = v.split(b"\n", 1)[1] if b"\n" in v else b""
         if kind in ("py", "npm"):                       # the collector already reduced these to name\nversion
             nv = body.decode("utf-8", "replace").split("\n")
-            if len(nv) == 2 and nv[0] and nv[1]:
+            if len(nv) >= 2 and nv[0] and nv[1]:
                 eco = "PyPI" if kind == "py" else "npm"
                 pkgs.append((eco, nv[0], nv[1], nv[0], nv[1]))
+                # a fork republished under a new name keeps the original import name in top_level.txt (line 3):
+                # query that too, so unclecode-litellm still matches litellm's advisories
+                if kind == "py" and len(nv) >= 3 and nv[2]:
+                    for top in nv[2].split():
+                        if top.lower() != nv[0].lower():
+                            pkgs.append((eco, top, nv[1], nv[0], nv[1]))
         elif kind == "go":
             gover, deps = osv.parse_gobuild(body)
             if not gover:
