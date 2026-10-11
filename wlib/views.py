@@ -294,6 +294,7 @@ def payload():
         "endpoints": endpoints_payload(),
         "netsec": netsec_payload(),
         "topology": topology(),
+        "incidents": incidents(),
     }
 
 
@@ -342,6 +343,21 @@ def heartbeat_payload():
         r["key_label"] = labels.get(r["key_fp"] or "", "")
     return {"heartbeat": rows, "logins": recent,
             "hb_events": q("select ts,target,event,detail from hb_events order by id desc limit 50")}
+
+
+def incidents(limit=60):
+    """incidents.py (SHADOW): joined-up incidents, the model's would-be action (never acted on) and what the owner did."""
+    if not has("incidents"):
+        return {"mode": "not run yet", "rows": []}
+    mode = str((config.get("incidents") or {}).get("mode") or "shadow")
+    rows = q("select i.id, i.entity, i.kind, i.opened, i.last_seen, i.n_facts, i.weight, i.owner_label, i.owner_source, "
+             "d.status, d.action, d.confidence, d.why, d.cited, d.reason, d.model, d.ts decided "
+             "from incidents i left join incident_decisions d on d.id = (select max(id) from incident_decisions "
+             "where incident_id = i.id) order by (d.id is not null) desc, i.last_seen desc limit ?", (limit,))
+    for r in rows:
+        r["facts"] = q("select fact_id, ts, source, summary from incident_facts where incident_id=? "
+                       "order by weight desc, ts desc limit 12", (r["id"],))
+    return {"mode": mode, "rows": rows}
 
 
 def topology():
