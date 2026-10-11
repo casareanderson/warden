@@ -248,8 +248,9 @@ def intake(con):
 
 def make_plan_container(con, job, t):
     wd, svc = t["workdir"], t["service"]
-    rc, out = docker_sh(t, f"test -r {wd}/docker-compose.yml -o -r {wd}/compose.yml -o -r {wd}/docker-compose.yaml "
-                           f"-o -r {wd}/compose.yaml && echo READABLE", timeout=60)
+    q = sh_quote(wd)                                 # wd/svc/c come from compose LABELS (attacker-settable) → always quote
+    rc, out = docker_sh(t, f"test -r {q}/docker-compose.yml -o -r {q}/compose.yml -o -r {q}/docker-compose.yaml "
+                           f"-o -r {q}/compose.yaml && echo READABLE", timeout=60)
     if "READABLE" not in out:
         msg = (f"🐳 **Container update: {t['name']}** — 🛑 REFUSED: its compose file in `{wd}` is not readable by the "
                f"automation account (e.g. a root-only CasaOS app). Update it from CasaOS / by hand.")
@@ -277,14 +278,15 @@ def execute_container(con, job, t):
     mid = job["message_id"]
     con.execute("update patch_jobs set status='running', decided=? where id=?", (iso(), job["id"])); con.commit()
     wd, svc, c = t["workdir"], t["service"], t["container"]
-    before = docker_sh(t, f"docker inspect -f '{{{{.Image}}}}' {c}", 60)[1].strip()
-    cmd = f"cd {wd} && " + (f"docker compose pull {svc} && " if t["action"] == "pull" else "") + \
-        f"docker compose up -d --no-deps {svc}"
+    qwd, qsvc, qc = sh_quote(wd), sh_quote(svc), sh_quote(c)   # labels, never trusted in a shell
+    before = docker_sh(t, f"docker inspect -f '{{{{.Image}}}}' {qc}", 60)[1].strip()
+    cmd = f"cd {qwd} && " + (f"docker compose pull {qsvc} && " if t["action"] == "pull" else "") + \
+        f"docker compose up -d --no-deps {qsvc}"
     rc, out = docker_sh(t, cmd)
     if rc != 0:
         raise RuntimeError(f"compose failed (rc {rc}): {out.strip()[-300:]}")
     time.sleep(20)
-    st = docker_sh(t, f"docker inspect -f '{{{{.State.Status}}}} {{{{.Image}}}}' {c}", 60)[1].split()
+    st = docker_sh(t, f"docker inspect -f '{{{{.State.Status}}}} {{{{.Image}}}}' {qc}", 60)[1].split()
     ok = bool(st) and st[0] == "running"
     changed = len(st) > 1 and st[1] != before
     result = (f"{'✅' if ok else '🛑'} **{t['name']}** re-created — state `{st[0] if st else '?'}`, "
