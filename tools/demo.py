@@ -2,6 +2,7 @@
 """Fill a database with believable DEMO data, for screenshots and for trying the console.
 
   WARDEN_DATA=/tmp/warden-demo python3 tools/demo.py
+  WARDEN_CONF=tools/demo.yml WARDEN_DATA=/tmp/warden-demo python3 tools/demo.py    # + hosts, an IoT VLAN, Cloudflare: the full map
 
 Every address is from the documentation ranges (RFC 5737: 192.0.2/24, 198.51.100/24,
 203.0.113/24) or a private range; every hostname ends in example.com. Refuses to
@@ -113,7 +114,72 @@ def main():
     con.execute("insert into intel_hits(ts,device,device_name,kind,indicator,feed,detail) values(?,?,?,?,?,?,?)",
                 (ts(hours=9), "192.168.1.31", "bulb-kitchen", "dns", "bad.example.net", "demo-feed", "known C2 domain"))
     con.commit()
+    v3(con)
+    con.commit()
     print(f"demo data written to {config.DB}")
+
+
+def v3(con):
+    """Heartbeat, sign-ins, the device inventory and line health: what the Endpoints columns and the Network map show.
+    Pair with tools/demo.yml (hosts, an IoT VLAN, Cloudflare in front) for the full map."""
+    import devices
+    import heartbeat
+    import netwatch
+    for m in (heartbeat, devices, netwatch):
+        m.db().close()
+    beats = [("node:192.168.1.2", "pve1", "node", "192.168.1.2", "up", 1_040_000, None),
+             ("ct:100", "proxy", "ct", "192.168.1.2", "up", 1_039_000, None),
+             ("ct:101", "dns", "ct", "192.168.1.2", "up", 1_039_000, None),
+             ("ct:104", "docker", "ct", "192.168.1.2", "up", 412_000, None),
+             ("ct:105", "media", "ct", "192.168.1.2", "up", 170_000, None),
+             ("ct:107", "old-wiki", "ct", "192.168.1.2", "stopped", None, "stopped"),
+             ("host:192.168.1.5", "nas", "host", None, "up", 262_000, None),
+             ("host:192.168.1.7", "llm", "host", None, "down", None, "ssh: connect to host 192.168.1.7 port 22: No route to host")]
+    for tgt, name, kind, node, state, up, note in beats:
+        down = state == "down"
+        con.execute("insert into hb(target,name,kind,node,state,last_ok,last_try,misses,rtt_ms,uptime_s,note,alerted,down_since) "
+                    "values(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (tgt, name, kind, node if kind == "ct" else tgt.split(":")[1], state,
+                     ts(minutes=26) if down else ts(minutes=2), ts(minutes=2), 5 if down else 0, None if down else 180,
+                     up, note or "", 1 if down else 0, ts(minutes=11) if down else None))
+    for when, tgt, ev, det in ((ts(minutes=11), "host:192.168.1.7", "down", "ssh: No route to host"),
+                               (ts(days=3), "host:192.168.1.5", "rebooted", "up 2m (was 41d 6h)"),
+                               (ts(days=2, hours=4), "ct:105", "back", "after ~6 min")):
+        con.execute("insert into hb_events(ts,target,event,detail) values(?,?,?,?)", (when, tgt, ev, det))
+    laptop = "SHA256:demoLaptopKey"
+    signins = [("node:192.168.1.2", ts(hours=2), "root", "192.168.1.40", "publickey", laptop, 1, 0, 0),
+               ("host:192.168.1.5", ts(days=1, hours=3), "admin", "192.168.1.40", "publickey", laptop, 1, 0, 0),
+               ("ct:104", ts(days=9), "root", "tty1", "console", "", 1, 0, 0),
+               ("ct:100", ts(minutes=40), "root", "100.64.0.7", "publickey", "SHA256:demoUnknownKey", 1, 0, 1)]
+    signins += [("host:192.168.1.5", ts(hours=5, minutes=i), u, "192.168.10.23", "password", "", 0, 0, 0)
+                for i, u in enumerate(["root", "admin", "admin", "pi", "ubnt", "root"])]
+    signins += [(t, ts(minutes=m), "root", "192.168.1.10", "publickey", "SHA256:wardenOwnKey", 1, 1, 0)
+                for t in ("node:192.168.1.2", "host:192.168.1.5") for m in (5, 20, 35)]
+    for tgt, when, user, src, method, fp, ok, self_, new in signins:
+        con.execute("insert or ignore into logins(target,ts,user,src,method,key_fp,ok,self,new) values(?,?,?,?,?,?,?,?,?)",
+                    (tgt, when, user, src, method, fp, ok, self_, new))
+        con.execute("insert into login_pairs values(?,?,?,?,?,?,?,1,?) on conflict(target,user,src,key_fp,ok) do update "
+                    "set last_ts=max(login_pairs.last_ts, excluded.last_ts), n=login_pairs.n+1",
+                    (tgt, user, src, fp, ok, when, when, self_))
+    for tgt, *_ in beats:
+        con.execute("insert or replace into login_runs values(?,?,?,?)", (tgt, ts(minutes=4), "ok", "demo"))
+    kinds = [("bulb", 12, 10), ("plug", 5, 10), ("speaker", 4, 1), ("tv", 2, 1), ("camera", 3, 10), ("personal", 5, 1),
+             ("computer", 3, 1), ("printer", 1, 1), ("network", 3, 1), ("server", 3, 1), ("unknown", 2, 10)]
+    n = 0
+    for kind, count, net in kinds:
+        for i in range(count):
+            n += 1
+            ip = f"192.168.{net}.{20 + n}"
+            con.execute("insert into devices(mac,ip,name,room,kind,kind_why,fixed,maker,model,sources,first_seen,last_seen,"
+                        "updated,identity) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (f"aa:00:00:00:01:{n:02x}", ip, f"{kind}-{i + 1}", random.choice(["Kitchen", "Lounge", "Office", ""]),
+                         kind, "demo", 1 if kind in ("bulb", "plug", "camera", "tv", "speaker", "printer") else 0, "Demo Co",
+                         "", "sweep,leases", ts(days=30), ts(minutes=random.randint(1, 30)), ts(minutes=1),
+                         f"aa:00:00:00:01:{n:02x}"))
+    for m in range(60):
+        con.execute("insert into net_health values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ((NOW - timedelta(minutes=m)).timestamp(), 0, 0.6, 0, 14 + random.random() * 3, 9, 12, 140, None, None,
+                     round(30 + random.random() * 20, 1), round(4 + random.random() * 3, 1), "ok", "[]"))
 
 
 if __name__ == "__main__":

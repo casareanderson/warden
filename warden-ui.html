@@ -856,14 +856,14 @@ function drawTopo(T) {
   const fit = (t, n) => (t = String(t ?? "")).length > n ? t.slice(0, n - 1) + "…" : t;
   const L = T.line, E = T.edge, cx = W / 2;
   // row 1: internet (+ Cloudflare)
-  const iw = narrow ? (E.cloudflare ? (W - 2 * P - 16) / 2 : W - 2 * P) : 230, ix = narrow ? P : E.cloudflare ? cx - iw - 30 : cx - iw / 2;
+  const iw = narrow ? (E.cloudflare ? (W - 2 * P - 16) / 2 : W - 2 * P) : 300, ix = narrow ? P : E.cloudflare ? cx - iw - 30 : cx - iw / 2;
   const cut = Math.floor((iw - 28) / 6.4);
   svg.push(box(ix, P, iw, 52), txt(ix + 14, P + 22, "Internet"),
     txt(ix + 14, P + 40, fit(L ? `${L.wan_ms != null ? Math.round(L.wan_ms) + " ms" : "—"} · ${Math.round(L.wan_loss || 0)}% loss${L.rx_mbps != null ? ` · ↓${L.rx_mbps} ↑${L.tx_mbps} Mbit/s` : ""}` : "line health: netwatch not running", cut), "t2"));
   if (L) svg.push(`<circle class="${L.state === "ok" ? "up" : L.state === "down" ? "down" : "unknown"}" cx="${ix + iw - 16}" cy="${P + 17}" r="5"/>`);
   let cf = null;
   if (E.cloudflare) {
-    cf = narrow ? {x: ix + iw + 16, y: P, w: iw} : {x: cx + 30, y: P, w: 250};
+    cf = narrow ? {x: ix + iw + 16, y: P, w: iw} : {x: cx + 30, y: P, w: 260};
     svg.push(box(cf.x, P, cf.w, 52), `<circle class="tag" cx="${cf.x + 16}" cy="${P + 17}" r="5"/>`, txt(cf.x + 28, P + 22, "Cloudflare edge"),
       txt(cf.x + 14, P + 40, fit(`${E.domain || "your domain"}${E.sso ? " · SSO in front" : ""}`, narrow ? cut : 36), "t2"),
       `<line class="ln" x1="${ix + iw}" y1="${P + 26}" x2="${cf.x}" y2="${P + 26}"/>`);
