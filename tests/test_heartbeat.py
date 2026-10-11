@@ -129,6 +129,69 @@ def test_node_down_marks_containers_unknown_not_down(hb, monkeypatch):
     assert len(hb.sent) == 1 and "pve" in hb.sent[0]                         # one message for the node, none per CT
 
 
+def _docker_hb(tmp_path, monkeypatch, watch="[proxy, cloudflared]"):
+    monkeypatch.setenv("WARDEN_DATA", str(tmp_path))
+    monkeypatch.setenv("WARDEN_CONF", str(tmp_path / "warden.yml"))
+    (tmp_path / "warden.yml").write_text(
+        "estate: {name: test, lan: [10.0.0.0/24], domain: example.com}\nnotify: {backend: none}\n"
+        f"hosts:\n  - {{name: nas, kind: docker, ssh: admin@10.0.0.5, watch_containers: {watch}}}\n"
+        "cloudflare: {zone_id: z1}\n")
+    import wlib.config as c
+    importlib.reload(c)
+    import wlib.hosts, wlib.notify, wlib.views  # noqa: E401
+    for m in (wlib.hosts, wlib.notify, wlib.views):
+        importlib.reload(m)
+    import heartbeat
+    importlib.reload(heartbeat)
+    sent = []
+    monkeypatch.setattr(heartbeat, "send", lambda t: sent.append(t))
+    monkeypatch.setattr(heartbeat, "own_keys", lambda: {SELF: "this box (id_ed25519)"})
+    heartbeat.sent = sent
+    return heartbeat
+
+
+def test_beat_docker_containers_one_by_one(tmp_path, monkeypatch):
+    """A declared Docker container that was running and then stopped (the unless-stopped-after-reboot casualty) is
+    flagged, even though its host is up."""
+    hb = _docker_hb(tmp_path, monkeypatch)
+    out = ["123.4 1\n@@docker\nproxy|running\ncloudflared|running\n"]
+
+    def remote(t, cmd, **kw):
+        assert "docker ps -a" in cmd
+        return (0, out[0], "")
+    monkeypatch.setattr(hb.hosts, "remote", remote)
+    con = hb.db()
+    hb.beat(con)
+    assert {r["target"]: r["state"] for r in con.execute("select target,state from hb")} == {
+        "host:10.0.0.5": "up", "ctr:nas:proxy": "up", "ctr:nas:cloudflared": "up"}
+    assert hb.sent == []                                               # both running: baseline, nothing to say
+    out[0] = "123.4 1\n@@docker\nproxy|exited\ncloudflared|running\n"  # the host OS update ran `docker stop` on proxy
+    hb.beat(con)
+    st = {r["target"]: r["state"] for r in con.execute("select target,state from hb")}
+    assert st["ctr:nas:proxy"] == "stopped" and st["ctr:nas:cloudflared"] == "up"
+    assert st["host:10.0.0.5"] == "up"                                 # the box itself still looks fine
+    assert any("proxy" in m and "STOPPED" in m for m in hb.sent)
+
+
+def test_docker_host_down_marks_containers_unknown(tmp_path, monkeypatch):
+    """A docker host that stops answering leaves its containers unknown, never down — one message, not one per CT."""
+    hb = _docker_hb(tmp_path, monkeypatch)
+    out = ["123.4 1\n@@docker\nproxy|running\ncloudflared|running\n"]
+
+    def remote(t, cmd, **kw):
+        return (0, out[0], "")
+    monkeypatch.setattr(hb.hosts, "remote", remote)
+    con = hb.db()
+    hb.beat(con)
+    monkeypatch.setattr(hb.hosts, "remote", lambda t, cmd, **kw: (255, "", "timeout"))
+    for _ in range(3):
+        hb.beat(con)
+    st = {r["target"]: r["state"] for r in con.execute("select target,state from hb")}
+    assert st["host:10.0.0.5"] == "down"
+    assert st["ctr:nas:proxy"] == "unknown" and st["ctr:nas:cloudflared"] == "unknown"
+    assert len(hb.sent) == 1 and "nas" in hb.sent[0]                   # one message for the host, none per container
+
+
 def test_views_heartbeat_and_topology(hb, monkeypatch):
     lxc = json.dumps([{"vmid": 101, "name": "web", "status": "running", "uptime": 5000}])
     monkeypatch.setattr(hb.hosts, "remote", fake_remote({"node:10.0.0.2": f"100.0 1\n@@lxc\n{lxc}", "host:10.0.0.5": "9.0 1"}))

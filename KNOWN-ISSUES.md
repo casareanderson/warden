@@ -130,10 +130,11 @@ is added it will follow these rules:
 
 ## Heartbeat and sign-ins (v3)
 
-- **Containers inside Docker are not heartbeat-checked one by one.** A stopped container on a box that is up still
-  looks fine. On the author's estate a host OS update left three `unless-stopped` containers (the reverse proxy among
-  them) stopped after the reboot, because the update had run `docker stop` on them, and nothing in warden flagged it.
-  Watching declared containers is the next step.
+- **Docker containers are heartbeat-checked only when declared.** List the containers that should always be running
+  in `watch_containers:` on the Docker host's `hosts:` entry (`kind: docker`, or `docker: true`). Each is checked
+  every beat (`ctr:<host>:<name>`, via `docker ps -a`), and one that was running and then stopped — the three
+  `unless-stopped` containers a host OS update left behind, the reverse proxy among them — is flagged as stopped while
+  its host still reads up. Containers not declared, and containers never seen running, are not watched.
 - **Only sign-ins that sshd or `last` record are seen.** `pct exec`, `lxc-attach` and the Proxmox web console don't
   write a sign-in line, so a session started that way never shows up.
 - **A shared key hides its users.** "Self" is any key that lives on the warden box. If another job on that box signs <!-- steward: skip (advice, design or upstream; not for the coding agent) -->
