@@ -209,6 +209,13 @@ def gather(con, since):
             out.append(dict(id=f"hb:{r['id']}", ts=r["ts"], source="heartbeat", entities=[f"box:{r['target']}"],
                             weight={"down": 4, "stopped": 3, "rebooted": 3}.get(r["event"], 0),
                             summary=f"{r['event']} {r['detail'] or ''}"[:140], data={"event": r["event"]}))
+    if has(con, "agent_alerts"):
+        for r in con.execute("select id, ts, agent, host, dest_ip, kind, feed from agent_alerts where ts > ?", (s,)):
+            n = net(r["dest_ip"])
+            if n:
+                out.append(dict(id=f"agent:{r['id']}", ts=r["ts"], source="agent-egress", entities=[n], weight=9,
+                                summary=f"Hermes agent {r['agent']} on {r['host']} reached {r['dest_ip']} ({r['kind']}/{r['feed']})"[:160],
+                                data={"agent": r["agent"], "host": r["host"], "dest": r["dest_ip"], "kind": r["kind"], "feed": r["feed"]}))
     return sorted(out, key=lambda f: f["ts"])
 
 
