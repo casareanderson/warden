@@ -10,7 +10,7 @@ HOW (nothing is installed on the scanned boxes, and there is no scanner binary a
   apk db), parse them here and ask OSV.dev which advisories affect those exact versions (wlib/osv.py).
   Docker images — a small Python collector (wlib/imgcollect.py) is fed to `python3 -` on the docker host.
   It reads each running container's root through /proc and sends back only package metadata: OS packages,
-  Python and npm packages, and Go build info. Only images of RUNNING containers are scanned.
+  Python, npm and PHP Composer packages, and Go build info. Only images of RUNNING containers are scanned.
   Vendor-firmware hosts (`firmware:` on a host, e.g. zimaos) — no package DB; tracked as a firmware version
   vs the vendor's latest release.
 
@@ -244,6 +244,8 @@ def image_packages(files):
             gv = gover.split()[0].removeprefix("go")
             pkgs.append(("Go", "stdlib", gv, "stdlib", gv))
             pkgs += [("Go", m, ver, m, ver) for m, ver in deps]
+        elif kind == "composer":
+            pkgs += [("Packagist", n, v, n, v) for n, v in osv.parse_composer(body.decode("utf-8", "replace"))]
         elif kind == "rust":
             pkgs += [("crates.io", c, ver, c, ver) for c, ver in osv.parse_rustdeps(body)]
     if not entries and not eco:
