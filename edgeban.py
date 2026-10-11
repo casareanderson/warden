@@ -9,7 +9,7 @@
 ENFORCEMENT = ONE WAF custom rule, `warden: blocklist (owner-approved bans)`, expression
 `(ip.src in {a b c/24 ...})`. Inline sets, so it needs only the WAF token (`cloudflare.token_secret`, default CF_API_TOKEN)
 (a Cloudflare IP List would need Account Filter Lists:Edit, which a WAF token usually lacks).
-Supersedes warden.py's cf_ban(), which posts to the IP Access Rules API Cloudflare is retiring.
+The same `warden: blocklist` WAF rule warden.py's cf_ban() appends to under `enforce: true`.
 
 Candidates:
   1. warden `bans` rows in state 'proposed' (its own log-side scoring, detect-only)
