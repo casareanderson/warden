@@ -51,7 +51,7 @@ sources:
 # Reached over SSH with a key; nothing is installed on them. See wlib/hosts.py.
 hosts:
   - {name: pve1, kind: proxmox, ssh: root@192.168.1.2, discover: true, docker_cts: [104], patch: true}
-  - {name: nas,  kind: docker,  ssh: admin@192.168.1.5, firmware: zimaos}
+  - {name: nas,  kind: docker,  ssh: admin@192.168.1.5, firmware: zimaos, watch_containers: [proxy, cloudflared]}
   - {name: llm,  kind: linux,   ssh: me@192.168.1.7, sudo_secret: LLM_SUDO, patch: true}
   - {name: this-box, kind: local}
 roles:                              # shown to whoever approves a patch

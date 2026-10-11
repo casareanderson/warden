@@ -13,6 +13,7 @@ warden.yml:
         kind: docker             # any box running Docker (user needs the docker group, not root)
         ssh: admin@10.0.0.5
         firmware: zimaos         # optional vendor-firmware check → fw:nas
+        watch_containers: [proxy, cloudflared]   # heartbeat-check these must-run containers (ctr:nas:<name>)
       - name: appliance          # a Docker appliance OS with no sudo (ZimaOS, Unraid…) that should ALSO get
         kind: linux              #   integrity + hardening sweeps: host:<ip>, plus img:<name> and fw:<name>
         ssh: admin@10.0.0.7
