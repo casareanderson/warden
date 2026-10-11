@@ -293,6 +293,7 @@ def payload():
         "vuln": vuln_payload(),
         "endpoints": endpoints_payload(),
         "netsec": netsec_payload(),
+        "topology": topology(),
     }
 
 
@@ -312,7 +313,108 @@ def endpoints_payload():
     if has("harden"):
         out["harden"] = q("select target,name,ts,idx,prev_idx,tests,warnings,suggestions,status,note from harden "
                           "order by idx")
+    out.update(heartbeat_payload())
     return out
+
+
+def heartbeat_payload():
+    """heartbeat.py: is each box up, who last signed in (not counting warden's own key), 24-h counts, recent sign-ins."""
+    if not has("hb"):
+        return {"heartbeat": [], "logins": [], "hb_events": []}
+    labels = {str(k): str(v) for k, v in (config.get("logins.known_keys") or {}).items()}
+    login = has("logins")
+    rows = []
+    for r in q("select * from hb order by kind != 'node', node, target"):
+        last = (q("select ts,user,src,method,key_fp,new from logins where target=? and ok=1 and self=0 "
+                  "order by ts desc limit 1", (r["target"],)) or
+                q("select last_ts ts,user,src,'' method,key_fp,0 new from login_pairs where target=? and ok=1 and self=0 "
+                  "order by last_ts desc limit 1", (r["target"],))) if login else []
+        n = q("select sum(ok=1 and self=0) h, sum(ok=1 and self=1) s, sum(ok=0) f from logins where target=? "
+              "and ts > datetime('now','-24 hours')", (r["target"],))[0] if login else {}
+        if last:
+            last[0]["key_label"] = labels.get(last[0]["key_fp"] or "", "")
+        rows.append(dict(r, last_login=last[0] if last else None, logins_24h=n.get("h") or 0,
+                         self_24h=n.get("s") or 0, failed_24h=n.get("f") or 0))
+    recent = q("select l.ts,l.target,coalesce(h.name,l.target) name,l.user,l.src,l.method,l.key_fp,l.ok,l.new "
+               "from logins l left join hb h on h.target=l.target where l.self=0 and l.ts > datetime('now','-7 days') "
+               "order by l.ts desc limit 300") if login else []
+    for r in recent:
+        r["key_label"] = labels.get(r["key_fp"] or "", "")
+    return {"heartbeat": rows, "logins": recent,
+            "hb_events": q("select ts,target,event,detail from hb_events order by id desc limit 50")}
+
+
+def topology():
+    """What the Network tab's diagram is drawn from: the way in from the internet, the router, each subnet with the
+    servers warden manages (containers under their node, heartbeat state) and every other device counted by kind.
+    Built from data warden already has — nothing here is hand-drawn, so it stays true as the network changes."""
+    import ipaddress
+    nets = []
+    for c in (config.get("estate.lan") or []):
+        try:
+            nets.append(ipaddress.ip_network(str(c), strict=False))
+        except ValueError:
+            pass
+    labels = {str(k): str(v) for k, v in (config.get("network.subnets") or {}).items()}
+
+    def subnet(ip):
+        try:
+            a = ipaddress.ip_address((ip or "").strip())
+        except ValueError:
+            return None
+        if a.is_loopback or a.is_link_local or not a.is_private:
+            return None
+        for n in nets:
+            if a in n:
+                return str(n)
+        return str(ipaddress.ip_network(f"{a}/24", strict=False))
+
+    addr = lambda ssh: (ssh or "").split("@")[-1] or None  # noqa: E731
+    src = config.get("sources") or {}
+    gw = config.get("netwatch.gateway") or addr(config.get("router.ssh"))
+    line = q("select ts,state,gw_ms,gw_loss,wan_ms,wan_loss,rx_mbps,tx_mbps from net_health order by ts desc limit 1") \
+        if has("net_health") else []
+    hb = {r["target"]: r for r in q("select target,name,kind,node,state,uptime_s,last_ok from hb")} if has("hb") else {}
+    servers = []
+    from . import hosts as _hosts
+    for h in _hosts.declared():
+        kind, ip = h.get("kind", "linux"), addr(h.get("ssh")) or ""
+        if kind == "local":
+            continue
+        tid = f"node:{ip}" if kind == "proxmox" else f"host:{ip}" if kind == "linux" else None
+        b = hb.get(tid, {}) if tid else {}
+        cts = sorted(({"target": t, "name": r["name"], "state": r["state"], "uptime_s": r["uptime_s"]}
+                      for t, r in hb.items() if r["kind"] == "ct" and r["node"] == ip),
+                     key=lambda c: int(c["target"].split(":")[1]))
+        servers.append({"name": h.get("name") or ip, "kind": kind, "ip": ip, "target": tid, "state": b.get("state"),
+                        "uptime_s": b.get("uptime_s"), "subnet": subnet(ip), "cts": cts, "docker": bool(h.get("docker"))})
+    groups = {}
+    for d in devices_list():
+        ip = (d.get("ips") or "").split(",")[-1]
+        sn = subnet(ip)
+        if not sn:
+            continue
+        g = groups.setdefault(sn, {"cidr": sn, "label": labels.get(sn, ""), "devices": 0, "kinds": {}})
+        g["devices"] += 1
+        k = d.get("kind") or "unknown"
+        g["kinds"][k] = g["kinds"].get(k, 0) + 1
+    for n in nets:
+        groups.setdefault(str(n), {"cidr": str(n), "label": labels.get(str(n), ""), "devices": 0, "kinds": {}})
+    for s in servers:
+        if s["subnet"] and s["subnet"] not in groups:
+            groups[s["subnet"]] = {"cidr": s["subnet"], "label": labels.get(s["subnet"], ""), "devices": 0, "kinds": {}}
+    order = sorted(groups.values(), key=lambda g: (-sum(1 for s in servers if s["subnet"] == g["cidr"]), -g["devices"]))
+    cf = config.get("cloudflare") or {}
+    return {
+        "gateway": {"ip": gw, "subnet": subnet(gw) if gw else None},
+        "line": line[0] if line else None,
+        "edge": {"cloudflare": bool(cf.get("zone_id")), "domain": config.get("estate.domain") or "",
+                 "tunnel": addr((src.get("cloudflared") or {}).get("ssh")), "proxy": addr((src.get("npm") or {}).get("ssh")),
+                 "sso": bool(src.get("authelia")) or bool(cf.get("sso_portal"))},
+        "servers": servers,
+        "subnets": [dict(g, kinds=sorted(({"k": k, "n": n} for k, n in g["kinds"].items()), key=lambda x: -x["n"]))
+                    for g in order],
+    }
 
 
 def netsec_payload():

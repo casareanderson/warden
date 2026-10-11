@@ -24,7 +24,7 @@ THE FEW WRITES (browser only, same-origin + an X-Warden header, so a cross-site 
 
   GET /api/v1/          index of views          GET /api/v1/openapi.json
   /api/v1/summary  detections?hours=&limit=&min_score=&ip=  top-ips?days=&limit=  ip/<addr>  search?q=
-  /api/v1/bans  vulns?target=  attack-surface  network  ids  integrity  health  setup
+  /api/v1/bans  vulns?target=  attack-surface  network  ids  integrity  heartbeat  topology  health  setup
 """
 import base64
 import hmac
@@ -69,6 +69,8 @@ V1 = {
     "network":        lambda qs, rest: views.network(),
     "ids":            lambda qs, rest: views.ids(),
     "integrity":      lambda qs, rest: views.integrity(),
+    "heartbeat":      lambda qs, rest: views.heartbeat_payload(),
+    "topology":       lambda qs, rest: views.topology(),
     "health":         lambda qs, rest: views.health(),
     "setup":          lambda qs, rest: {"checks": setup.checks(), "score": setup.score(setup.checks())},
     "approvals":      lambda qs, rest: {"pending": notify.pending()},
