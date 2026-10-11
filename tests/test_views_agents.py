@@ -54,3 +54,38 @@ def test_can_read_other_bit():
 
 def test_can_read_unknown_stat_is_none():
     assert views._can_read(1000, 1000, "", "garbage") is None
+
+
+import importlib as _il
+import sqlite3 as _sql
+
+
+def _agents_db_without_bytes(tmp_path, monkeypatch):
+    """A pre-v3.1 DB: agent_conns has no bytes_recv column; the other agent_* tables exist but are empty."""
+    monkeypatch.setenv("WARDEN_DATA", str(tmp_path))
+    monkeypatch.setenv("WARDEN_CONF", str(tmp_path / "warden.yml"))
+    (tmp_path / "warden.yml").write_text(
+        "estate: {name: test, timezone: Europe/London, lan: [192.168.0.0/16]}\nnotify: {backend: none}\n")
+    import wlib.config as c
+    _il.reload(c)
+    db = _sql.connect(str(c.DB))
+    db.executescript("""
+      create table agent_conns(agent,host,dest,dest_ip,port,domain,first_seen,last_seen,hits,container,sample_cmd);
+      create table agent_alerts(id integer primary key, ts,agent,host,dest,dest_ip,kind,feed,detail);
+      create table agent_findings(id integer primary key, ts,agent,host,dest,score,decision,reasons,explain,verdict);
+      create table agent_runs(host,ts,status,note,seen,attributed);
+    """)
+    db.execute("insert into agent_conns values('hermes:sec','box','api.example.com','93.184.216.34',443,"
+               "'api.example.com','2026-10-01','2026-10-02',5,'','hermes')")
+    db.commit(); db.close()
+    import wlib.views as v
+    _il.reload(v)
+    return v
+
+
+def test_agents_payload_old_db_without_bytes_recv(tmp_path, monkeypatch):
+    """Regression: agents_payload must not raise 'near bytes_recv: syntax error' on a DB predating the column."""
+    v = _agents_db_without_bytes(tmp_path, monkeypatch)
+    out = v.agents_payload()                       # used to raise sqlite3.OperationalError
+    assert out["conns"] and out["conns"][0]["bytes_recv"] == 0
+    assert out["dests"] and out["dests"][0]["bytes_recv"] == 0
