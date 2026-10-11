@@ -27,6 +27,13 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 - [Roadmap](#roadmap)
 - [Support and licence](#support-and-licence)
 
+## What's new in v3.1
+
+- **The incident brain, released.** Every detector — edge, logs, LAN, vulnerabilities, integrity, agents — is joined into one picture per entity, and in **shadow mode** the model writes down what it *would* do and how sure it is, and never carries it out. Now its own **Incidents** tab, so you can watch what it gets right before you ever let it act. ([more](#incidents-shadow-mode))
+- **Watch any AI agent, not just Hermes.** Agent tracking is now generic: name your own agents — a ChatGPT or Muse bridge, a custom bot, any runtime — with `agents.patterns` in `warden.yml`. The **Agents** tab adds a **map** of each agent and where it reaches, an **access panel** (the user it runs as, its groups, Linux capabilities, sudo rights and which configured secret files it could read — all read-only), and a **destination history** across every agent, known-bad first, with best-effort bytes so a real download is visible, not just a connection.
+- **A console that's easier to live in.** A **"Waiting for you"** button in the header gathers everything needing your ✅ / ❌ in one place; a no-AI **query builder** on Search composes `type:`/`kind:`/`cc:`/`date:` filters (now with negation, e.g. `-kind:challenge`); the **Connect** tab plugs in any assistant (Claude, ChatGPT, Cursor, a generic MCP client, curl) with copy-paste blocks; and **Settings** is tidied into a labelled section per subsystem.
+- **Still lightweight.** No new runtime dependencies — the agent map, access panel and byte counts are the same read-only `ss`/`/proc` collector doing a little more, and the console stays vanilla inline JS. Footprint is essentially unchanged.
+
 ## What's new in v3
 
 - **A heartbeat for every box.** Every 5 minutes: up, down, stopped or unknown, and for how long. One SSH call per Proxmox node answers for the node *and* every container on it, so twenty containers cost one sign-in, not twenty. A box that misses three beats sends one message, and another when it's back, saying "it rebooted" when the uptime shows it. If a node stops answering, its containers show as unknown rather than down, so one dead node is one message.
@@ -66,11 +73,11 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 | Heartbeat and sign-ins | `heartbeat.py` | Is every box up (one call per Proxmox node covers its containers), who last signed in over SSH or the console, failed sign-ins, down/back/reboot messages, and a message for a sign-in from a user, address and key a box has never seen. warden's own key is left out. |
 | Endpoint drift | `integrity.py`, `harden.py` | Agentless file and config baselines with ✅-to-accept; weekly Lynis hardening score per box (run from a temp dir, nothing left installed). |
 | Devices and internet | `devices.py`, `devicewatch.py`, `netwatch.py` | One inventory of every device (sweep, router leases, Home Assistant) with its normal behaviour learned and anything new scored; internet health every minute with line usage and the busiest devices. The Network tab draws all of it as a live map. |
-| Hermes agents | `agents.py` | Attributes every outbound connection on each agent host to the Hermes agent that made it (`hermes:<profile>`, `opencode:<user>`, `app:<x>`), checks each destination against the threat feeds, and flags an agent reaching a host it has never used. Detect-only; Claude Code and system noise are not tracked. |
+| AI agents | `agents.py` | Attributes every outbound connection on each agent host to the agent that made it — Hermes profiles, OpenCode, or any agent you name with `agents.patterns` (a ChatGPT/Muse bridge, your own bot). Checks each destination against the threat feeds, flags an agent reaching a host it has never used, records what each agent can access (user, groups, Linux capabilities, sudo, readable secret files), and keeps a destination history with best-effort bytes received. Detect-only, read-only; interactive dev tools (Claude Code) and system noise are not tracked. |
 | Network IDS | `netids.py`, `netintel.py` | Pulls Suricata alerts; checks router DNS and connection logs against threat feeds. Both optional. |
 | Edge | `intel.py`, `edgeban.py`, `cfsec.py`, `edge-sentry/` | Cloudflare edge events, an attack-surface snapshot (public names, WAF rules, zone settings, SSO coverage), a proposed edge blocklist, a zone audit, and a report-only Worker. All optional. |
 | Alerts | `siemalert.py`, `wlib/notify.py` | New findings to Discord, a webhook or ntfy, with self-report suppression. |
-| Console | `warden-ui.py`, `wlib/auth.py` | Thirteen tabs, sign-in with roles and 2FA, unified search (`ip:` `cc:` `kind:` `type:`), per-collector health, a customisable home page, settings and approvals. |
+| Console | `warden-ui.py`, `wlib/auth.py` | Fourteen tabs, sign-in with roles and 2FA, unified search with a no-AI query builder (`ip:` `cc:` `kind:` `type:` `src:` `date:`, with negation), a "Waiting for you" summary of everything needing your ✅ / ❌, per-collector health, a customisable home page, settings grouped by subsystem, and approvals. |
 | Agents | `wlib/mcp.py`, `/api/v1` | Eighteen read-only MCP tools and the same views over REST. |
 
 Every optional feature switches itself off when it isn't configured. A box with no Cloudflare zone never runs the Cloudflare jobs.
@@ -78,6 +85,14 @@ Every optional feature switches itself off when it isn't configured. A box with 
 ## How it compares
 
 Every piece of warden exists somewhere else, often done better. What warden adds is the combination: no agents on your machines, one small box (1 vCPU, 512 MB), Cloudflare edge bans worked out from the logs you already have, and nothing banned or patched until a person says yes. It's meant to sit next to these tools, not replace them.
+
+**What makes warden different** — the tools above are broader and more mature in their own areas; this is where warden isn't like them:
+
+- **Detect-only by default.** warden *proposes* — a ban, a patch, a country block — and nothing happens until you ✅ it, in chat or in the console. Fail2ban, CrowdSec's bouncers and Wazuh's active response all act on their own. warden is built for the case where you want the judgement, not the reflex.
+- **AI-native.** Every view is an [MCP](#connect-your-agent-mcp-and-rest) tool and a REST endpoint, so any assistant — Claude, ChatGPT, Cursor, your own bot — can ask "what's attacking me?" and get real data. On top of that sits the **incident brain**, which correlates every detector into one picture per entity and, in shadow mode, reasons about what it *would* do so you can judge it before it ever acts. None of the tools above ship either.
+- **It watches your AI agents.** warden attributes outbound connections to the agent that made them, maps where each one reaches, records what it can access (user, groups, Linux capabilities, sudo, readable secrets) and flags any known-bad destination. If you run autonomous agents, nothing else here does this.
+- **Agentless, dependency-free, 512 MB.** No agent on your hosts, no Postgres/Redis/Elastic, Python standard library plus a little. Built for a homelab, not an enterprise SOC — Wazuh wants 4 vCPU / 8 GB, Security Onion far more.
+- **One tool, many layers.** Logs *and* LAN *and* vulnerabilities (ranked by what's actually running and exploited, no scanner binary) *and* file integrity *and* the Cloudflare edge *and* your agents — joined up, instead of one box per concern.
 
 | Tool | What it does well | How warden differs | Licence |
 |---|---|---|---|
@@ -280,7 +295,7 @@ incidents:
 
 ## Status, limits and real results
 
-Status: v3.0, running in detect-only mode on the author's estate since September 2026. It's a second opinion, not a replacement for CrowdSec or a WAF: it reads what they miss.
+Status: v3.1, running in detect-only mode on the author's estate since September 2026. It's a second opinion, not a replacement for CrowdSec or a WAF: it reads what they miss.
 
 Measured on that estate:
 
