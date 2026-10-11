@@ -36,7 +36,7 @@ def head(path, n):
     except OSError:
         return None
 
-def pymeta(b):
+def pymeta(b, dp=""):
     name = ver = None
     for line in (b or b"").decode("utf-8", "replace").splitlines():
         if not line.strip():
@@ -45,7 +45,13 @@ def pymeta(b):
             name = line[5:].strip()
         elif line.startswith("Version:"):
             ver = line[8:].strip()
-    return f"{name}\n{ver}".encode() if name and ver else None
+    if not name or not ver:
+        return None
+    tops = ""
+    tl = head(os.path.join(dp, "top_level.txt"), 4096) if dp else None
+    if tl:
+        tops = " ".join(l.strip() for l in tl.decode("utf-8", "replace").splitlines() if l.strip())
+    return f"{name}\n{ver}".encode() + (f"\n{tops}".encode() if tops else b"")
 
 def npmmeta(b):
     try:
@@ -183,9 +189,9 @@ for cid in ALL:
             fp = os.path.join(dp, fn)
             kind = None
             if fn == "METADATA" and dp.endswith(".dist-info") or fn == "PKG-INFO" and dp.endswith(".egg-info"):
-                kind, data = "py", pymeta(head(fp, 4096))
+                kind, data = "py", pymeta(head(fp, 4096), dp)
             elif fn.endswith(".egg-info") and os.path.isfile(fp):
-                kind, data = "py", pymeta(head(fp, 4096))
+                kind, data = "py", pymeta(head(fp, 4096), dp)
             elif fn == "package.json" and re.search(r"/node_modules/(@[^/]+/)?[^/@]+$", dp):
                 kind, data = "npm", npmmeta(head(fp, 1 << 20))
             else:
