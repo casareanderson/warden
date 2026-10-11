@@ -19,7 +19,9 @@ Sign-ins. sshd's own lines (journald, or auth.log / secure / messages where ther
 Logins made with a key that lives on THIS box (warden's own sweeps — and anything else that runs here with the same
 key) are tagged `self` and kept out of "last login", or every box would always say "warden, 4 minutes ago".
 `logins.known_keys: {SHA256:…: "backup job"}` names other automation keys the same way. Console logins (tty) come
-from `last`. The first collection from a box is its baseline (silent); after that an accepted sign-in from a
+from `last`. A `pct exec` / `lxc-attach` / web-console session writes no line at all, so warden also reads each
+box's process table and records one still attached under init (ppid 1) on a tty as an `attach` sign-in — only while
+it is still open. The first collection from a box is its baseline (silent); after that an accepted sign-in from a
 user + address + key that box has never seen is NEW → a message (`logins.notify_new: false` turns that off).
 Read-only on every box; nothing is installed.
 """
@@ -65,6 +67,8 @@ if [ -n "$out" ]; then printf '%s\n' "$out"; else
 fi
 echo @@last
 (last -w --time-format iso -n 30 2>/dev/null || wtmpdb last -n 30 2>/dev/null) | grep -E '^[^ ]+ +(tty|console)' | head -30
+echo @@ps
+ps -eo pid=,ppid=,tty=,user=,comm= 2>/dev/null
 true
 '''
 # one node session covers its own sign-ins and every running container's
@@ -150,13 +154,26 @@ def _ts(line, year):
     return None, line
 
 
-def parse(text, keys):
-    """sshd + `last` lines → sign-in events (dicts). Unparseable lines are skipped, never guessed."""
+def parse(text, keys, now_ts=None):
+    """sshd + `last` lines → sign-in events (dicts). Unparseable lines are skipped, never guessed.
+
+    `@@ps` adds the box's own process table. `pct exec`, `lxc-attach` and the Proxmox web console write no log line,
+    so a session started that way is caught here only while it is still open: a shell still attached directly under
+    the container's init (ppid 1) on a real tty. warden's own sweep runs `sh -c` with no tty, so it never matches."""
     year, out, section = datetime.now().year, [], "ssh"
     for line in (text or "").splitlines():
         line = line.rstrip()
         if line == "@@last":
             section = "last"; continue
+        if line == "@@ps":
+            section = "ps"; continue
+        if section == "ps":
+            f = line.split(None, 4)
+            if len(f) >= 5 and f[0].isdigit() and f[1] == "1" and f[2] not in ("?", "??") \
+                    and f[4] not in ("getty", "agetty", "login"):
+                out.append(dict(ts=now_ts or now(), user=f[3], src=f[2], method="attach",
+                                key_fp=f"pid:{f[0]}", ok=1, self=0))
+            continue
         if section == "last":
             m = LAST.match(line)
             if m:
@@ -373,7 +390,7 @@ def logins(con=None):
                 con.execute("insert into login_runs values(?,?,?,?) on conflict(target) do update set ts=excluded.ts, "
                             "status=excluded.status, note=excluded.note", (target, ts, "error", err or f"exit {rc}"))
                 continue
-            new_lines += store(con, target, parse(text, keys), ts)
+            new_lines += store(con, target, parse(text, keys, ts), ts)
     con.execute("delete from logins where ts < datetime('now', ?)", (f"-{KEEP_DAYS} days",))
     con.execute("delete from logins where self=1 and ts < datetime('now', ?)", (f"-{KEEP_SELF_DAYS} days",))
     con.commit()                       # commit BEFORE any notify call
@@ -392,6 +409,22 @@ def store(con, target, events, ts):
     baseline = not con.execute("select 1 from login_runs where target=? and status='ok'", (target,)).fetchone()
     fresh = []
     for e in sorted(events, key=lambda x: x["ts"]):
+        if e.get("method") == "attach":
+            # a still-open pct exec / lxc-attach / web-console session: dedup by its pid, not its collection time,
+            # so the same session seen on two sweeps is one sign-in, not a new row each 15 minutes.
+            pk = (target, e["user"], e["src"], e["key_fp"], e["ok"])
+            had = con.execute("select 1 from login_pairs where target=? and user=? and src=? and key_fp=? and ok=?",
+                              pk).fetchone()
+            if had:
+                con.execute("update login_pairs set last_ts=max(login_pairs.last_ts, ?) where target=? and user=? "
+                            "and src=? and key_fp=? and ok=?", (e["ts"],) + pk)
+                continue
+            con.execute("insert or ignore into logins(target,ts,user,src,method,key_fp,ok,self) values(?,?,?,?,?,?,?,?)",
+                        (target, e["ts"], e["user"], e["src"], e["method"], e["key_fp"], e["ok"], e["self"]))
+            con.execute("insert into login_pairs values(?,?,?,?,?,?,?,1,?) on conflict(target,user,src,key_fp,ok) do update "
+                        "set last_ts=max(login_pairs.last_ts, excluded.last_ts), n=login_pairs.n+1",
+                        pk + (e["ts"], e["ts"], e["self"]))
+            continue
         cur = con.execute("insert or ignore into logins(target,ts,user,src,method,key_fp,ok,self) values(?,?,?,?,?,?,?,?)",
                           (target, e["ts"], e["user"], e["src"], e["method"], e["key_fp"], e["ok"], e["self"]))
         if cur.rowcount != 1:
