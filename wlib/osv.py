@@ -92,6 +92,25 @@ def parse_npm(text):
     return (n, v) if isinstance(n, str) and isinstance(v, str) and n and v else None
 
 
+def parse_composer(text):
+    """composer's vendor/composer/installed.json → [(name, version)] for the Packagist ecosystem. Handles the
+    newer {"packages": [...]} wrapper and the older bare-list form; entries whose version is a branch alias
+    (dev-main) are skipped because OSV only ranges over released versions."""
+    try:
+        d = json.loads(text)
+    except ValueError:
+        return []
+    pkgs = d if isinstance(d, list) else d.get("packages") or []
+    out = set()
+    for p in pkgs:
+        if not isinstance(p, dict):
+            continue
+        n, v = p.get("name"), p.get("version")
+        if isinstance(n, str) and isinstance(v, str) and "/" in n and v and not v.startswith("dev-"):
+            out.add((n, v))
+    return sorted(out)
+
+
 _GO_MAGIC = b"\xff Go buildinf:"
 
 

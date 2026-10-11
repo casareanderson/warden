@@ -160,10 +160,26 @@ def test_images_hosts_from_inventory(estate, monkeypatch):
     assert rows == [["web", "nginx:latest", "newer", "/srv/app", "web", "2026-10-01", "abcdef123456"]]
 
 
+def test_image_collector_source_compiles():
+    from wlib.imgcollect import SOURCE
+    compile(SOURCE, "<imgcollect>", "exec")
+
+
 def test_vulnscan_firmware_unknown_kind(estate):
     import vulnscan
     label, cur, latest, note = vulnscan.firmware({"firmware": "acmeos", "ssh": "x@y", "kind": "firmware"})
     assert cur is None and latest is None and "skipped" in note
+
+
+def test_image_packages_reads_composer(estate):
+    import json
+    import vulnscan
+    installed = json.dumps({"packages": [{"name": "guzzlehttp/guzzle", "version": "7.4.0"},
+                                         {"name": "foo/bar", "version": "dev-main"}]})
+    files = {"composer/1": b"vendor/composer/installed.json\n" + installed.encode()}
+    pkgs, label, unread, kern = vulnscan.image_packages(files)
+    assert ("Packagist", "guzzlehttp/guzzle", "7.4.0", "guzzlehttp/guzzle", "7.4.0") in pkgs
+    assert not any(p[0] == "Packagist" and p[1] == "foo/bar" for p in pkgs)
 
 
 def test_modules_import_without_estate_paths():

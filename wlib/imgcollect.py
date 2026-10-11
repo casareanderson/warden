@@ -8,6 +8,7 @@ writes a gzipped tar to stdout holding only package metadata:
   <n>/os/...                      os-release, dpkg status (+ distroless status.d), apk db
   <n>/py/<i>                      "name\nversion" from each *.dist-info/METADATA, *.egg-info/PKG-INFO
   <n>/npm/<i>                     "name\nversion" from each node_modules/<pkg>/package.json
+  <n>/composer/<i>                vendor/composer/installed.json (raw; warden parses it)
   (name/version are pulled out on the docker host: whole package.json files took the Zima scan to 1.1 GB)
   <n>/go/<i>                      256 KB from the Go build-info magic of each Go executable
   <n>/rust/<i>                    the .dep-v0 section of each Rust executable built with cargo-auditable
@@ -188,6 +189,8 @@ for cid in ALL:
                 kind, data = "py", pymeta(head(fp, 4096))
             elif fn == "package.json" and re.search(r"/node_modules/(@[^/]+/)?[^/@]+$", dp):
                 kind, data = "npm", npmmeta(head(fp, 1 << 20))
+            elif fn == "installed.json" and dp.endswith("/vendor/composer"):
+                kind, data = "composer", head(fp, 8 << 20)
             else:
                 try:
                     st = os.lstat(fp)
