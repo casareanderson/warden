@@ -70,8 +70,10 @@ roll-up and edge-ban logic are general.
 - **Package types not read inside images:** Java jars, Ruby gems, .NET, and Go binaries older than
   Go 1.18 (counted in the target's note). Rust binaries are read only when built with `cargo auditable`.
   PHP composer packages are read from each image's `vendor/composer/installed.json` (2026-10-11).
-- **Renamed forks are invisible.** A fork published under a new name (e.g. `unclecode-litellm`, a litellm 1.81 fork)
-  matches no advisories for the original project.
+- **Renamed forks are matched by their import name.** A PyPI fork republished under a new name (e.g.
+  `unclecode-litellm`, a litellm 1.81 fork) keeps the original import name in its `top_level.txt`, which the
+  collector now reads and queries too, so it matches the original project's advisories. A fork that also renames
+  the import module leaves no name to match and is still invisible.
 
 ## netscan
 
@@ -84,9 +86,10 @@ roll-up and edge-ban logic are general.
   six of the "new" ones were bulbs and a TV that had been asleep. Setting it to
   0 turns those into permanent false alarms.
 - **OUI tables go stale.** nmap's shipped vendor table did not know a prefix
-  that accounted for 17 hosts. Only put verifiable entries in `OUI_EXTRA`: a
-  guessed vendor name is worse than a blank one, because it makes an unknown
-  device look identified.
+  that accounted for 17 hosts. `OUI_EXTRA` patches verifiable gaps only, and
+  `tests/test_netscan.py` now refuses a guessed entry: a vendor name is worse
+  than a blank one, because it makes an unknown device look identified.
+  Unknown prefixes still read `unknown (OUI … not in table)`.
 
 ## edge-sentry
 
@@ -133,8 +136,24 @@ is added it will follow these rules:
   looks fine. On the author's estate a host OS update left three `unless-stopped` containers (the reverse proxy among
   them) stopped after the reboot, because the update had run `docker stop` on them, and nothing in warden flagged it.
   Watching declared containers is the next step.
-- **Only sign-ins that sshd or `last` record are seen.** `pct exec`, `lxc-attach` and the Proxmox web console don't
-  write a sign-in line, so a session started that way never shows up.
+- **Sign-ins that write no log line are only seen while they are open.** `pct exec`, `lxc-attach` and the Proxmox
+  web console don't write a sign-in line, so warden now also reads each box's process table and records a shell still
+  attached directly under the container's init on a real tty as an `attach` sign-in. A session that opened and closed
+  between two 15-minute sweeps still leaves no trace.
 - **A shared key hides its users.** "Self" is any key that lives on the warden box. If another job on that box signs <!-- steward: skip (advice, design or upstream; not for the coding agent) -->
   in with the same key, it is left out too. Give jobs their own keys and name them in `logins.known_keys`.
-- **Container sign-ins and heartbeats need Proxmox** (`pct`, `pvesh`). Containers on other hypervisors are not seen.
+- **Container sign-ins still need Proxmox** (`pct exec`). Docker containers are now heartbeat-checked — a `docker`
+  host's running and stopped containers are seen, and a restart reads as a reboot — but sign-ins *inside* containers
+  are only read from LXC over `pct exec`; a container on another hypervisor shows up/down yet its sign-ins are not.
+
+## Hermes agent tracking
+
+- **`ss` is a snapshot.** `agents.py` polls every 10 minutes; a connection that opens and closes between polls is
+  not seen. It catches steady talkers (beacons, long transfers), not a single sub-second request.
+- **Attribution needs root on the agent host.** Without it, `ss` only annotates warden's own user's sockets; the
+  rest are counted but shown as unattributed, never guessed.
+- **Destinations are IPs first.** The threat check is reliable on the destination IP (C2/botnet feeds); mapping an
+  IP back to the domain the agent intended is best-effort, so domain-feed and red-list matches depend on a resolver
+  log being available.
+- **Interactive tools are out of scope by design.** Claude Code, ssh and system daemons are in `agents.ignore`;
+  this watches the autonomous Hermes agents, not a person at a keyboard.

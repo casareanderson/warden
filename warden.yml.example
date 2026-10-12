@@ -115,6 +115,7 @@ ui:
   cookie_secure: auto               # auto = Secure cookie when the proxy says X-Forwarded-Proto: https
   real_ip_header: ""                # e.g. CF-Connecting-IP behind Cloudflare; default = last X-Forwarded-For hop
   trust_proxy_user_header: Remote-User   # auth: proxy only
+  trust_proxy_insecure: false            # auth: proxy only — allow a non-loopback bind (the proxy MUST overwrite Remote-User and the port MUST be firewalled; otherwise warden refuses to start)
   basic_user: ""                    # auth: basic only
 api:
   enabled: true
@@ -138,3 +139,22 @@ dashboard:
 # exposure:
 #   npm: {url: "https://192.168.1.10:81", user_secret: NPM_USER, pass_secret: NPM_PASSWORD, verify_tls: false}
 #   extra: [{host: vpn.example.com, upstream: ["192.168.1.20:443"]}]   # hand-written routes the API can't show
+
+# ── Hermes agent activity ────────────────────────────────────────────────────
+# agents.py attributes each outbound connection on an agent host to the AGENT that made it, flags any reaching a
+# known-bad host, and records what each agent can access. Detect-only, read-only. The box warden runs on is watched
+# by default. It is not Hermes-specific — name any agent you run.
+agents:
+  include_local: true            # also watch the box warden itself runs on (where most agents run); false to skip it
+  learn_hours: 48                # a destination first seen within this long of an agent's first sighting is "learning"
+  hermes_profile: sec            # which Hermes profile writes the advisory line on a review card (set to "" to skip)
+  patterns:                      # name your own agents — checked BEFORE the built-ins (hermes/opencode/ollama/…),
+    []                           #   so you can override or extend. Each: {pattern: <regex on the command line>,
+                                 #   name: <label>}. $1..$9 in name expand to regex capture groups. Examples:
+                                 #   - {pattern: '\bmuse\b', name: 'muse'}
+                                 #   - {pattern: 'mybot --role (\w+)', name: 'mybot:$1'}
+  secret_files:                  # sensitive files whose readability by each agent warden should report (absolute
+    []                           #   paths; warden's own warden.yml and DB are always included). e.g. /root/.env
+  ignore:                        # processes NOT tracked (substring, or /regex/ against the command line). The defaults
+    []                           #   already drop Claude Code, ssh/sshd and system daemons; add your own here.
+# Mark any OTHER host that runs agents with `agents: true` in its hosts: entry above.

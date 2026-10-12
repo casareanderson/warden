@@ -79,6 +79,7 @@ footer{color:var(--faint);font-size:11.5px;text-align:center;padding:20px}
 .pill.warn{color:var(--amb);border-color:var(--amb-line);background:var(--amb-bg)}
 .pill.bad{color:var(--red);border-color:var(--red-line);background:var(--red-bg)}
 .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+button.pill{font-family:inherit;cursor:pointer} button.pill:hover{filter:brightness(1.12)}
 /* search */
 .search{flex:1;min-width:240px;max-width:640px;display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:6px 10px}
 .search:focus-within{border-color:var(--acc)}
@@ -197,8 +198,13 @@ aside.drawer.on{transform:none}
 .tokbox{font-family:var(--mono);font-size:12px;background:var(--grn-bg);border:1px solid var(--grn-line);color:var(--grn);padding:8px;border-radius:6px;word-break:break-all;margin-bottom:8px}
 pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px;font-size:11.5px;overflow:auto;white-space:pre-wrap;margin:4px 0 10px;position:relative}
 .snip-h{display:flex;align-items:center;justify-content:space-between;color:var(--dim);font-size:12px}
-.appr{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:10px;margin-bottom:8px}
+.appr{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;margin-bottom:5px}
 .appr pre{flex:1;margin:0;white-space:pre-wrap;font:12.5px/1.45 inherit}
+.appr .apx{flex:1;margin:0;white-space:pre-wrap;font:12px/1.32 inherit}
+.appr .apx b{color:var(--fg)}
+.appr .apx code{background:var(--line2);padding:0 4px;border-radius:4px;font-size:11.5px}
+.appr .apb{display:flex;flex-direction:column;gap:5px}
+.appr-legend{margin:2px 0 9px;font-size:12px}
 
 /* sidebar navigation (html[data-nav=side], wide screens) */
 nav .grp{display:none}
@@ -228,6 +234,33 @@ html[data-nav=top] nav{position:sticky;top:var(--hdr,58px);z-index:4;background:
 .pick .mv button{background:none;border:1px solid var(--line2);color:var(--dim);border-radius:4px;width:22px;height:20px;cursor:pointer;padding:0;line-height:1}
 .geo-ctl{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .intg .card h3 .b{margin-left:auto}
+/* search query builder */
+#qbuild{margin-bottom:12px}
+.qb-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.qb-row select,.qb-row input{background:var(--panel2);border:1px solid var(--line2);border-radius:6px;color:var(--fg);padding:5px 9px;font:inherit;font-size:var(--fs-sm)}
+.qb-row #qb-val{flex:1;min-width:160px}
+/* settings groups */
+.cfg-grp{margin-bottom:16px}
+.cfg-grp:last-child{margin-bottom:0}
+.cfg-grp h4{margin:0 0 4px;font-size:11px;color:var(--acc);text-transform:uppercase;letter-spacing:.06em;font-weight:600;border-bottom:1px solid var(--line);padding-bottom:5px}
+.cfg-grp h4 .q{font-family:var(--mono);text-transform:none;letter-spacing:0}
+/* agent permissions cards */
+.perm{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:11px 13px;margin-bottom:8px}
+.perm.hot{border-color:var(--amb-line)}
+.perm .ph{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:9px}
+.perm .ph .pid{min-width:0}
+.perm .ph b{font-family:var(--mono)}
+.perm .ptags{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+.perm dl.pf{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:0;font-size:var(--fs-sm)}
+.perm dl.pf dt{color:var(--faint);white-space:nowrap}
+.perm dl.pf dd{margin:0;color:var(--dim)}
+.perm dl.pf code{background:var(--panel2);padding:0 5px;border-radius:4px;color:var(--fg)}
+.agmap text{fill:var(--fg);font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.agmap .t2{fill:var(--dim);font-size:10px}
+.agmap .node{fill:var(--panel2);stroke:var(--line2)} .agmap .node.bad{stroke:var(--red-line);fill:var(--red-bg)}
+.agmap .ag{fill:var(--acc-bg);stroke:var(--acc-line)}
+.agmap .ln{stroke:var(--line2);stroke-width:1;fill:none} .agmap .ln.bad{stroke:var(--red);stroke-width:1.4}
+.agmap g[data-agent]{cursor:pointer} .agmap g[data-agent]:hover rect{stroke:var(--acc)}
 
 /* ── 6 · density + responsive ─────────────────────────────────────────────── */
 html[data-density=compact]{--fs:12.5px;--fs-sm:11.5px;--pad-cell:3px 8px;--pad-card:9px 11px;--gap:8px;--kpi-v:19px;--pad-main:10px 12px 28px;--radius:7px;--donut:92px}
@@ -238,6 +271,53 @@ html[data-density=compact] nav button{padding:7px 10px}
 @media(max-width:1100px){.grid.ov{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.grid.ov{grid-template-columns:1fr}.ov .s2{grid-column:1/-1}.fld{grid-template-columns:1fr}}
 @media(max-width:600px){.bar{padding:10px 14px}main{padding:14px}.g2,.g3{grid-template-columns:1fr}.updated{display:none}}
+
+/* sub-navigation under a primary tab */
+.subnav{display:flex;gap:6px;flex-wrap:wrap;padding:14px 20px 0;margin:0}
+.subnav button{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line2);color:var(--dim);border-radius:999px;padding:5px 13px;font-size:12.5px;cursor:pointer}
+.subnav button:hover{color:var(--fg);border-color:var(--acc-line)}
+.subnav button.on{background:var(--acc-bg);border-color:var(--acc-line);color:var(--fg)}
+.subnav .count{background:var(--line2);color:var(--fg);border-radius:999px;padding:0 6px;font-size:11px;line-height:16px}
+.subnav .count.bad{background:var(--red);color:#fff}
+.count.dot{min-width:9px;width:9px;height:9px;padding:0;border-radius:50%;background:var(--amb);text-indent:-999px;overflow:hidden}
+.count.dot.bad{background:var(--red)}
+.fld label .fkey{display:block;font-size:10px;color:var(--faint);font-weight:400;margin-top:2px;font-family:var(--mono)}
+.acc{display:flex;flex-direction:column;gap:6px}
+.acc-item{background:var(--panel);border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+.acc-item summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:9px;padding:10px 13px;font-weight:600;color:var(--fg)}
+.acc-item summary::-webkit-details-marker{display:none}
+.acc-item summary::before{content:"+";width:14px;flex:none;text-align:center;color:var(--acc);font-weight:700;font-size:15px}
+.acc-item[open] summary::before{content:"\2212"}
+.acc-item summary .b{margin-left:auto;font-weight:400}
+.acc-item[open] summary{border-bottom:1px solid var(--line2)}
+.acc-item:hover summary{color:var(--acc)}
+.acc-body{padding:11px 13px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(236px,1fr));gap:10px}
+.tiles .tile{background:var(--panel);border:1px solid var(--line2);border-radius:10px;overflow:hidden}
+.tiles .tile>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:11px;padding:13px 14px}
+.tiles .tile>summary::-webkit-details-marker{display:none}
+.tiles .tile .ti-ic{width:34px;height:34px;flex:none;border-radius:8px;display:grid;place-items:center;background:var(--acc-bg);color:var(--acc)}
+.tiles .tile .ti-ic svg{width:18px;height:18px}
+.tiles .tile .ti-txt{min-width:0}
+.tiles .tile .ti-name{font-weight:600;color:var(--fg);display:block}
+.tiles .tile .ti-tag{display:block;font-size:11.5px;color:var(--dim);margin-top:1px}
+.tiles .tile:hover{border-color:var(--acc-line)}
+.tiles .tile[open]{grid-column:1/-1}
+.tiles .tile[open]>summary{border-bottom:1px solid var(--line2)}
+.tiles .tile .ti-body{padding:12px 14px}
+.docp{margin:0;line-height:1.55;color:var(--fg)}
+#t-docs .card{margin-bottom:12px}
+#t-docs dl.kv dt{color:var(--acc)}
+.lanes{display:flex;flex-direction:column;gap:7px}
+.lane{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:8px 11px;cursor:pointer}
+.lane:hover{border-color:var(--acc-line)}
+.lane-ag{flex:none;min-width:150px;max-width:220px;font-family:var(--mono);font-size:12px;color:var(--fg);background:var(--acc-bg);border:1px solid var(--acc-line);border-radius:6px;padding:3px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lane-ag.bad{background:var(--red-bg);border-color:var(--red-line)}
+.lane-arrow{color:var(--faint);flex:none}
+.lane-dests{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+.dchip{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line2);border-radius:999px;padding:2px 9px;font-size:11.5px;color:var(--dim);font-family:var(--mono)}
+.dchip.bad{background:var(--red-bg);border-color:var(--red-line);color:var(--red)}
+.dchip .dby{color:var(--faint);font-size:10px}
 </style>
 
 <header>
@@ -247,6 +327,7 @@ html[data-density=compact] nav button{padding:7px 10px}
       <span>warden<br><small>homelab security hub</small></span>
     </div>
     <span class="pill" id="mode"><span class="dot"></span>…</span>
+    <button class="pill warn" id="waiting" hidden title="Everything waiting for your ✅ / ❌ right now"></button>
     <label class="search">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b949e" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="q" placeholder="Search events, edge, hosts…  ip:  cc:RU  kind:sqli  src:npm  type:edge" autocomplete="off">
@@ -261,6 +342,8 @@ html[data-density=compact] nav button{padding:7px 10px}
 <nav id="nav"></nav>
 
 <main>
+<div id="subnav" class="subnav" hidden></div>
+
 <!-- OVERVIEW -->
 <section class="tab" id="t-overview">
   <div class="ov-head"><span class="hint">last 30 days · click a slice to search it</span>
@@ -270,11 +353,17 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="grid g4 ov" id="ov-widgets"></div>
 </section>
 
-<!-- DETECTIONS -->
-<section class="tab" id="t-detections">
+<!-- INCIDENTS -->
+<section class="tab" id="t-incidents">
+  <div class="banner ok" style="margin-bottom:16px"><b>The incident brain.</b> Every detector — edge, logs, LAN, vulnerabilities, integrity, agents — is joined into one picture per entity. In <b>shadow mode</b> the model writes down what it <i>would</i> do and how sure it is; warden never carries it out. You can see what it got right before you ever let it act.</div>
   <h2>Incidents · shadow <span class="hint" id="inc-hint">signals from every detector joined up · the model's would-be action is recorded, never carried out</span></h2>
   <div class="tbl-tools"><input data-filter="incidents" placeholder="filter: entity, action, owner…"><span class="n" id="incidents-n"></span></div>
   <div class="wrap"><table id="incidents"></table></div>
+  <div class="note">Click <b>Facts</b> on any row for the signals the incident was built from, each with its source and time. Shadow is the default; turning it to advisory or enforcing is a deliberate change in <code>warden.yml</code>, never a button.</div>
+</section>
+
+<!-- DETECTIONS -->
+<section class="tab" id="t-detections">
   <h2>Ban decisions <span class="hint" id="ban-hint"></span></h2>
   <div class="wrap"><table id="bans"></table></div>
   <h2>Edge blocklist <span class="hint">proposed hourly · you ✅/❌ in your alerts channel or Settings · enforced as ONE Cloudflare WAF rule · bans lapse after 30 days</span></h2>
@@ -393,6 +482,32 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="note">netscan is detect-only with no enforcement path: acting automatically against a LAN device has a far worse blast radius than a late alert.</div>
 </section>
 
+<!-- AGENTS -->
+<section class="tab" id="t-agents">
+  <div class="banner ok" style="margin-bottom:16px"><b>Watch what your AI agents do.</b> Any autonomous agent on the estate — Hermes profiles, OpenCode, a ChatGPT/Muse bridge, a scraper, your own bot — is attributed to the process that made each outbound connection, so you can see where it reaches, what it can access, and whether it ever touched a known-bad host. Detect-only: warden reads <code>/proc</code> and sockets, never blocks or kills. Name your own agents with <code>agents.patterns</code> in <code>warden.yml</code>.</div>
+  <div class="kpis" id="ag-kpis"></div>
+  <h2>Reached a known-bad destination <span class="hint">an agent connected to a host on a threat feed — detect-only, nothing was blocked</span></h2>
+  <div class="wrap"><table id="ag-alerts"></table></div>
+  <div class="card" style="margin:12px 0"><h3>Agent map <span class="q" id="ag-map-h"></span></h3><div id="ag-map"></div>
+    <div class="note" style="margin:6px 0 0">Each agent and the destinations it talks to, drawn from the egress warden has attributed. Known-bad destinations are red; click an agent to filter the tables below.</div></div>
+  <h2>What each agent can access <span class="hint">read-only: the user it runs as, its groups, Linux capabilities, sudo rights, and which configured secret files it could read · the riskiest first</span></h2>
+  <div id="ag-perms"></div>
+  <h2>Agents <span class="hint">each autonomous agent and what it talks to; interactive dev tools (Claude Code) and system noise are not tracked</span></h2>
+  <div class="tbl-tools"><input data-filter="ag-agents" placeholder="filter: agent, host…"><span class="n" id="ag-agents-n"></span></div>
+  <div class="wrap"><table id="ag-agents"></table></div>
+  <h2>Destination history · all agents <span class="hint">every destination any agent has reached — known-bad first — with hits and best-effort bytes received</span></h2>
+  <div class="tbl-tools"><input data-filter="ag-dests" placeholder="filter: destination, ip, agent…"><span class="n" id="ag-dests-n"></span></div>
+  <div class="wrap"><table id="ag-dests"></table></div>
+  <h2>Destinations · per agent</h2>
+  <div class="tbl-tools"><input data-filter="ag-conns" placeholder="filter: agent, destination, ip…"><span class="n" id="ag-conns-n"></span></div>
+  <div class="wrap"><table id="ag-conns"></table></div>
+  <h2>New-destination reviews <span class="hint">✅ expected, learn it · ❌ not expected</span></h2>
+  <div class="wrap"><table id="ag-find"></table></div>
+  <h2>Coverage</h2>
+  <div class="wrap"><table id="ag-runs"></table></div>
+  <div class="note"><code>ss</code> is a snapshot every 10 minutes, so a connection that opens and closes between polls is missed, and bytes are that socket's lifetime at the moment it was sampled — a real download shows up big, but short transfers can be undercounted. Without root on a host, only warden's own user's sockets are attributed — never guessed.</div>
+</section>
+
 <!-- HEALTH -->
 <section class="tab" id="t-health">
   <h2>Source health — is it actually reading anything?</h2>
@@ -402,30 +517,17 @@ html[data-density=compact] nav button{padding:7px 10px}
   <div class="wrap"><table id="suppressed"></table></div>
 </section>
 
-<!-- SEARCH -->
-<section class="tab" id="t-settings">
-  <h2>Waiting for you <span class="hint">what warden proposed — same as reacting ✅ / ❌ in your chat channel</span></h2>
+<!-- SETTINGS -->
+<section class="tab" id="t-review">
+  <h2>Review <span class="hint">everything that needs your ✅ / ❌ right now — same as reacting in your chat channel</span></h2>
   <div id="appr"></div>
+</section>
+
+<section class="tab" id="t-settings">
   <h2>Setup <span class="hint" id="setup-score"></span></h2>
   <div class="wrap"><table id="setup"></table></div>
   <h2>Settings <span class="hint" id="ovr-note">the ones that are safe to change from a browser — the rest live in warden.yml</span></h2>
   <div class="card" id="cfg"></div>
-</section>
-
-<section class="tab" id="t-connect">
-  <div class="banner ok" style="margin-bottom:16px"><b>warden is the hub; your tools plug into it.</b> Everything here is read-only for the tool you connect:
-    a token can read what this console shows and nothing more — it can't ban, block, patch or approve.</div>
-  <div class="grid g2">
-    <div class="card"><h3>1 · Make a token</h3>
-      <div class="row"><input id="tok-name" placeholder="who it's for, e.g. home-assistant" maxlength="60"><button class="btn" id="tok-new">New token</button></div>
-      <div id="tok-once"></div><div class="wrap" style="border:0"><table id="toks"></table></div></div>
-    <div class="card"><h3>2 · Your endpoints</h3><div id="endpoints-info"></div></div>
-  </div>
-  <h2>3 · Plug in a tool <span class="hint">copy, replace $WARDEN_TOKEN with the token from step 1</span></h2>
-  <div class="grid g3 intg" id="intg"></div>
-  <h2>Put warden behind your VPN <span class="hint">the console has no reason to be on the open internet — pick what you already run</span></h2>
-  <div class="grid g3 intg" id="vpn"></div>
-  <div class="note">Whatever sits in front must pass <code>/mcp</code> and <code>/api/v1</code> straight through (no login page) — the bearer token is the auth there. Everything else can sit behind your SSO.</div>
 </section>
 
 <section class="tab" id="t-account">
@@ -456,8 +558,73 @@ html[data-density=compact] nav button{padding:7px 10px}
   </div>
 </section>
 
+<section class="tab" id="t-connect">
+  <div class="banner ok" style="margin-bottom:16px"><b>warden is the hub; your tools plug into it.</b> Everything here is read-only for the tool you connect: a token can read what this console shows and nothing more — it can't ban, block, patch or approve.</div>
+  <div class="grid g2">
+    <div class="card"><h3>1 · Make a token</h3>
+      <div class="row"><input id="tok-name" placeholder="who it's for, e.g. home-assistant" maxlength="60"><button class="btn" id="tok-new">New token</button></div>
+      <div id="tok-once"></div>
+      <div class="row" style="margin-top:8px"><input id="tok-fill" placeholder="… or paste a wdn_… token to auto-fill the snippets" autocomplete="off" spellcheck="false"></div>
+      <div class="wrap" style="border:0"><table id="toks"></table></div></div>
+    <div class="card"><h3>2 · Your endpoints</h3><div id="endpoints-info"></div></div>
+  </div>
+  <h2>Plug in a tool <span class="hint">make or paste a token above and the snippets fill in — ready to copy</span> <span class="hint" id="tok-state" style="color:var(--amb)"></span></h2>
+  <div class="tiles" id="intg"></div>
+  <h2>Put warden behind your VPN <span class="hint">the console has no reason to be on the open internet — pick what you already run</span></h2>
+  <div class="tiles" id="vpn"></div>
+  <div class="note">Whatever sits in front must pass <code>/mcp</code> and <code>/api/v1</code> straight through (no login page) — the bearer token is the auth there. Everything else can sit behind your SSO.</div>
+</section>
+
+<section class="tab" id="t-docs">
+  <h2>Documentation <span class="hint">the short version — full docs on GitHub</span></h2>
+  <div class="grid g2">
+    <div class="card"><h3>What warden is</h3>
+      <p class="docp">A local, dependency-free security console for a homelab or small estate. It reads the logs your WAF can't see, sweeps your LAN, scans your machines for vulnerabilities, watches files for drift and your AI agents for where they reach — and proposes bans and patches you approve with a ✅. <b>Detect-only and read-only by default: it tells you what it would do, and you decide.</b></p></div>
+    <div class="card"><h3>Getting around</h3>
+      <dl class="kv">
+        <dt>Overview</dt><dd>KPIs, charts, the last 30 days at a glance.</dd>
+        <dt>Review</dt><dd>Everything waiting for your ✅ / ❌.</dd>
+        <dt>Threats</dt><dd>Detections, Cloudflare edge, network, incidents, geo.</dd>
+        <dt>Agents</dt><dd>What each AI agent reaches out to, and what it can access.</dd>
+        <dt>Posture</dt><dd>Attack surface, vulnerabilities, endpoints, host health.</dd>
+        <dt>Connect</dt><dd>Make a token and plug tools in over MCP or REST.</dd>
+        <dt>Settings</dt><dd>Config safe to change from a browser, plus your account.</dd>
+      </dl></div>
+  </div>
+  <h2>Connect a tool</h2>
+  <div class="card"><p class="docp">warden exposes a read-only <b>REST API</b> and an <b>MCP</b> endpoint. Both take a bearer token (<code>wdn_…</code>) you make on the <b>Connect</b> tab; those two paths skip your SSO so an agent or script can reach them without a login redirect, while everything else stays behind it. A token can only <i>read</i> what this console shows — it can never ban, block, patch or approve.</p></div>
+  <h2>Security model</h2>
+  <div class="card">
+    <dl class="kv">
+      <dt>Detect-only</dt><dd>Ships with <code>enforce: false</code> — records what it would ban and changes nothing until you turn it on.</dd>
+      <dt>Read-only API</dt><dd>No token, tool or model can act through warden; it advises, you approve.</dd>
+      <dt>Private at rest</dt><dd>Tokens are SHA-256, passwords scrypt, and the database is owner-only on disk.</dd>
+    </dl>
+  </div>
+  <h2>Full documentation</h2>
+  <div class="note">The complete docs live on GitHub —
+    <a href="https://github.com/casareanderson/warden#readme" target="_blank" rel="noopener">README</a> ·
+    <a href="https://github.com/casareanderson/warden/blob/main/docs/SETUP.md" target="_blank" rel="noopener">5-minute setup</a> ·
+    <a href="https://github.com/casareanderson/warden/blob/main/KNOWN-ISSUES.md" target="_blank" rel="noopener">Known issues</a> ·
+    <a href="https://github.com/casareanderson/warden/releases" target="_blank" rel="noopener">Releases</a></div>
+</section>
+
 <section class="tab" id="t-search">
   <h2>Search <span class="hint" id="s-meta"></span></h2>
+  <div class="card" id="qbuild">
+    <div class="qb-row">
+      <select id="qb-field" title="field">
+        <option value="type">type</option><option value="kind">kind</option><option value="src">source</option>
+        <option value="ip">ip</option><option value="cc">country</option><option value="date">date</option>
+      </select>
+      <select id="qb-op" title="match"><option value="">is</option><option value="-">is not</option></select>
+      <input id="qb-val" list="qb-vals" placeholder="value — pick or type" autocomplete="off">
+      <datalist id="qb-vals"></datalist>
+      <button class="btn sm" id="qb-add">Add to query</button>
+      <button class="btn ghost sm" id="qb-clear" title="empty the search box">Clear</button>
+    </div>
+    <div class="note" style="margin:8px 0 0">Builds the query in the search box above — e.g. <code>type:edge -kind:challenge cc:RU</code>. No AI, just a shortcut: pick a field, choose <b>is</b> or <b>is&nbsp;not</b>, and the values fill in from what warden has seen. Free text works too; press Enter in the box to run.</div>
+  </div>
   <div class="chips" id="s-chips"></div>
   <div class="wrap" style="margin-top:10px"><table id="sres"></table></div>
 </section>
@@ -482,26 +649,63 @@ const ago = ts => { if (!ts) return "—"; const d = (Date.now() - new Date(ts.r
 const selfB = r => r.self ? ' <span class="b acc" title="our own address (self-ips.txt / warden.yml allow) — excluded from counts">self</span>' : "";
 const ccCell = (cc, red) => cc ? `<span class="flag">${flag(cc)}</span>${esc(cc)}${red ? ' <span class="b red">red list</span>' : ""}` : '<span class="q">—</span>';
 
-const GROUPS = [["Monitor", [["overview","Overview"],["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["search","Search"]]],
-                ["Exposure", [["surface","Attack surface"],["geo","Geo & red list"]]],
-                ["Assets", [["vulns","Vulnerabilities"],["endpoints","Endpoints"]]],
-                ["Hub", [["health","Health"],["connect","Connect"],["settings","Settings"],["account","Account"]]]];
-const TABS = GROUPS.flatMap(g => g[1]);
+// ── primary navigation: 6 top-level tabs; related views live under a sub-nav (kids) ──
+const NAV = [
+  {id:"overview", label:"Overview"},
+  {id:"review",   label:"Review"},
+  {id:"threats",  label:"Threats",  kids:[["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["incidents","Incidents"],["geo","Geo & red list"]]},
+  {id:"agents",   label:"Agents"},
+  {id:"posture",  label:"Posture",  kids:[["surface","Attack surface"],["vulns","Vulnerabilities"],["endpoints","Endpoints"],["health","Health"]]},
+  {id:"connect",  label:"Connect"},
+  {id:"hub",      label:"Settings", kids:[["settings","Settings"],["account","Account"]]},
+  {id:"docs",     label:"Docs"},
+];
+const KIDS = {}, CHILD_OF = {}, SUBLABEL = {};
+NAV.forEach(n => { if (n.kids) { KIDS[n.id] = n.kids.map(k => k[0]); n.kids.forEach(([cid,lbl]) => { CHILD_OF[cid] = n.id; SUBLABEL[cid] = lbl; }); } });
+const SECTIONS = new Set([...document.querySelectorAll("section.tab")].map(s => s.id.slice(2)));
+const navigable = id => SECTIONS.has(id) || !!KIDS[id];
+const CUR_SUB = {};   // remembers the last child viewed under each parent
 let D = null;
 
 function nav() {
-  $("#nav").innerHTML = GROUPS.map(([g, tabs]) => `<div class="grp">${g}</div>` +
-    tabs.map(([id, label]) => `<button data-tab="${id}">${label}<span class="count" id="c-${id}" hidden></span></button>`).join("")).join("");
-  $("#nav").onclick = e => { const b = e.target.closest("button"); if (b) show(b.dataset.tab); };
+  $("#nav").innerHTML = NAV.map(n =>
+    `<button data-nav="${n.id}">${n.label}<span class="count" id="c-${n.id}" hidden></span></button>`).join("");
+  $("#nav").onclick = e => { const b = e.target.closest("button"); if (b) show(b.dataset.nav); };
+}
+function renderSub(parent) {
+  const sn = $("#subnav");
+  if (!parent || !KIDS[parent]) { sn.hidden = true; sn.innerHTML = ""; return; }
+  sn.hidden = false;
+  const active = CUR_SUB[parent];
+  sn.innerHTML = NAV.find(n => n.id === parent).kids.map(([id, label]) =>
+    `<button data-sub="${id}" class="${id === active ? "on" : ""}">${label}<span class="count" id="c-${id}" hidden></span></button>`).join("");
+  KIDS[parent].forEach(applyCount);
 }
 function show(id) {
-  document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "t-" + id));
-  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id));
-  if (location.hash !== "#" + id) history.replaceState(null, "", "#" + id);
-  try { localStorage.setItem("warden-tab", id); } catch {}
-  if (id === "network" && D) drawTopo(D.topology);      // laid out at the tab's real width, which is 0 while hidden
+  let primary, section;
+  if (CHILD_OF[id]) { primary = CHILD_OF[id]; section = id; CUR_SUB[primary] = id; }
+  else if (KIDS[id]) { primary = id; section = CUR_SUB[id] || KIDS[id][0]; CUR_SUB[id] = section; }
+  else { primary = id; section = id; }
+  if (!SECTIONS.has(section)) section = SECTIONS.has(id) ? id : "overview";
+  document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "t-" + section));
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.nav === primary));
+  renderSub(KIDS[primary] ? primary : null);
+  if (location.hash !== "#" + section) history.replaceState(null, "", "#" + section);
+  try { localStorage.setItem("warden-tab", section); } catch {}
+  if (section === "network" && D) drawTopo(D.topology);
 }
-function badge(id, n, bad) { const el = $("#c-" + id); if (!el) return; el.hidden = !n; el.textContent = n; el.classList.toggle("bad", !!bad); }
+const COUNTS = {};
+function applyCount(id) { const el = $("#c-" + id); if (!el) return; const c = COUNTS[id] || {n: 0}; el.hidden = !c.n; el.textContent = c.n; el.className = "count" + (c.bad ? " bad" : ""); }
+function applyParent(p) {                              // a parent tab shows a dot (not a noisy catalog sum) when a child needs attention
+  const el = $("#c-" + p); if (!el) return;
+  const anyN = KIDS[p].some(k => (COUNTS[k] || {}).n), anyBad = KIDS[p].some(k => (COUNTS[k] || {}).bad);
+  el.textContent = ""; el.hidden = !anyN; el.className = "count dot" + (anyBad ? " bad" : "");
+}
+function badge(id, n, bad) {
+  COUNTS[id] = {n, bad};
+  if (CHILD_OF[id]) { applyCount(id); applyParent(CHILD_OF[id]); }
+  else applyCount(id);                                 // a standalone primary (Overview, Waiting for you, Agents) keeps its number
+}
 
 function donut(el, data, opts = {}) {
   if (!data || !data.length) { el.innerHTML = '<div class="empty">' + (opts.empty || "No data in this window.") + "</div>"; return; }
@@ -629,6 +833,8 @@ function render() {
     {h: "", f: r => `<button class="btn" data-inc="${r.id}">Facts</button>`}], IN.rows,
     IN.mode === "not run yet" ? "incidents.py has not run yet." : "No incidents.");
   window._inc = Object.fromEntries(IN.rows.map(r => [r.id, r]));
+  const incAsk = IN.rows.filter(r => r.status === "ok" && !r.owner_label && !["ignore_learn", "watch"].includes(r.action)).length;
+  badge("incidents", incAsk, incAsk > 0);
   $("#ban-hint").textContent = d.mode === "detect-only" ? "detect-only — these are what warden WOULD ban; nothing is applied" : "";
   table("bans", [{h: "When", k: "ts", cls: "ts"}, {h: "Address", k: "ip", cls: "ip", ip: 1}, {h: "Country", f: r => ccCell(r.cc, r.red)},
     {h: "Score", k: "score", cls: "num", num: 1}, {h: "State", f: r => `<span class="b ${r.state === "active" ? "red" : "amb"}">${esc(r.state)}</span>`},
@@ -738,7 +944,37 @@ function render() {
   badge("health", d.health.filter(h => (h.note || "").startsWith("BLIND") || !h.lines).length, true);
   table("suppressed", [{h: "When", k: "ts", cls: "ts"}, {h: "Kind", k: "kind", cls: "mono"}, {h: "Detail", k: "detail", cls: "det", title: 1}, {h: "Reason", k: "reason"}],
     d.suppressed, "Nothing suppressed.");
+  renderWaiting(d);
 }
+
+// ── "Waiting for you": one place for everything that needs your ✅ / ❌ right now ──
+function renderWaiting(d) {
+  const ap = d.approvals || [];
+  const integ = ((d.endpoints || {}).integrity || []).reduce((a, r) => a + (r.open || 0), 0);
+  const inc = ((d.incidents || {}).rows || []).filter(r => r.status === "ok" && !r.owner_label && !["ignore_learn", "watch"].includes(r.action)).length;
+  const agRev = ((d.agents || {}).findings || []).filter(f => f.verdict == null && f.decision === "review").length;
+  const pill = $("#waiting"); if (!pill) return;
+  pill.hidden = !(ap.length || integ || inc || agRev);
+  pill.textContent = ap.length ? `⏳ ${ap.length} to review` : `⏳ ${integ + inc + agRev} to review`;
+  window._waiting = {ap, integ, inc, agRev};
+}
+function openWaiting() {
+  const w = window._waiting || {ap: [], integ: 0, inc: 0, agRev: 0};
+  const go = (tab, label) => `<button class="btn ghost sm" onclick="closeDrawer();show('${tab}')">${label} →</button>`;
+  const decide = w.ap.length
+    ? `<h3>Needs ✅ / ❌ now (${w.ap.length})</h3>` + w.ap.map(a => `<div class="appr" style="margin-bottom:6px"><pre>${esc(a.text.split("\n").slice(0, 2).join("\n"))}</pre></div>`).join("")
+      + `<div class="note">Decide here, or react in your alerts channel — same effect. ${go("review", "Open Review")}</div>`
+    : '<h3>Needs ✅ / ❌ now</h3><div class="empty">Nothing in the approval queue. 🎉</div>';
+  const also = [
+    w.integ ? [`${w.integ} integrity change${w.integ === 1 ? "" : "s"} to accept or reject`, "endpoints", "Endpoints"] : null,
+    w.inc ? [`${w.inc} incident${w.inc === 1 ? "" : "s"} the model would act on`, "incidents", "Incidents"] : null,
+    w.agRev ? [`${w.agRev} new agent destination${w.agRev === 1 ? "" : "s"} to review`, "agents", "Agents"] : null,
+  ].filter(Boolean);
+  openDrawer("Review", decide + (also.length
+    ? "<h3>Also worth a look</h3>" + also.map(([t, tab, label]) => `<div class="appr" style="margin-bottom:6px"><span style="flex:1">${esc(t)}</span>${go(tab, label)}</div>`).join("")
+    : ""));
+}
+$("#waiting").onclick = openWaiting;
 
 
 const SEVN = {4: "CRITICAL", 3: "HIGH", 2: "MEDIUM", 1: "LOW", 0: "UNKNOWN"};
@@ -974,6 +1210,101 @@ function loginCell(b) {
   return `<span style="white-space:nowrap"><span class="mono" title="${esc(tip)}">${who}</span> <span class="q">${ago(l.ts)}${l.method && l.method !== "console" ? " · " + esc(l.method) : ""}</span></span>`
     + (l.key_label ? ` <span class="b acc">${esc(l.key_label)}</span>` : "") + (l.new ? ' <span class="b amb">new</span>' : "") + f;
 }
+const bytes = n => { n = +n || 0; if (n < 1024) return n + " B"; const u = ["KB", "MB", "GB", "TB"]; let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1); return n.toFixed(n < 10 ? 1 : 0) + " " + u[i]; };
+const badDest = r => r.bad ? ' <span class="b red" title="on a threat feed">known-bad</span>' : "";
+function renderAgents(A) {
+  if (!A) return;
+  const open = (A.findings || []).filter(f => f.verdict == null && f.decision === "review").length;
+  const bad = (A.alerts || []).length;
+  const priv = (A.perms || []).filter(p => p.privileged).length;
+  $("#ag-kpis").innerHTML = [
+    ["Agents", (A.agents || []).length, "autonomous agents seen talking out", ""],
+    ["Known-bad hits", bad, "matched a threat feed", bad ? "red" : "grn"],
+    ["Privileged agents", priv, "root, hot caps, sudo or a risky group", priv ? "amb" : "grn"],
+    ["New to review", open, "destinations awaiting \u2705/\u274c", open ? "amb" : "grn"],
+  ].map(([t, v, s, c]) => `<div class="kpi ${c}"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join("");
+  table("ag-alerts", [{h: "When", f: r => ago(r.ts), cls: "ts"}, {h: "Agent", k: "agent", cls: "mono"}, {h: "Host", k: "host"},
+    {h: "Kind", f: r => `<span class="b red">${esc(r.kind)}</span>`}, {h: "Destination", f: r => esc(r.dest), cls: "mono"},
+    {h: "Feed", k: "feed"}, {h: "Detail", k: "detail", cls: "det"}], A.alerts, "No agent has reached a known-bad destination. \ud83c\udf89");
+  drawAgentMap(A);
+  renderAgentPerms(A.perms || []);
+  table("ag-agents", [{h: "Agent", f: r => `<b>${esc(r.agent)}</b>`}, {h: "Host", k: "host"},
+    {h: "Destinations", k: "dests", cls: "num", num: 1}, {h: "Connections", k: "conns", cls: "num", num: 1},
+    {h: "Last seen", f: r => ago(r.last_seen), cls: "ts"},
+    {h: "Flags", f: r => r.alerts ? `<span class="b red">${r.alerts} alert${r.alerts > 1 ? "s" : ""}</span>` : '<span class="q">\u2014</span>'}],
+    A.agents, "agents.py has not run yet.");
+  table("ag-dests", [{h: "Destination", f: r => esc(r.domain || r.dest) + badDest(r), cls: "mono"},
+    {h: "IP", k: "dest_ip", cls: "ip mono", ip: 1}, {h: "Agents", f: r => esc(r.agents || ""), cls: "det"},
+    {h: "Hits", k: "hits", cls: "num", num: 1}, {h: "Received", f: r => bytes(r.bytes_recv), cls: "num", num: 1},
+    {h: "First", f: r => ago(r.first_seen), cls: "ts"}, {h: "Last", f: r => ago(r.last_seen), cls: "ts"}],
+    A.dests || [], "No destinations recorded.");
+  table("ag-conns", [{h: "Agent", k: "agent", cls: "mono"}, {h: "Destination", f: r => esc(r.domain || r.dest) + badDest(r), cls: "mono"},
+    {h: "IP", k: "dest_ip", cls: "ip mono", ip: 1}, {h: "Port", k: "port", cls: "num"}, {h: "Seen", k: "hits", cls: "num", num: 1},
+    {h: "Received", f: r => bytes(r.bytes_recv), cls: "num", num: 1},
+    {h: "Last", f: r => ago(r.last_seen), cls: "ts"}, {h: "In", k: "container", cls: "det q"}], A.conns, "No destinations recorded.");
+  table("ag-find", [{h: "When", f: r => ago(r.ts), cls: "ts"}, {h: "Agent", k: "agent", cls: "mono"}, {h: "Destination", k: "dest", cls: "mono"},
+    {h: "Score", k: "score", cls: "num", num: 1}, {h: "Why", f: r => esc((JSON.parse(r.reasons || "[]")).slice(1).join("; ")), cls: "det", title: 1},
+    {h: "Verdict", f: r => r.verdict ? `<span class="b ${r.verdict === "suspicious" ? "red" : r.verdict === "normal" ? "ok" : ""}">${esc(r.verdict)}</span>` : '<span class="b amb">open</span>'}],
+    A.findings, "Nothing new from any agent.");
+  table("ag-runs", [{h: "Host", k: "host"}, {h: "Status", f: r => `<span class="b ${r.status === "ok" ? "ok" : "red"}">${esc(r.status)}</span>`},
+    {h: "Sockets", k: "seen", cls: "num", num: 1}, {h: "Attributed", k: "attributed", cls: "num", num: 1},
+    {h: "Last", f: r => ago(r.ts), cls: "ts"}, {h: "Note", k: "note", cls: "det"}], A.runs, "No agent-host runs yet.");
+  badge("agents", bad + open, bad > 0);
+}
+// Agent map: a column of agents on the left, their destinations on the right, a line per edge. Known-bad = red.
+function drawAgentMap(A) {
+  const el = $("#ag-map"); if (!el) return;
+  const conns = A.conns || [], agents = [...new Set(conns.map(c => c.agent))];
+  if (!agents.length) { el.innerHTML = '<div class="empty">agents.py has not attributed any egress yet.</div>'; $("#ag-map-h").textContent = ""; return; }
+  const badIp = new Set((A.alerts || []).map(a => a.dest_ip)), isBad = c => c.bad || badIp.has(c.dest_ip);
+  const byAgent = {};
+  conns.forEach(c => { const m = byAgent[c.agent] || (byAgent[c.agent] = {});
+    const d = m[c.dest] || (m[c.dest] = {dest: c.dest, hits: 0, by: 0, bad: false});
+    d.hits += c.hits || 0; d.by = Math.max(d.by, c.bytes_recv || 0); d.bad = d.bad || isBad(c); });
+  const laneBad = a => Object.values(byAgent[a]).some(d => d.bad);
+  const order = agents.slice().sort((a, b) => (laneBad(b) - laneBad(a)) || a.localeCompare(b));
+  const total = new Set(conns.map(c => c.dest)).size;
+  el.innerHTML = `<div class="lanes">` + order.map(a => {
+    const ds = Object.values(byAgent[a]).sort((x, y) => (y.bad - x.bad) || (y.hits - x.hits));
+    return `<div class="lane" data-agent="${esc(a)}" title="click to filter the tables below"><div class="lane-ag${laneBad(a) ? " bad" : ""}">${esc(a)}</div><div class="lane-arrow">→</div><div class="lane-dests">${ds.map(d => `<span class="dchip${d.bad ? " bad" : ""}" title="${esc(d.dest)} · ${d.hits} hits${d.by ? " · " + bytes(d.by) : ""}${d.bad ? " · known-bad" : ""}">${esc(d.dest)}${d.by ? `<span class="dby">${bytes(d.by)}</span>` : ""}</span>`).join("")}</div></div>`;
+  }).join("") + `</div>`;
+  $("#ag-map-h").textContent = `· ${agents.length} agent${agents.length === 1 ? "" : "s"} · ${total} destination${total === 1 ? "" : "s"}`;
+}
+function renderAgentPerms(perms) {
+  const el = $("#ag-perms"); if (!el) return;
+  if (!perms.length) { el.innerHTML = '<div class="empty">No access facts yet \u2014 agents.py records these as it attributes each agent (root on the host gives the fullest picture).</div>'; return; }
+  const sorted = perms.slice().sort((a, b) => (b.privileged - a.privileged) || a.agent.localeCompare(b.agent));
+  el.innerHTML = sorted.map(p => {
+    const tags = [];
+    if (p.root) tags.push('<span class="b red">runs as root</span>');
+    if (p.cap_full) tags.push('<span class="b red">all capabilities</span>');
+    (p.hot_groups || []).forEach(g => tags.push(`<span class="b amb">${esc(g)} group</span>`));
+    if (p.has_sudo) tags.push('<span class="b amb">sudo</span>');
+    (p.cap_hot || []).filter(c => c !== "(all)").forEach(c => tags.push(`<span class="b amb" title="Linux capability">cap_${esc(c)}</span>`));
+    const caps = (p.cap_names || []);
+    const reads = p.can_read || [];
+    return `<div class="perm${p.privileged ? " hot" : ""}">
+      <div class="ph">
+        <div class="pid"><b>${esc(p.agent)}</b> <span class="q">on ${esc(p.host)} · runs as ${esc(p.user || p.uid)}${p.group ? " · " + esc(p.group) : ""}</span></div>
+        ${tags.length ? `<div class="ptags">${tags.join("")}</div>` : ""}
+      </div>
+      <dl class="pf">
+        <dt>Groups</dt><dd>${(p.groups_list || []).length ? p.groups_list.map(g => `<code>${esc(g)}</code>`).join(" ") : '<span class="q">—</span>'}</dd>
+        <dt>Capabilities</dt><dd>${p.cap_full ? '<span class="n">the full set (root-equivalent)</span>' : caps.length ? caps.map(c => `<code>${esc(c)}</code>`).join(" ") : '<span class="q">none</span>'}</dd>
+        <dt>Sudo</dt><dd>${p.has_sudo ? `<code>${esc((p.sudo || "").slice(0, 160))}</code>` : '<span class="q">none without a password, or not checkable here</span>'}</dd>
+        <dt>Can read</dt><dd>${reads.length ? reads.map(f => `<code>${esc(f)}</code>`).join(" ") : '<span class="q">none of the configured secret files</span>'}</dd>
+      </dl></div>`;
+  }).join("");
+}
+document.addEventListener("click", e => {          // agent map: click an agent to filter the per-agent tables
+  const g = e.target.closest("#ag-map [data-agent]"); if (!g) return;
+  ["ag-conns", "ag-agents", "ag-dests"].forEach(id => {
+    const i = document.querySelector(`[data-filter="${id}"]`);
+    if (i) { i.value = g.dataset.agent; i.dispatchEvent(new Event("input", {bubbles: true})); }
+  });
+  $("#ag-agents").scrollIntoView({behavior: "smooth", block: "center"});
+});
 function renderNetsec(N) {
   if (!N) return;
   donut($("#ch-ids"), N.ids_top.map(x => ({k: x.k, n: x.n, red: x.sev === 1})), {unit: "alerts", q: x => "type:ids " + x.k.split(" ").slice(0, 3).join(" ")});
@@ -1063,12 +1394,12 @@ function kpiDefs(d, edgeBlind) {
     vuln_fixable: ["Fixable CVEs", V.fixable || 0, `${V.crit || 0} critical`, V.crit ? "red" : V.fixable ? "amb" : "grn", "vulns"],
     ids_24h: ["IDS alerts 24 h", N.ids_24h || 0, `${N.intel_24h || 0} threat-intel hits`, N.ids_24h ? "amb" : "grn", "network"],
     integrity_open: ["Integrity changes", integ, "open, not yet accepted", integ ? "amb" : "grn", "endpoints"],
-    approvals: ["Waiting for you", ap, "approve in Settings or chat", ap ? "amb" : "grn", "settings"],
+    approvals: ["Review", ap, "approve here or in chat", ap ? "amb" : "grn", "review"],
   };
 }
 const KPI_TITLES = {events_24h: "Detections 24 h", ips_7d: "Scored IPs 30 d", edge_24h: "Edge blocks 24 h", red_hits_7d: "Red-list hits",
   findings_open: "Open findings", bans: "Ban proposals", hosts: "LAN hosts", vuln_kev: "Known-exploited CVEs", vuln_fixable: "Fixable CVEs",
-  ids_24h: "IDS alerts 24 h", integrity_open: "Integrity changes", approvals: "Waiting for you"};
+  ids_24h: "IDS alerts 24 h", integrity_open: "Integrity changes", approvals: "Review"};
 let LAYOUT = null, EDIT = null;
 
 function renderOverview(d, edgeBlind) {
@@ -1097,7 +1428,7 @@ function renderOverview(d, edgeBlind) {
     } else if (w.type === "approvals") {
       const ap = d.approvals || [];
       el.innerHTML = ap.length ? ap.slice(0, 5).map(a => `<div class="q" style="margin-bottom:6px">${esc(a.text.split("\n")[0]).slice(0, 140)}</div>`).join("") +
-        `<div class="note"><a href="#settings" onclick="show('settings');return false">decide →</a></div>` : '<div class="empty">Nothing waiting. 🎉</div>';
+        `<div class="note"><a href="#review" onclick="show('review');return false">decide →</a></div>` : '<div class="empty">Nothing waiting. 🎉</div>';
     } else if (w.type === "hosthealth") hostHealth(el, d.hosthealth);
     else if (w.type === "map") worldMap(el, d.geo);
     else if (w.type === "top") {
@@ -1288,7 +1619,20 @@ document.addEventListener("change", async e => {
 });
 
 // ── Connect: tokens, endpoints, integrations, VPN recipes ───────────────────
-const snip = (title, body, note) => `<div class="snip-h"><span>${title}</span><button class="btn ghost sm" data-copy>copy</button></div><pre class="snip">${esc(body)}</pre>${note ? `<div class="note" style="margin-top:-4px">${note}</div>` : ""}`;
+function shieldCode(){try{document.querySelectorAll("pre,code,kbd,.mono,.ip,.num").forEach(e=>e.setAttribute("translate","no"))}catch(e){}}
+let TOKEN = "";                 // a token the viewer made/pasted this session; fills the snippets
+const ICN = {
+  mcp:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>',
+  rest:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 4c-2 0-3 1-3 3v2c0 1-1 2-2 2 1 0 2 1 2 2v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1 1 2 2 2-1 0-2 1-2 2v2c0 2-1 3-3 3"/></svg>',
+  dash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M8 17v-5M13 17V8M18 17v-7"/></svg>',
+  home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>',
+  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg>',
+  cloud:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 18a4 4 0 01-.5-7.97A5.5 5.5 0 0117.5 10 3.5 3.5 0 0118 18z"/></svg>',
+};
+function fillTok(str){ if(!TOKEN) return str; const tk = esc(TOKEN); return str.split("${WARDEN_TOKEN}").join(tk).split("$WARDEN_TOKEN").join(tk); }
+document.addEventListener("input", e => { if(e.target && e.target.id === "tok-fill"){ TOKEN = e.target.value.trim(); if(SET) renderConnect(); } });
+const iconFor = tag => /cloud|aws|gcp|azure/i.test(tag) ? "cloud" : /MCP|agent|GPT|Action|bot/i.test(tag) ? "mcp" : /dashboard|metric|monitoring/i.test(tag) ? "dash" : /automation/i.test(tag) ? "home" : "rest";
+const snip = (title, body, note) => `<div class="snip-h"><span>${title}</span><button class="btn ghost sm" data-copy>copy</button></div><pre class="snip" translate="no">${esc(body)}</pre>${note ? `<div class="note" style="margin-top:-4px">${note}</div>` : ""}`;
 function renderConnect() {
   const here = location.origin + location.pathname.replace(/\/$/, "") + "/mcp";
   let mcp = /^https?:\/\//i.test(SET.mcp_url || "") ? SET.mcp_url : here, api = mcp.replace(/\/mcp$/, "/api/v1"), host;
@@ -1323,13 +1667,58 @@ function renderConnect() {
   --header "Authorization: Bearer $WARDEN_TOKEN"`)],
     ["Claude Desktop / Cursor / VS Code", "agent · MCP", snip("mcp.json", `{"mcpServers": {"warden": {"type": "http", "url": "${mcp}",
   "headers": {"Authorization": "Bearer \${WARDEN_TOKEN}"}}}}`)],
+    ["ChatGPT", "custom GPT · Action", snip("GPT → Actions → Authentication: API key (Bearer)", `Import an Action from:
+  ${api}/openapi.json
+Auth:  API Key · Bearer · paste the token from step 1
+Then ask it, e.g. "what is warden waiting on?" or "any known-exploited CVEs?"`, "Works the same for any assistant that imports an OpenAPI schema with a bearer key.")],
+    ["Any MCP client", "agent · MCP", snip("generic MCP server config", `name:    warden
+transport: http (streamable)
+url:     ${mcp}
+header:  Authorization: Bearer $WARDEN_TOKEN`, "Muse, LibreChat, Open WebUI, your own bot — anything that speaks MCP over HTTP. Tools: ask_warden + one per view.")],
     ["n8n / Node-RED / scripts", "REST", snip("HTTP request", `GET ${api}/summary
 Authorization: Bearer $WARDEN_TOKEN`)],
+    ["curl / anything", "REST", snip("terminal", `curl -s ${api}/summary \\
+  -H "Authorization: Bearer $WARDEN_TOKEN" | jq .
+# any view: /detections /vulns /approvals /ip/<addr> /search?q=cc:RU`)],
     ["Grafana / Homepage / Uptime Kuma", "dashboards · REST", snip("JSON API data source", `URL:    ${api}/summary
 Header: Authorization: Bearer $WARDEN_TOKEN
 Fields: kpi.events_24h · kpi.vuln_kev · kpi.ids_24h · mode`, "Uptime Kuma: an HTTP(s)-Json Query monitor on <code>kpi.vuln_kev == 0</code> turns red when a known-exploited CVE appears.")],
+    ["Open WebUI / LibreChat / Ollama", "local AI · MCP", snip("MCP server config", `name: warden
+transport: http (streamable)
+url: ${mcp}
+headers:
+  Authorization: Bearer $WARDEN_TOKEN`, "Open WebUI → Tools/MCP; LibreChat → librechat.yaml mcpServers; any local-AI front-end that speaks MCP over HTTP.")],
+    ["Prometheus / Grafana Agent", "metrics · REST (JSON)", snip("json_exporter module", `# warden serves JSON, not OpenMetrics — scrape it with json_exporter:
+modules:
+  warden:
+    metrics:
+      - name: warden_vuln_kev
+        path: '{ .kpi.vuln_kev }'
+      - name: warden_ids_24h
+        path: '{ .kpi.ids_24h }'
+# target ${api}/summary · header  Authorization: Bearer $WARDEN_TOKEN`, "Or point Grafana's JSON API data source straight at /summary.")],
+    ["Netdata / Zabbix / Checkmk", "monitoring · REST", snip("HTTP (JSON) check", `URL:    ${api}/summary
+Header: Authorization: Bearer $WARDEN_TOKEN
+Field:  kpi.vuln_kev       # alert when > 0
+# Zabbix:  HTTP agent item + JSONPath $.kpi.vuln_kev
+# Checkmk: check_httpv2 --json-path`, "Go red when a known-exploited CVE appears, or when warden leaves detect-only.")],
+    ["Slack / Discord bot", "chat bot · MCP / REST", snip("bot backend", `GET ${api}/approvals     # "what is warden waiting on?"
+GET ${api}/summary       # the headline numbers
+Authorization: Bearer $WARDEN_TOKEN
+# or wire the MCP endpoint ${mcp} into an MCP-aware bot`, "warden already pushes alerts to your channel — this is the pull side, so you can ask it questions from chat.")],
+    ["AWS", "cloud · CloudWatch / Security Hub", snip("scheduled Lambda", `import urllib.request, json, boto3
+req = urllib.request.Request("${api}/summary", headers={"Authorization": "Bearer $WARDEN_TOKEN"})
+k = json.load(urllib.request.urlopen(req))["kpi"]
+boto3.client("cloudwatch").put_metric_data(Namespace="warden",
+  MetricData=[{"MetricName": "vuln_kev", "Value": k["vuln_kev"]}])
+# EventBridge rate(5 minutes) -> this Lambda -> CloudWatch alarm on vuln_kev > 0`, "Or map findings into Security Hub (ASFF) and alert via SNS.")],
+    ["GCP", "cloud · Cloud Monitoring / SCC", snip("scheduled Cloud Function", `import urllib.request, json
+req = urllib.request.Request("${api}/summary", headers={"Authorization": "Bearer $WARDEN_TOKEN"})
+k = json.load(urllib.request.urlopen(req))["kpi"]
+# write k["vuln_kev"] as custom.googleapis.com/warden/vuln_kev via monitoring_v3
+# Cloud Scheduler (every 5 min) drives it; alert policy on the metric > 0`, "Or push findings to Security Command Center.")],
   ];
-  $("#intg").innerHTML = I.map(([t, tag, body]) => `<div class="card"><h3>${t} <span class="b">${tag}</span></h3>${body}</div>`).join("");
+  $("#intg").innerHTML = I.map(([t, tag, body]) => `<details class="tile"><summary><span class="ti-ic">${ICN[iconFor(tag)]}</span><span class="ti-txt"><span class="ti-name">${t}</span><span class="ti-tag">${tag}</span></span></summary><div class="ti-body">${fillTok(body)}</div></details>`).join("");
   const V = [
     ["Tailscale", `tailscale serve --bg --https=443 http://127.0.0.1:8792
 # tailnet-only: https://<this-machine>.<tailnet>.ts.net
@@ -1351,7 +1740,8 @@ handle { forward_auth <your-sso> … ; reverse_proxy 127.0.0.1:8792 }`],
 # allow only your admin devices to it (ACL / flow rules),
 # and leave it off every public DNS record`],
   ];
-  $("#vpn").innerHTML = V.map(([t, body]) => `<div class="card"><h3>${t}</h3>${snip("recipe", body)}</div>`).join("");
+  $("#vpn").innerHTML = V.map(([t, body]) => `<details class="tile"><summary><span class="ti-ic">${ICN.shield}</span><span class="ti-txt"><span class="ti-name">${t}</span><span class="ti-tag">VPN / mesh</span></span></summary><div class="ti-body">${fillTok(snip("recipe", body))}</div></details>`).join("");
+  const ts = $("#tok-state"); if (ts) ts.textContent = TOKEN ? "✓ filled with your token — don't share screenshots" : "";
 }
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-copy]"); if (!b) return;
@@ -1361,15 +1751,31 @@ document.addEventListener("click", e => {
 
 // ── Settings: editable config + write-only secrets ──────────────────────────
 let FID = 0;
+const FIELD_LABELS = {
+  "estate.name": "Estate name", "estate.domain": "Domain", "estate.timezone": "Time zone",
+  "notify.backend": "Alerts channel", "notify.channel": "Channel ID", "notify.ntfy_url": "ntfy server URL",
+  "api.enabled": "REST API + MCP", "api.public_url": "Public URL", "cloudflare.zone_id": "Cloudflare Zone ID",
+  "patch.night": "Overnight patch time", "patch.expire_hours": "Approval expires after (hours)",
+};
 function field(f) {
   const id = "cfg-" + (++FID), v = f.value ?? "";
   const input = Array.isArray(f.type) ? `<select id="${id}">${f.type.map(o => `<option${o === v ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`
     : f.type === "bool" ? `<select id="${id}"><option value="true"${v ? " selected" : ""}>on</option><option value="false"${v ? "" : " selected"}>off</option></select>`
     : `<input id="${id}" value="${esc(v)}" ${f.type === "int" ? 'inputmode="numeric"' : ""} placeholder="not set">`;
-  return `<div class="fld"><label for="${id}">${esc(f.key)}</label>${input}<button class="btn sm" data-save-key="${esc(f.key)}">Save</button></div>`;
+  return `<div class="fld"><label for="${id}">${esc(FIELD_LABELS[f.key] || f.key)}<span class="fkey">${esc(f.key)}</span></label>${input}<button class="btn sm" data-save-key="${esc(f.key)}">Save</button></div>`;
 }
+// Grouped by the prefix before the first dot (cloudflare.*, incidents.*, …) — a tidy section per subsystem.
+const CFG_GROUP_TITLES = {cloudflare: "Cloudflare edge", incidents: "Incident brain", agents: "Agents", geo: "Geo & red list",
+  api: "API & tokens", notify: "Alerts & notifications", patch: "Patching", vuln: "Vulnerabilities", ids: "Intrusion detection",
+  net: "Network", estate: "Estate", logins: "Sign-ins", beszel: "Host health"};
 function renderCfg() {
-  $("#cfg").innerHTML = (SET.editable || []).map(field).join("") + '<div class="msg" id="cfg-msg"></div>';
+  const eds = SET.editable || [];
+  if (!eds.length) { $("#cfg").innerHTML = '<div class="empty">Nothing is browser-editable in this setup — every setting lives in <code>warden.yml</code>.</div>'; return; }
+  const groups = {};
+  eds.forEach(f => { const g = (f.key.split(".")[0] || "other"); (groups[g] = groups[g] || []).push(f); });
+  $("#cfg").innerHTML = Object.keys(groups).sort().map(g =>
+    `<div class="cfg-grp"><h4>${esc(CFG_GROUP_TITLES[g] || g)} <span class="q">${esc(g)}.*</span></h4>${groups[g].map(field).join("")}</div>`).join("")
+    + '<div class="msg" id="cfg-msg"></div>';
 }
 document.addEventListener("click", async e => {
   const k = e.target.closest("[data-save-key]");
@@ -1396,10 +1802,14 @@ let SET = null;
 async function loadSettings() {
   try { SET = await getj("api/settings"); if (SET.error) return; } catch { return; }
   const ap = SET.approvals || [];
-  badge("settings", ap.length, false);
-  $("#appr").innerHTML = ap.length ? ap.map(a => { const ch = JSON.parse(a.choices || "[]");
-    return `<div class="appr"><pre>${esc(a.text)}</pre><div style="display:flex;flex-direction:column;gap:6px">${ch.map(c =>
-      `<button class="btn ${c === "❌" ? "ghost" : ""} sm" data-appr="${esc(a.id)}" data-c="${c}">${c} ${{"✅": "approve", "❌": "reject", "⚡": "approve, now"}[c] || ""}</button>`).join("")}</div></div>`; }).join("")
+  badge("review", ap.length, false);
+  const APPR_LEGEND = "✅ = expected, accept as the new baseline · ❌ = keep open, I'll investigate";
+  const fmtAppr = t => esc(t).split("\n")
+      .filter(l => l.trim() !== "" && !/=\s*expected, accept as the new baseline/.test(l))
+      .join("\n").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  $("#appr").innerHTML = ap.length ? `<div class="appr-legend q">${APPR_LEGEND}</div>` + ap.map(a => { const ch = JSON.parse(a.choices || "[]");
+    return `<div class="appr"><div class="apx">${fmtAppr(a.text)}</div><div class="apb">${ch.map(c =>
+      `<button class="btn ${c === "❌" ? "ghost" : ""} sm" data-appr="${esc(a.id)}" data-c="${c}">${c} ${{"✅": "approve", "❌": "reject", "⚡": "now"}[c] || ""}</button>`).join("")}</div></div>`; }).join("")
     : '<div class="empty">Nothing waiting for a decision.</div>';
   const sc = SET.score; $("#setup-score").textContent = `${sc.required_ok}/${sc.required} required · ${sc.optional_ok}/${sc.optional} optional`;
   table("setup", [{h: "", f: r => r.ok ? '<span class="y">✓</span>' : r.optional ? '<span class="q">○</span>' : '<span class="n">✗</span>'},
@@ -1413,7 +1823,7 @@ async function loadSettings() {
     {h: "Last used", f: r => ago(r.last_used), cls: "ts"},
     {h: "", f: r => r.revoked ? '<span class="q">revoked</span>' : `<button class="btn ghost sm" data-revoke="${r.id}">revoke</button>`}],
     SET.tokens, "No tokens yet.");
-  renderConnect(); renderCfg();
+  renderConnect(); renderCfg(); shieldCode();
 }
 document.addEventListener("click", async e => {
   const a = e.target.closest("[data-appr]");
@@ -1424,14 +1834,14 @@ document.addEventListener("click", async e => {
   if (e.target.id === "tok-new") {
     const r = await post("api/tokens", "tokens", {name: $("#tok-name").value.trim() || "agent"});
     $("#tok-once").innerHTML = r.ok ? `<div class="tokbox">${esc(r.token)}</div><div class="note" style="margin:0 0 8px">${esc(r.note)}</div>` : `<div class="n">${esc(r.error || "failed")}</div>`;
-    $("#tok-name").value = ""; loadSettings();
+    $("#tok-name").value = ""; if (r.ok && r.token) TOKEN = r.token; loadSettings();
   }
 });
 
 async function load() {
-  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec);
+  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); renderAgents(D.agents); shieldCode();
         const a = document.activeElement;   // don't wipe a half-typed setting/token on the 60-s refresh
-        if (!(a && /INPUT|SELECT/.test(a.tagName) && a.closest("#t-settings,#t-connect"))) loadSettings(); }
+        if (!(a && /INPUT|SELECT/.test(a.tagName) && a.closest("#t-settings,#t-account,#t-connect"))) loadSettings(); }
   catch (e) { console.error("warden render:", e); $("#updated").textContent = "⚠ refresh failed"; }
 }
 
@@ -1449,14 +1859,36 @@ async function runSearch(text) {
 $("#s-chips").innerHTML = ["type:edge", "kind:auth-failure", "kind:sensitive-file", "src:authelia", "type:net-alert kind:NEW_DEVICE", "cc:RU", "cc:CN"]
   .map(c => `<button class="chip">${c}</button>`).join("");
 $("#s-chips").onclick = e => { if (e.target.classList.contains("chip")) runSearch(e.target.textContent); };
+// ── query builder: no AI, just field chips whose values come from what warden has seen ──
+function qbVals(field) {
+  const d = D || {}, c = d.charts || {};
+  if (field === "type") return ["log", "edge", "host", "net-alert", "vuln", "ids", "intel"];
+  if (field === "kind") return [...new Set([...(c.kind || []), ...(c.net_alerts || [])].map(x => x.k))].filter(Boolean);
+  if (field === "src") return (c.source || []).map(x => x.k).filter(Boolean);
+  if (field === "cc") return (d.geo || []).map(x => x.cc).filter(Boolean);
+  if (field === "date") { const a = []; for (let i = 0; i < 10; i++) a.push(new Date(Date.now() - i * 864e5).toISOString().slice(0, 10)); return a; }
+  return [];
+}
+function qbFill() { $("#qb-vals").innerHTML = qbVals($("#qb-field").value).slice(0, 80).map(v => `<option value="${esc(v)}">`).join(""); }
+$("#qb-field").addEventListener("change", qbFill);
+$("#qb-val").addEventListener("focus", qbFill);
+$("#qb-val").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("#qb-add").click(); } });
+$("#qb-add").onclick = () => {
+  const v = $("#qb-val").value.trim(); if (!v) { $("#qb-val").focus(); return; }
+  const tok = $("#qb-op").value + $("#qb-field").value + ":" + v, cur = $("#q").value.trim();
+  $("#q").value = (cur ? cur + " " : "") + tok; $("#qb-val").value = "";
+  runSearch($("#q").value.trim());
+};
+$("#qb-clear").onclick = () => { $("#q").value = ""; $("#qb-val").value = ""; $("#s-meta").textContent = ""; table("sres", [], [], "Cleared — build a new query above."); badge("search", 0, false); };
+qbFill();
 $("#q").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.value.trim()) runSearch(e.target.value.trim()); if (e.key === "Escape") e.target.blur(); });
 document.addEventListener("keydown", e => { if (e.key === "/" && document.activeElement.tagName !== "INPUT") { e.preventDefault(); $("#q").focus(); } });
 
 nav();
 let start = location.hash.slice(1);
-if (!TABS.some(t => t[0] === start)) { try { start = localStorage.getItem("warden-tab") || "overview"; } catch { start = "overview"; } }
-show(TABS.some(t => t[0] === start) ? start : "overview");
-window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (TABS.some(t => t[0] === h)) show(h); });
+if (!navigable(start)) { try { start = localStorage.getItem("warden-tab") || "overview"; } catch { start = "overview"; } }
+show(navigable(start) ? start : "overview");
+window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (navigable(h)) show(h); });
 loadAccount(); load(); setInterval(load, 60000);
 </script>
 </html>

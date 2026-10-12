@@ -116,6 +116,8 @@ def main():
     con.commit()
     v3(con)
     con.commit()
+    v31(con)
+    con.commit()
     print(f"demo data written to {config.DB}")
 
 
@@ -180,6 +182,99 @@ def v3(con):
         con.execute("insert into net_health values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     ((NOW - timedelta(minutes=m)).timestamp(), 0, 0.6, 0, 14 + random.random() * 3, 9, 12, 140, None, None,
                      round(30 + random.random() * 20, 1), round(4 + random.random() * 3, 1), "ok", "[]"))
+
+
+def v31(con):
+    """v3.1: the incident brain (shadow) and generic agent tracking — map, access, destination history."""
+    con.executescript("""
+      create table if not exists incidents(id integer primary key, entity text, kind text, opened text, last_seen text,
+        n_facts integer default 0, weight integer default 0, owner_label text, owner_source text);
+      create table if not exists incident_facts(incident_id integer, fact_id text, ts text, source text, summary text,
+        weight integer, data text, primary key(incident_id, fact_id));
+      create table if not exists incident_decisions(id integer primary key, incident_id integer, ts text, model text,
+        facts_hash text, status text, action text, confidence real, why text, cited text, reason text,
+        tokens_in integer, tokens_out integer, cost real);
+      create table if not exists agent_seen(agent text primary key, first_seen text, last_seen text, host text);
+      create table if not exists agent_conns(agent text, host text, dest text, dest_ip text, port integer,
+        domain text, first_seen text, last_seen text, hits integer default 1, container text, sample_cmd text,
+        bytes_recv integer default 0, primary key(agent, dest, port));
+      create table if not exists agent_alerts(id integer primary key, ts text, agent text, host text, dest text,
+        dest_ip text, kind text, feed text, detail text, notified integer default 0, unique(agent, dest_ip, feed));
+      create table if not exists agent_findings(id integer primary key, ts text, agent text, host text, dest text,
+        score integer, decision text, reasons text, facts text, explain text, message_id text, verdict text,
+        decided_at text, unique(agent, dest));
+      create table if not exists agent_runs(host text primary key, ts text, status text, note text,
+        seen integer, attributed integer);
+      create table if not exists agent_perms(agent text, host text, ts text, user text, uid integer, gid integer,
+        groups text, caps text, sudo text, root integer, primary key(agent, host));
+      create table if not exists agent_files(host text, path text, stat text, ts text, primary key(host, path));
+    """)
+    # ── incidents (shadow): every detector joined per entity; the model's would-be action is recorded, never run ──
+    incs = [
+        ("203.0.113.0/24", "subnet", 31, 9, None, None,
+         [("edge", "14 WAF blocks for /.env and /.git across 3 origins", 4),
+          ("log", "path traversal + SQLi from 203.0.113.9 and 203.0.113.41", 4),
+          ("geo", "all 8 addresses geolocate to a red-list country", 2)],
+         ("ok", "propose_edge_block", 0.82, "Co-ordinated probing from one /24 across edge and origin; recommend an edge block for review.")),
+        ("host:192.168.1.5", "box", 12, 7, "benign", "owner ✅ 2 days ago",
+         [("vuln", "1 known-exploited CVE with a fix (CISA KEV)", 4),
+          ("endpoint", "6 failed SSH sign-ins then a new key accepted", 3)],
+         ("ok", "ask_owner", 0.6, "A KEV with a fix on an internet-reachable box, plus an unfamiliar new key — worth a human look.")),
+        ("192.168.10.31", "device", 5, 4, None, None,
+         [("intel", "kitchen bulb looked up a known-C2 domain", 3),
+          ("device", "first new domain this device has ever requested", 2)],
+         ("ok", "watch", 0.44, "Likely a firmware call-home, but it is new for this device; watch rather than act.")),
+    ]
+    for i, (entity, kind, weight, nf, ol, osrc, facts, dec) in enumerate(incs, 1):
+        con.execute("insert into incidents(id,entity,kind,opened,last_seen,n_facts,weight,owner_label,owner_source) "
+                    "values(?,?,?,?,?,?,?,?,?)", (i, entity, kind, ts(days=2), ts(hours=i), nf, weight, ol, osrc))
+        for j, (src, summary, w) in enumerate(facts):
+            con.execute("insert into incident_facts(incident_id,fact_id,ts,source,summary,weight,data) values(?,?,?,?,?,?,?)",
+                        (i, f"{src}:{i}:{j}", ts(hours=i, minutes=j * 7), src, summary, w, "{}"))
+        st, action, conf, why = dec
+        con.execute("insert into incident_decisions(incident_id,ts,model,facts_hash,status,action,confidence,why,cited,"
+                    "reason,tokens_in,tokens_out,cost) values(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (i, ts(hours=i), "demo-model", f"h{i}", st, action, conf, why, "[]", "", 300, 40, 0.0002))
+    # ── agents: who talks to what, with bytes, known-bad, access, and a map's worth of edges ──
+    host = "warden-host"
+    agents = [
+        ("hermes:scout", 0, 0, "000001ffffffffff", "", "User warden-scout may run: (ALL) NOPASSWD: /usr/bin/systemctl", 1),
+        ("hermes:coder", 1001, 1001, "0000000000000400", "1001 999", "", 0),      # cap_net_bind_service, docker group
+        ("opencode:steward", 1002, 1002, "0000000000000000", "1002", "", 0),
+        ("app:instagram", 1003, 1003, "0000000000000000", "1003", "", 0),
+    ]
+    for agent, uid, gid, caps, groups, sudo, root in agents:
+        con.execute("insert into agent_seen(agent,first_seen,last_seen,host) values(?,?,?,?)", (agent, ts(days=20), ts(minutes=8), host))
+        con.execute("insert into agent_perms(agent,host,ts,user,uid,gid,groups,caps,sudo,root) values(?,?,?,?,?,?,?,?,?,?)",
+                    (agent, host, ts(minutes=8), agent.split(":")[-1] if root == 0 else "root", uid, gid, groups, caps, sudo, root))
+    for path, stat in (("/opt/warden/warden.yml", "0:0:600"), ("/opt/warden/warden.db", "0:0:640"),
+                       ("/home/coder/.env", "1001:999:640")):
+        con.execute("insert into agent_files(host,path,stat,ts) values(?,?,?,?)", (host, path, stat, ts(minutes=8)))
+    # destinations: (agent, domain, ip, port, hits, bytes, container)
+    dests = [
+        ("hermes:scout", "openrouter.ai", "198.51.100.7", 443, 420, 2_300_000, ""),
+        ("hermes:scout", "api.github.com", "198.51.100.8", 443, 86, 540_000, ""),
+        ("hermes:coder", "api.github.com", "198.51.100.8", 443, 310, 61_000_000, "docker-9ad31c2b7e01"),
+        ("hermes:coder", "registry.npmjs.org", "198.51.100.12", 443, 140, 48_500_000, "docker-9ad31c2b7e01"),
+        ("opencode:steward", "api.openai.com", "198.51.100.21", 443, 72, 1_100_000, ""),
+        ("app:instagram", "graph.instagram.com", "198.51.100.33", 443, 55, 260_000, ""),
+        ("app:instagram", "", "203.0.113.66", 4444, 3, 900, ""),                   # the known-bad one
+    ]
+    for agent, domain, ip, port, hits, brecv, ctr in dests:
+        dest = domain or ip
+        con.execute("insert into agent_conns(agent,host,dest,dest_ip,port,domain,first_seen,last_seen,hits,container,sample_cmd,bytes_recv) "
+                    "values(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (agent, host, dest, ip, port, domain, ts(days=15), ts(minutes=9), hits, ctr, agent, brecv))
+    con.execute("insert into agent_alerts(ts,agent,host,dest,dest_ip,kind,feed,detail,notified) values(?,?,?,?,?,?,?,?,1)",
+                (ts(hours=3), "app:instagram", host, "203.0.113.66", "203.0.113.66", "c2", "feodo", "outbound to 203.0.113.66:4444"))
+    con.execute("insert into agent_findings(ts,agent,host,dest,score,decision,reasons,facts,explain,message_id,verdict) "
+                "values(?,?,?,?,?,?,?,?,?,?,?)",
+                (ts(hours=6), "opencode:steward", host, "api.openai.com", 58, "review",
+                 '["a destination this agent has not used before","first seen between midnight and 6am"]', "{}",
+                 "Could be a new model backend; check the run that opened it.", "demo-mid", None))
+    for h in (host,):
+        con.execute("insert into agent_runs(host,ts,status,note,seen,attributed) values(?,?,?,?,?,?)",
+                    (h, ts(minutes=8), "ok", "root; 28/34 sockets attributed", 34, 28))
 
 
 if __name__ == "__main__":
