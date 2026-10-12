@@ -27,6 +27,19 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 - [Roadmap](#roadmap)
 - [Support and licence](#support-and-licence)
 
+## What's new in v3.3
+
+Plug anything into warden, and find your way around it.
+
+![warden v3.3 Connect tab](docs/v33-connect.png)
+
+- **Connect tab** — integrations as a tile grid (15 of them: MCP agents, dashboards, local-AI frontends, Prometheus, Netdata/Zabbix/Checkmk, a Slack/Discord bot, and AWS + GCP). Click a tile for its setup; **make or paste a token and every snippet fills in, ready to copy** — no hand-editing.
+- **Docs tab** — concise in-app help (what warden is, a tour of each tab, how to connect, the security model), with links out to the full GitHub docs.
+- **Clearer Agents tab** — the map is now **per-agent lanes** (no crossing lines; known-bad in red, bytes shown), and *"what each agent can access"* is a tidy grid.
+- **Overview you can arrange** — the numbers row can be placed anywhere (below host health, under the traffic map) and everything reorders, all in Customise.
+- **Reads in any language** — the console is plain, labelled HTML, so your browser translates it; commands, IPs and config keys are left intact.
+- **Merged fixes** — package types inside container images, a tested OUI "never guess a vendor" contract, and `pct exec`/`lxc-attach`/web-console sign-ins now recorded.
+
 ## What's new in v3.2
 
 A much simpler console, and the database is now private at rest.
