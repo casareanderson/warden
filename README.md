@@ -343,12 +343,18 @@ Known limits (full list in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)): the Cloudflare W
   Amazonbot, …) and show which bot crawled which hostname, how often, and whether it honoured robots.txt — the
   outbound-agent view's mirror image, for the AI traffic coming *at* you rather than *from* your agents.
 
-## Related tools
+## The warden family
 
-warden is the full platform. Two of its engines also ship on their own, for when you want just one piece:
+Three tools, one job: knowing what's actually happening on your homelab. Each one runs on its own, and warden is
+the big brother that brings it all into one place.
 
-- **[sieve](https://github.com/casareanderson/sieve)** — warden's dependency/CVE scanner as a standalone CLI (OSV.dev + CISA KEV + EPSS, no server).
-- **ephor** — warden's AI-agent network monitor as a standalone, passive watcher (coming soon).
+| Tool | Watches | Runs as |
+|---|---|---|
+| **[warden](https://github.com/casareanderson/warden)** | The whole estate: intrusions, bans, vulnerabilities, patches and AI agents, in one console you review and approve from | A server + web console |
+| **[sieve](https://github.com/casareanderson/sieve)** | Known vulnerabilities in packages, container images and lockfiles (OSV.dev + CISA KEV + EPSS) | A CLI or GitHub Action: `pipx install sieve-scan` |
+| **[ephor](https://github.com/casareanderson/ephor)** | What the AI agents on a Linux box connect to, download and can access | A dependency-free CLI that runs down to a Pi Zero |
+
+sieve and ephor both started life inside warden and were pulled out so you can use just the piece you need.
 
 ## Support and licence
 
