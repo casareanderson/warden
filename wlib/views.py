@@ -389,6 +389,7 @@ def agents_payload():
               "order by agent, hits desc")
     for c in conns:
         c["bad"] = c["dest_ip"] in bad_ips or c["dest"] in bad_dests
+        c["cc"] = GEO.cc(c["dest_ip"] or "")
 
     # Destination history across ALL agents: one row per destination, known-bad first, with totals and who reached it.
     dests = q(f"""select dest, dest_ip, max(domain) domain, group_concat(distinct agent) agents, count(distinct agent) n_agents,

@@ -318,6 +318,7 @@ html[data-density=compact] nav button{padding:7px 10px}
 .dchip{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line2);border-radius:999px;padding:2px 9px;font-size:11.5px;color:var(--dim);font-family:var(--mono)}
 .dchip.bad{background:var(--red-bg);border-color:var(--red-line);color:var(--red)}
 .dchip .dby{color:var(--faint);font-size:10px}
+.dchip .dz{font-size:11px;line-height:1}
 .numrow{grid-column:1/-1;background:transparent;border:0;padding:0}
 .numrow .kpis{margin:0}
 </style>
@@ -1257,6 +1258,19 @@ function renderAgents(A) {
   badge("agents", bad + open, bad > 0);
 }
 // Agent map: a column of agents on the left, their destinations on the right, a line per edge. Known-bad = red.
+function _ip4(ip){const p=(ip||"").split(".");if(p.length!==4)return null;let n=0;for(const q of p){const x=+q;if(!(x>=0&&x<=255))return null;n=(n*256)+x;}return n>>>0;}
+function _inCidr(ip,cidr){const[b,bits]=cidr.split("/");const ii=_ip4(ip),bi=_ip4(b);if(ii==null||bi==null)return false;const m=bits==="0"?0:(~0<<(32-+bits))>>>0;return((ii&m)>>>0)===((bi&m)>>>0);}
+const CF4=["173.245.48.0/20","103.21.244.0/22","103.22.200.0/22","103.31.4.0/22","141.101.64.0/18","108.162.192.0/18","190.93.240.0/20","188.114.96.0/20","197.234.240.0/22","198.41.128.0/17","162.158.0.0/15","104.16.0.0/13","104.24.0.0/14","172.64.0.0/13","131.0.72.0/22"];
+const PRIV4=["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","127.0.0.0/8","169.254.0.0/16"];
+function zoneOf(ip,bad){
+  if(bad)return{ic:"\u2620",t:"known-bad"};
+  if(!ip)return{ic:"\ud83c\udf10",t:"internet"};
+  if(ip.includes(":"))return{ic:"\ud83c\udf10",t:"internet (IPv6)"};
+  if(PRIV4.some(c=>_inCidr(ip,c)))return{ic:"\ud83c\udfe0",t:"internal / LAN"};
+  if(_inCidr(ip,"100.64.0.0/10"))return{ic:"\ud83d\udd17",t:"mesh (NetBird)"};
+  if(CF4.some(c=>_inCidr(ip,c)))return{ic:"\u2601\ufe0f",t:"behind Cloudflare"};
+  return{ic:"\ud83c\udf10",t:"internet"};
+}
 function drawAgentMap(A) {
   const el = $("#ag-map"); if (!el) return;
   const conns = A.conns || [], agents = [...new Set(conns.map(c => c.agent))];
@@ -1264,16 +1278,16 @@ function drawAgentMap(A) {
   const badIp = new Set((A.alerts || []).map(a => a.dest_ip)), isBad = c => c.bad || badIp.has(c.dest_ip);
   const byAgent = {};
   conns.forEach(c => { const m = byAgent[c.agent] || (byAgent[c.agent] = {});
-    const d = m[c.dest] || (m[c.dest] = {dest: c.dest, hits: 0, by: 0, bad: false});
-    d.hits += c.hits || 0; d.by = Math.max(d.by, c.bytes_recv || 0); d.bad = d.bad || isBad(c); });
+    const d = m[c.dest] || (m[c.dest] = {dest: c.dest, ip: c.dest_ip, cc: c.cc || "", hits: 0, by: 0, bad: false});
+    d.hits += c.hits || 0; d.by = Math.max(d.by, c.bytes_recv || 0); d.bad = d.bad || isBad(c); if (!d.cc && c.cc) d.cc = c.cc; });
   const laneBad = a => Object.values(byAgent[a]).some(d => d.bad);
   const order = agents.slice().sort((a, b) => (laneBad(b) - laneBad(a)) || a.localeCompare(b));
   const total = new Set(conns.map(c => c.dest)).size;
   el.innerHTML = `<div class="lanes">` + order.map(a => {
     const ds = Object.values(byAgent[a]).sort((x, y) => (y.bad - x.bad) || (y.hits - x.hits));
-    return `<div class="lane" data-agent="${esc(a)}" title="click to filter the tables below"><div class="lane-ag${laneBad(a) ? " bad" : ""}">${esc(a)}</div><div class="lane-arrow">→</div><div class="lane-dests">${ds.map(d => `<span class="dchip${d.bad ? " bad" : ""}" title="${esc(d.dest)} · ${d.hits} hits${d.by ? " · " + bytes(d.by) : ""}${d.bad ? " · known-bad" : ""}">${esc(d.dest)}${d.by ? `<span class="dby">${bytes(d.by)}</span>` : ""}</span>`).join("")}</div></div>`;
+    return `<div class="lane" data-agent="${esc(a)}" title="click to filter the tables below"><div class="lane-ag${laneBad(a) ? " bad" : ""}">${esc(a)}</div><div class="lane-arrow">→</div><div class="lane-dests">${ds.map(d => { const z = zoneOf(d.ip, d.bad); return `<span class="dchip${d.bad ? " bad" : ""}" title="${esc(d.dest)} · ${z.t}${d.cc ? " · " + d.cc : ""} · ${d.hits} hits${d.by ? " · " + bytes(d.by) : ""}"><span class="dz">${z.ic}</span>${d.cc ? flag(d.cc) + " " : ""}${esc(d.dest)}${d.by ? `<span class="dby">${bytes(d.by)}</span>` : ""}</span>`; }).join("")}</div></div>`;
   }).join("") + `</div>`;
-  $("#ag-map-h").textContent = `· ${agents.length} agent${agents.length === 1 ? "" : "s"} · ${total} destination${total === 1 ? "" : "s"}`;
+  $("#ag-map-h").textContent = `· ${agents.length} agent${agents.length === 1 ? "" : "s"} · ${total} destination${total === 1 ? "" : "s"} · ☁️ behind Cloudflare · 🌐 internet · 🏠 LAN · 🔗 mesh · ☠ known-bad`;
 }
 function renderAgentPerms(perms) {
   const el = $("#ag-perms"); if (!el) return;
