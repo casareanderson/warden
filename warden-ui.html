@@ -247,9 +247,14 @@ html[data-nav=top] nav{position:sticky;top:var(--hdr,58px);z-index:4;background:
 /* agent permissions cards */
 .perm{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:11px 13px;margin-bottom:8px}
 .perm.hot{border-color:var(--amb-line)}
-.perm .ph{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
-.perm .ph b{font-family:var(--mono)} .perm .pf{color:var(--dim);font-size:var(--fs-sm);line-height:1.6}
-.perm .pf code{background:var(--panel2);padding:0 4px;border-radius:4px}
+.perm .ph{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:9px}
+.perm .ph .pid{min-width:0}
+.perm .ph b{font-family:var(--mono)}
+.perm .ptags{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+.perm dl.pf{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:0;font-size:var(--fs-sm)}
+.perm dl.pf dt{color:var(--faint);white-space:nowrap}
+.perm dl.pf dd{margin:0;color:var(--dim)}
+.perm dl.pf code{background:var(--panel2);padding:0 5px;border-radius:4px;color:var(--fg)}
 .agmap text{fill:var(--fg);font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 .agmap .t2{fill:var(--dim);font-size:10px}
 .agmap .node{fill:var(--panel2);stroke:var(--line2)} .agmap .node.bad{stroke:var(--red-line);fill:var(--red-bg)}
@@ -1285,14 +1290,17 @@ function renderAgentPerms(perms) {
     (p.cap_hot || []).filter(c => c !== "(all)").forEach(c => tags.push(`<span class="b amb" title="Linux capability">cap_${esc(c)}</span>`));
     const caps = (p.cap_names || []);
     const reads = p.can_read || [];
-    return `<div class="perm${p.privileged ? " hot" : ""}"><div class="ph"><b>${esc(p.agent)}</b> <span class="q">on ${esc(p.host)}</span>
-        <span class="q">\u00b7 runs as ${esc(p.user || p.uid)}${p.group ? " \u00b7 " + esc(p.group) : ""}</span>${tags.join(" ")}</div>
-      <div class="pf">
-        ${(p.groups_list || []).length ? `Groups: ${p.groups_list.map(g => `<code>${esc(g)}</code>`).join(" ")}<br>` : ""}
-        Capabilities: ${p.cap_full ? "the full set (root-equivalent)" : caps.length ? caps.map(c => `<code>${esc(c)}</code>`).join(" ") : "none"}<br>
-        Sudo: ${p.has_sudo ? esc((p.sudo || "").slice(0, 160)) : '<span class="q">none it could use without a password, or not checkable here</span>'}<br>
-        Can read: ${reads.length ? reads.map(f => `<code>${esc(f)}</code>`).join(" ") : '<span class="q">none of the configured secret files</span>'}
-      </div></div>`;
+    return `<div class="perm${p.privileged ? " hot" : ""}">
+      <div class="ph">
+        <div class="pid"><b>${esc(p.agent)}</b> <span class="q">on ${esc(p.host)} · runs as ${esc(p.user || p.uid)}${p.group ? " · " + esc(p.group) : ""}</span></div>
+        ${tags.length ? `<div class="ptags">${tags.join("")}</div>` : ""}
+      </div>
+      <dl class="pf">
+        <dt>Groups</dt><dd>${(p.groups_list || []).length ? p.groups_list.map(g => `<code>${esc(g)}</code>`).join(" ") : '<span class="q">—</span>'}</dd>
+        <dt>Capabilities</dt><dd>${p.cap_full ? '<span class="n">the full set (root-equivalent)</span>' : caps.length ? caps.map(c => `<code>${esc(c)}</code>`).join(" ") : '<span class="q">none</span>'}</dd>
+        <dt>Sudo</dt><dd>${p.has_sudo ? `<code>${esc((p.sudo || "").slice(0, 160))}</code>` : '<span class="q">none without a password, or not checkable here</span>'}</dd>
+        <dt>Can read</dt><dd>${reads.length ? reads.map(f => `<code>${esc(f)}</code>`).join(" ") : '<span class="q">none of the configured secret files</span>'}</dd>
+      </dl></div>`;
   }).join("");
 }
 document.addEventListener("click", e => {          // agent map: click an agent to filter the per-agent tables
