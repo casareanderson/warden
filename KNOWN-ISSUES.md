@@ -85,9 +85,10 @@ roll-up and edge-ban logic are general.
   six of the "new" ones were bulbs and a TV that had been asleep. Setting it to
   0 turns those into permanent false alarms.
 - **OUI tables go stale.** nmap's shipped vendor table did not know a prefix
-  that accounted for 17 hosts. Only put verifiable entries in `OUI_EXTRA`: a
-  guessed vendor name is worse than a blank one, because it makes an unknown
-  device look identified.
+  that accounted for 17 hosts. `OUI_EXTRA` patches verifiable gaps only, and
+  `tests/test_netscan.py` now refuses a guessed entry: a vendor name is worse
+  than a blank one, because it makes an unknown device look identified.
+  Unknown prefixes still read `unknown (OUI … not in table)`.
 
 ## edge-sentry
 
