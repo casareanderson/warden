@@ -81,6 +81,32 @@ def test_parse_formats_and_self(hb):
     assert ev[0]["ts"] == "2026-10-11 12:49:33"
 
 
+def test_parse_attach_sessions_and_dedup(hb):
+    text = "\n".join([
+        "@@last",
+        "@@ps",
+        "1 1 ? root systemd",
+        "42 1 pts/0 root -bash",
+        "43 1 console root getty",
+        "44 1 pts/1 admin sh",
+        "45 1 ? root sh",                       # warden's own no-tty sweep — never a sign-in
+    ])
+    ev = hb.parse(text, {}, now_ts="2026-10-11 10:00:00")
+    attach = [e for e in ev if e["method"] == "attach"]
+    assert {e["src"] for e in attach} == {"pts/0", "pts/1"}
+    assert {e["key_fp"] for e in attach} == {"pid:42", "pid:44"}
+    assert all(e["ok"] and not e["self"] for e in attach)
+    con = hb.db()
+    assert hb.store(con, "ct:101", attach, "t") == []               # baseline + attach never raises "new"
+    again = [dict(e, ts="2026-10-11 10:15:00") for e in attach]
+    assert hb.store(con, "ct:101", again, "t") == []                # same live session on the next sweep
+    n = con.execute("select count(*) from logins where target='ct:101' and method='attach'").fetchone()[0]
+    assert n == 2                                                   # one row each, not one per sweep
+    counts = {r["key_fp"]: r["n"] for r in con.execute(
+        "select key_fp, n from login_pairs where target='ct:101'")}
+    assert counts == {"pid:42": 1, "pid:44": 1}
+
+
 def test_split_node_sections(hb):
     out = "nodeline1\nnodeline2\n@@ct:101\nct101line\n@@ct:102\n"
     parts = hb.split_sections(out)
