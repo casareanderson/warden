@@ -321,6 +321,21 @@ html[data-density=compact] nav button{padding:7px 10px}
 .dchip .dz{font-size:11px;line-height:1}
 .numrow{grid-column:1/-1;background:transparent;border:0;padding:0}
 .numrow .kpis{margin:0}
+.netarch{font-size:var(--fs-sm)}
+.na-cols{display:flex;font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.na-cols span:first-child{width:260px;flex:none}
+.na-host{font-family:var(--mono);font-size:12px;color:var(--dim);margin:12px 0 5px}
+.na-row{display:grid;grid-template-columns:200px 46px 1fr;align-items:center;padding:3px 0;cursor:pointer}
+.na-row:hover .na-agent{border-color:var(--acc)}
+.na-agent{font-family:var(--mono);font-size:12px;background:var(--acc-bg);border:1px solid var(--acc-line);border-radius:6px;padding:4px 10px;justify-self:start;max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.na-agent.bad{background:var(--red-bg);border-color:var(--red-line)}
+.na-link{height:2px;background:var(--line2);position:relative}
+.na-link::after{content:"\2192";position:absolute;right:-1px;top:-10px;color:var(--faint);font-size:14px}
+.na-zones{display:flex;flex-wrap:wrap;gap:6px;border-left:2px solid var(--line2);padding-left:16px;min-height:22px;align-items:center}
+.na-z{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--dim);background:var(--panel2);border:1px solid var(--line2);border-radius:999px;padding:2px 10px}
+.na-z.z-bad{background:var(--red-bg);border-color:var(--red-line);color:var(--red)}
+.na-z.z-lan{color:var(--grn)}
+.na-z.z-cf{color:var(--acc)}
 </style>
 
 <header>
@@ -1273,21 +1288,32 @@ function zoneOf(ip,bad){
 }
 function drawAgentMap(A) {
   const el = $("#ag-map"); if (!el) return;
-  const conns = A.conns || [], agents = [...new Set(conns.map(c => c.agent))];
-  if (!agents.length) { el.innerHTML = '<div class="empty">agents.py has not attributed any egress yet.</div>'; $("#ag-map-h").textContent = ""; return; }
+  const conns = A.conns || [];
+  if (!conns.length) { el.innerHTML = '<div class="empty">agents.py has not attributed any egress yet.</div>'; $("#ag-map-h").textContent = ""; return; }
   const badIp = new Set((A.alerts || []).map(a => a.dest_ip)), isBad = c => c.bad || badIp.has(c.dest_ip);
-  const byAgent = {};
-  conns.forEach(c => { const m = byAgent[c.agent] || (byAgent[c.agent] = {});
-    const d = m[c.dest] || (m[c.dest] = {dest: c.dest, ip: c.dest_ip, cc: c.cc || "", hits: 0, by: 0, bad: false});
-    d.hits += c.hits || 0; d.by = Math.max(d.by, c.bytes_recv || 0); d.bad = d.bad || isBad(c); if (!d.cc && c.cc) d.cc = c.cc; });
-  const laneBad = a => Object.values(byAgent[a]).some(d => d.bad);
-  const order = agents.slice().sort((a, b) => (laneBad(b) - laneBad(a)) || a.localeCompare(b));
-  const total = new Set(conns.map(c => c.dest)).size;
-  el.innerHTML = `<div class="lanes">` + order.map(a => {
-    const ds = Object.values(byAgent[a]).sort((x, y) => (y.bad - x.bad) || (y.hits - x.hits));
-    return `<div class="lane" data-agent="${esc(a)}" title="click to filter the tables below"><div class="lane-ag${laneBad(a) ? " bad" : ""}">${esc(a)}</div><div class="lane-arrow">→</div><div class="lane-dests">${ds.map(d => { const z = zoneOf(d.ip, d.bad); return `<span class="dchip${d.bad ? " bad" : ""}" title="${esc(d.dest)} · ${z.t}${d.cc ? " · " + d.cc : ""} · ${d.hits} hits${d.by ? " · " + bytes(d.by) : ""}"><span class="dz">${z.ic}</span>${d.cc ? flag(d.cc) + " " : ""}${esc(d.dest)}${d.by ? `<span class="dby">${bytes(d.by)}</span>` : ""}</span>`; }).join("")}</div></div>`;
-  }).join("") + `</div>`;
-  $("#ag-map-h").textContent = `· ${agents.length} agent${agents.length === 1 ? "" : "s"} · ${total} destination${total === 1 ? "" : "s"} · ☁️ behind Cloudflare · 🌐 internet · 🏠 LAN · 🔗 mesh · ☠ known-bad`;
+  const AG = {};                                   // agent -> {host, dests{dest:{ip,bad}}}
+  conns.forEach(c => { const a = AG[c.agent] || (AG[c.agent] = {host: c.host || "?", dests: {}});
+    const d = a.dests[c.dest] || (a.dests[c.dest] = {ip: c.dest_ip, bad: false}); d.bad = d.bad || isBad(c); });
+  const ZDEF = [["bad","☠","known-bad","z-bad"], ["cf","☁️","Cloudflare","z-cf"],
+                ["internet","🌐","internet","z-net"], ["mesh","🔗","mesh","z-mesh"],
+                ["lan","🏠","LAN","z-lan"]];
+  const keyOf = (ip, bad) => { const t = zoneOf(ip, bad).t; return /known-bad/.test(t) ? "bad" : /Cloudflare/.test(t) ? "cf" : /LAN/.test(t) ? "lan" : /mesh/.test(t) ? "mesh" : "internet"; };
+  const zones = a => { const z = {}; Object.values(AG[a].dests).forEach(d => { const k = keyOf(d.ip, d.bad); z[k] = (z[k] || 0) + 1; }); return z; };
+  const agentBad = a => Object.values(AG[a].dests).some(d => d.bad);
+  const goesOut = a => Object.values(AG[a].dests).some(d => { const t = zoneOf(d.ip, d.bad).t; return !/LAN|mesh/.test(t); });
+  const hosts = {};
+  Object.keys(AG).forEach(a => { (hosts[AG[a].host] = hosts[AG[a].host] || []).push(a); });
+  el.innerHTML = `<div class="netarch"><div class="na-cols"><span>Your network</span><span>Outside · where they reach</span></div>` +
+    Object.keys(hosts).sort().map(host =>
+      `<div class="na-host">🖥️ ${esc(host)}</div>` +
+      hosts[host].sort((a, b) => (agentBad(b) - agentBad(a)) || (goesOut(b) - goesOut(a)) || a.localeCompare(b)).map(a => {
+        const z = zones(a);
+        const badges = ZDEF.filter(([k]) => z[k]).map(([k, ic, lbl, cls]) => `<span class="na-z ${cls}">${ic} ${z[k]} ${esc(lbl)}</span>`).join("");
+        return `<div class="na-row" data-agent="${esc(a)}" title="click to filter the tables below"><div class="na-agent${agentBad(a) ? " bad" : ""}">${esc(a)}</div><div class="na-link"></div><div class="na-zones">${badges || '<span class="q">no egress</span>'}</div></div>`;
+      }).join("")
+    ).join("") + `</div>`;
+  const nag = Object.keys(AG).length, out = Object.keys(AG).filter(goesOut).length;
+  $("#ag-map-h").textContent = `· ${nag} agent${nag === 1 ? "" : "s"} · ${out} reaching outside your network`;
 }
 function renderAgentPerms(perms) {
   const el = $("#ag-perms"); if (!el) return;
