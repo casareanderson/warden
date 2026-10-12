@@ -329,6 +329,13 @@ Known limits (full list in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)): the Cloudflare W
   Amazonbot, …) and show which bot crawled which hostname, how often, and whether it honoured robots.txt — the
   outbound-agent view's mirror image, for the AI traffic coming *at* you rather than *from* your agents.
 
+## Related tools
+
+warden is the full platform. Two of its engines also ship on their own, for when you want just one piece:
+
+- **[sieve](https://github.com/casareanderson/sieve)** — warden's dependency/CVE scanner as a standalone CLI (OSV.dev + CISA KEV + EPSS, no server).
+- **ephor** — warden's AI-agent network monitor as a standalone, passive watcher (coming soon).
+
 ## Support and licence
 
 If warden is useful to you, [buy me a coffee](https://buymeacoffee.com/iamc_tech). More field notes at [dev.to/iam-tech](https://dev.to/iam-tech).
