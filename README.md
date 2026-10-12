@@ -324,6 +324,7 @@ Known limits (full list in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)): the Cloudflare W
 
 - **Cloud connectors:** read-only posture checks for your own cloud accounts.
 - **An evolve agent:** watches security advisories and tool trends, and proposes improvements to warden's own rules with the same ✅ / ❌ flow.
+- **Crawl-aware agent tracking (from ephor v0.2).** Port ephor's crawl-client classification into `agents.py` so the Agents tab labels *how* an agent reaches out — a headless `chromium`/Playwright/Puppeteer, `crawl4ai`, `scrapy`, `curl`, python `requests`, `node` — all read from `/proc`, and tags known crawl/scrape SaaS destinations (e.g. Firecrawl) as a category. Detect-only, stdlib, no new dependency; keeps warden the superset of the standalone ephor.
 - **Inbound AI-crawler tracking (edge):** on the Edge·Cloudflare view, identify AI crawlers hitting your own
   public sites by their declared user-agent (GPTBot, ClaudeBot, CCBot, PerplexityBot, Google-Extended, Bytespider,
   Amazonbot, …) and show which bot crawled which hostname, how often, and whether it honoured robots.txt — the
