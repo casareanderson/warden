@@ -36,3 +36,21 @@ def test_dpkg_source_mapping():
 def test_cvss3():
     assert osv.cvss3("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H") == 9.8
     assert osv.level(osv.cvss3("CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:N")) == "LOW"
+
+
+def test_parse_composer_wrapped():
+    text = ('{"packages": [{"name": "guzzlehttp/guzzle", "version": "7.4.0"},'
+            '{"name": "symfony/console", "version": "v6.0.0"}], "dev": false}')
+    assert osv.parse_composer(text) == [("guzzlehttp/guzzle", "7.4.0"), ("symfony/console", "v6.0.0")]
+
+
+def test_parse_composer_bare_list_skips_dev_and_junk():
+    text = ('[{"name": "monolog/monolog", "version": "2.3.0"},'
+            '{"name": "foo/bar", "version": "dev-main"},'
+            '{"name": "noslash", "version": "1.0"},'
+            '{"name": "missing/version"}, "not a dict"]')
+    assert osv.parse_composer(text) == [("monolog/monolog", "2.3.0")]
+
+
+def test_parse_composer_not_json():
+    assert osv.parse_composer("") == [] and osv.parse_composer("not json") == []

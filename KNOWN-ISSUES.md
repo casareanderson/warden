@@ -67,8 +67,9 @@ roll-up and edge-ban logic are general.
   target `stale` (Alpine also falls back to its cached secdb). What a `stale` result cannot show is an
   advisory never fetched — a new CVE, or a package first seen that day — so it can under-report until OSV
   is reachable again.
-- **Package types not read inside images:** Java jars, Ruby gems, PHP composer, .NET, and Go binaries older than
+- **Package types not read inside images:** Java jars, Ruby gems, .NET, and Go binaries older than
   Go 1.18 (counted in the target's note). Rust binaries are read only when built with `cargo auditable`.
+  PHP composer packages are read from each image's `vendor/composer/installed.json` (2026-10-11).
 - **Renamed forks are matched by their import name.** A PyPI fork republished under a new name (e.g.
   `unclecode-litellm`, a litellm 1.81 fork) keeps the original import name in its `top_level.txt`, which the
   collector now reads and queries too, so it matches the original project's advisories. A fork that also renames
