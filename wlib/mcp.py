@@ -19,7 +19,7 @@ from . import views
 
 PROTOCOL = "2025-06-18"
 KNOWN = {"2025-06-18", "2025-03-26", "2024-11-05"}
-SERVER = {"name": "warden", "version": "3.0.0"}
+SERVER = {"name": "warden", "version": "3.2.0"}
 
 
 def _obj(props=None, required=None):
@@ -110,6 +110,12 @@ TOOLS = [
                     "propose_patch_now, check_box — never carried out), its confidence and fact-checked reason, and "
                     "what the owner actually decided where they did.",
      "inputSchema": _obj(), "fn": lambda a: views.incidents()},
+    {"name": "warden_agents",
+     "description": "Which Hermes-estate agent is talking to what: each autonomous agent (hermes:<profile>, "
+                    "opencode:<user>, app:<x>) with its outbound destinations, any that matched a threat feed "
+                    "(malware/phishing/C2/red-list), new destinations awaiting your review, and per-host attribution "
+                    "coverage. Interactive dev tools like Claude Code are not tracked.",
+     "inputSchema": _obj(), "fn": lambda a: views.agents_payload()},
     {"name": "warden_health",
      "description": "Is warden itself working: last run of each collector in 24 h, lines read/scored, and "
                     "alerts that were suppressed and why.",

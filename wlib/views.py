@@ -295,6 +295,7 @@ def payload():
         "netsec": netsec_payload(),
         "topology": topology(),
         "incidents": incidents(),
+        "agents": agents_payload(),
     }
 
 
@@ -316,6 +317,121 @@ def endpoints_payload():
                           "order by idx")
     out.update(heartbeat_payload())
     return out
+
+
+# Linux capability names by bit (used only to turn a CapEff hex mask into plain English; no dependency).
+CAP_NAMES = ["chown", "dac_override", "dac_read_search", "fowner", "fsetid", "kill", "setgid", "setuid", "setpcap",
+             "linux_immutable", "net_bind_service", "net_broadcast", "net_admin", "net_raw", "ipc_lock", "ipc_owner",
+             "sys_module", "sys_rawio", "sys_chroot", "sys_ptrace", "sys_pacct", "sys_admin", "sys_boot", "sys_nice",
+             "sys_resource", "sys_time", "sys_tty_config", "mknod", "lease", "audit_write", "audit_control", "setfcap",
+             "mac_override", "mac_admin", "syslog", "wake_alarm", "block_suspend", "audit_read", "perfmon", "bpf",
+             "checkpoint_restore"]
+# Capabilities worth flagging as near-root, and groups that hand out root-equivalent access.
+CAP_HOT = {"sys_admin", "sys_ptrace", "sys_module", "dac_override", "dac_read_search", "net_admin", "net_raw",
+           "sys_rawio", "setuid", "setgid", "bpf"}
+GROUP_HOT = {"sudo", "wheel", "root", "docker", "adm", "lxd", "disk", "shadow"}
+
+
+def _caps(hexmask):
+    """A CapEff hex mask -> (list of capability names, is_full_root)."""
+    try:
+        m = int(hexmask, 16)
+    except (TypeError, ValueError):
+        return [], False
+    full = (m & 0x1FFFFFFFFFF) == 0x1FFFFFFFFFF                 # all 41 defined bits set == effectively root
+    names = [CAP_NAMES[i] for i in range(len(CAP_NAMES)) if m & (1 << i)]
+    return names, full
+
+
+def _grp_names(gid, groups):
+    """(primary group name, [supplementary group names]) from a gid and a space-separated gid string, best-effort."""
+    import grp
+    def nm(g):
+        try:
+            return grp.getgrgid(int(g)).gr_name
+        except (KeyError, ValueError, OverflowError, TypeError):
+            return str(g)
+    prim = nm(gid) if gid not in (None, -1, "") else ""
+    sup = [nm(g) for g in str(groups or "").split() if g]
+    return prim, sup
+
+
+def _can_read(uid, gid, gids, stat):
+    """Could a process with this uid/gid/supplementary-gids read a file with this 'owner:group:mode' stat? Best-effort."""
+    if uid == 0:
+        return True
+    try:
+        ou, og, mode = stat.split(":")
+        ou, og = int(ou), int(og)
+        perm = int(mode[-3:], 8) if len(mode) >= 3 else int(mode, 8)
+    except (ValueError, AttributeError):
+        return None                                            # unknown — don't claim either way
+    owns = {int(gid)} | {int(g) for g in str(gids or "").split() if g.isdigit()}
+    if uid == ou:
+        return bool(perm & 0o400)
+    if og in owns:
+        return bool(perm & 0o040)
+    return bool(perm & 0o004)
+
+
+def agents_payload():
+    """AI agent egress: one row per agent with its destinations, any known-bad hits, what each agent can access on the
+    box it runs on, the review/coverage detail, and a known-bad-aware destination history (with best-effort bytes)."""
+    if not has("agent_conns"):
+        return {"agents": [], "conns": [], "alerts": [], "findings": [], "runs": [], "perms": [], "dests": []}
+    has_bytes = "bytes_recv" in {r["name"] for r in q("pragma table_info(agent_conns)")}
+    bcol = "bytes_recv" if has_bytes else "0 bytes_recv"
+    bagg = "bytes_recv" if has_bytes else "0"   # aggregate form: max(0) is valid, max(0 bytes_recv) is not
+    bad_ips = {r["dest_ip"] for r in q("select distinct dest_ip from agent_alerts")} if has("agent_alerts") else set()
+    bad_dests = {r["dest"] for r in q("select distinct dest from agent_alerts")} if has("agent_alerts") else set()
+
+    conns = q(f"select agent,host,dest,dest_ip,port,domain,first_seen,last_seen,hits,container,{bcol} from agent_conns "
+              "order by agent, hits desc")
+    for c in conns:
+        c["bad"] = c["dest_ip"] in bad_ips or c["dest"] in bad_dests
+
+    # Destination history across ALL agents: one row per destination, known-bad first, with totals and who reached it.
+    dests = q(f"""select dest, dest_ip, max(domain) domain, group_concat(distinct agent) agents, count(distinct agent) n_agents,
+                  min(first_seen) first_seen, max(last_seen) last_seen, sum(hits) hits, max({bagg}) bytes_recv
+                  from agent_conns group by dest order by hits desc""")
+    for d in dests:
+        d["bad"] = d["dest_ip"] in bad_ips or d["dest"] in bad_dests
+    dests.sort(key=lambda d: (not d["bad"], -(d["hits"] or 0)))
+
+    perms = []
+    if has("agent_perms"):
+        files = q("select host,path,stat from agent_files") if has("agent_files") else []
+        fbyhost = {}
+        for f in files:
+            fbyhost.setdefault(f["host"], []).append(f)
+        for p in q("select agent,host,ts,user,uid,gid,groups,caps,sudo,root from agent_perms order by agent,host"):
+            caps, full = _caps(p["caps"])
+            prim, sup = _grp_names(p["gid"], p["groups"])
+            hot_grp = sorted(GROUP_HOT.intersection([prim] + sup))
+            reads = []
+            for f in fbyhost.get(p["host"], []):
+                r = _can_read(p["uid"], p["gid"], p["groups"], f["stat"])
+                if r:
+                    reads.append(f["path"])
+            has_sudo = bool((p["sudo"] or "").strip()) and "none or unknown" not in (p["sudo"] or "")
+            perms.append({**p, "cap_names": caps, "cap_full": full,
+                          "cap_hot": sorted(CAP_HOT.intersection(caps)) or (["(all)"] if full else []),
+                          "group": prim, "groups_list": sup, "hot_groups": hot_grp, "has_sudo": has_sudo,
+                          "can_read": reads,
+                          "privileged": bool(p["root"]) or full or bool(hot_grp) or has_sudo})
+
+    return {
+        "agents": q("""select a.agent, max(a.host) host, count(*) dests, sum(a.hits) conns, max(a.last_seen) last_seen,
+                       (select count(*) from agent_alerts al where al.agent=a.agent) alerts
+                       from agent_conns a group by a.agent order by alerts desc, conns desc"""),
+        "conns": conns,
+        "dests": dests,
+        "perms": perms,
+        "alerts": q("select ts,agent,host,dest,dest_ip,kind,feed,detail from agent_alerts order by id desc limit 100"),
+        "findings": q("select ts,agent,host,dest,score,decision,reasons,explain,verdict from agent_findings "
+                      "order by (verdict is null) desc, id desc limit 200"),
+        "runs": q("select host,ts,status,note,seen,attributed from agent_runs order by host"),
+    }
 
 
 def heartbeat_payload():
@@ -494,18 +610,40 @@ def vuln_payload():
     }
 
 
-FIELDS = {"ip", "cc", "kind", "src", "host", "type"}
+FIELDS = {"ip", "cc", "kind", "src", "host", "type", "date"}
+
+
+def _field_match(r, field, val, hay):
+    """Does row r match field:val (negation handled by the caller)?"""
+    if field == "ip":
+        return (r.get("ip") or "").startswith(val)
+    if field == "cc":
+        return (r.get("cc") or "").lower() == val
+    if field == "kind":
+        return val in (r.get("kind") or "").lower()
+    if field == "src":
+        return val in (r.get("source") or "").lower()
+    if field == "type":
+        return val == r["type"]
+    if field == "date":
+        return (r.get("ts") or "").lower().startswith(val)
+    if field == "host":
+        return val in hay
+    return True
 
 
 def search(text):
-    """Unified search. Every row: ts, type, source, ip, cc, kind, detail, score."""
-    terms, free = {}, []
+    """Unified search. Every row: ts, type, source, ip, cc, kind, detail, score. Supports field:value terms
+    (ip/cc/kind/src/type/host/date), free text, and negation with a leading '-' (e.g. -kind:challenge)."""
+    preds, free = [], []                                       # preds: (neg, field, value); free: (neg, word)
     for t in (text or "").split():
-        k, sep, v = t.partition(":")
+        neg = t.startswith("-") and len(t) > 1
+        body = t[1:] if neg else t
+        k, sep, v = body.partition(":")
         if sep and k.lower() in FIELDS and v:
-            terms[k.lower()] = v.lower()
+            preds.append((neg, k.lower(), v.lower()))
         else:
-            free.append(t.lower())
+            free.append((neg, body.lower()))
     watch = redlist()["watch"]
     rows = []
     rows += [dict(r, type="log") for r in q(
@@ -539,19 +677,9 @@ def search(text):
     out = []
     for r in rows:
         hay = " ".join(str(v) for v in r.values() if v is not None).lower()
-        if terms.get("ip") and not (r.get("ip") or "").startswith(terms["ip"]):
-            continue
-        if terms.get("cc") and (r.get("cc") or "").lower() != terms["cc"]:
-            continue
-        if terms.get("kind") and terms["kind"] not in (r.get("kind") or "").lower():
-            continue
-        if terms.get("src") and terms["src"] not in (r.get("source") or "").lower():
-            continue
-        if terms.get("type") and terms["type"] != r["type"]:
-            continue
-        if terms.get("host") and terms["host"] not in hay:
-            continue
-        if all(f in hay for f in free):
+        if any(_field_match(r, f, v, hay) == neg for neg, f, v in preds):
+            continue                                           # a positive term must match; a negated term must not
+        if all((w in hay) != neg for neg, w in free):
             out.append(r)
     out.sort(key=lambda r: r.get("ts") or "", reverse=True)
     return {"q": text, "total": len(out), "rows": out[:500]}
