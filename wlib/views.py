@@ -711,6 +711,7 @@ WIDGETS = {
     "top":       {"title": "Top addresses · 30 days", "type": "top", "size": 4},
     "hosthealth": {"title": "Host health · Beszel", "type": "hosthealth", "size": 2},
     "map":       {"title": "Where traffic comes from · 30 days", "type": "map", "size": 4},
+    "numbers":   {"title": "Numbers (the KPI row)", "type": "kpis", "size": 4},
 }
 
 

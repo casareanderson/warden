@@ -318,6 +318,8 @@ html[data-density=compact] nav button{padding:7px 10px}
 .dchip{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line2);border-radius:999px;padding:2px 9px;font-size:11.5px;color:var(--dim);font-family:var(--mono)}
 .dchip.bad{background:var(--red-bg);border-color:var(--red-line);color:var(--red)}
 .dchip .dby{color:var(--faint);font-size:10px}
+.numrow{grid-column:1/-1;background:transparent;border:0;padding:0}
+.numrow .kpis{margin:0}
 </style>
 
 <header>
@@ -1406,13 +1408,20 @@ let LAYOUT = null, EDIT = null;
 
 function renderOverview(d, edgeBlind) {
   LAYOUT = d.layout; const W = d.widgets, defs = kpiDefs(d, edgeBlind);
-  $("#kpis").innerHTML = LAYOUT.kpis.map(id => defs[id]).filter(Boolean).map(([t, v, s, cls, go]) =>
+  const kpiHtml = LAYOUT.kpis.map(id => defs[id]).filter(Boolean).map(([t, v, s, cls, go]) =>
     `<div class="kpi ${cls}" data-go="${go}"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${esc(s)}</div></div>`).join("");
-  document.querySelectorAll(".kpi[data-go]").forEach(x => x.onclick = () => show(x.dataset.go));
+  const numInFlow = LAYOUT.widgets.includes("numbers");
+  $("#kpis").innerHTML = numInFlow ? "" : kpiHtml;          // numbers sit at the top unless placed in the flow
+  const bindKpis = () => document.querySelectorAll(".kpi[data-go]").forEach(x => x.onclick = () => show(x.dataset.go));
+  bindKpis();
   const box = $("#ov-widgets");
   if (!LAYOUT.widgets.length) { box.innerHTML = '<div class="empty s4">No charts pinned — press <b>Customise</b>.</div>'; return; }
-  box.innerHTML = LAYOUT.widgets.map(id => `<div class="card s${W[id].size || 1}"><h3>${esc(W[id].title)}</h3><div id="w-${id}"></div></div>`).join("");
+  box.innerHTML = LAYOUT.widgets.map(id => id === "numbers"
+    ? `<div class="card numrow"><div class="kpis">${kpiHtml}</div></div>`
+    : `<div class="card s${W[id].size || 1}"><h3>${esc(W[id].title)}</h3><div id="w-${id}"></div></div>`).join("");
+  bindKpis();
   for (const id of LAYOUT.widgets) {
+    if (id === "numbers") continue;                          // the KPI row, rendered inline above
     const w = W[id], el = $("#w-" + id);
     if (w.type === "donut") {
       let rows = pick(d, w.src) || [];
