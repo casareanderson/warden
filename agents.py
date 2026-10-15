@@ -325,6 +325,52 @@ def _int(x, default=-1):
         return default
 
 
+# ── same provider? Gmail IMAP / Cloudflare / Akamai rotate IPs; each rotation used to be a new review card ──
+_PTR = {}
+IPV4 = re.compile(r"\d+\.\d+\.\d+\.\d+")
+
+
+def _ptr_org(ip, con=None):
+    """Registrable part of the reverse-DNS name (wh-in-f108.1e100.net -> 1e100.net), '' if none.
+    2 s cap per lookup; cached in-process and (with con) in agent_ptr for a week."""
+    if ip in _PTR:
+        return _PTR[ip]
+    if con is not None:
+        con.execute("create table if not exists agent_ptr(ip text primary key, org text, ts text)")
+        r = con.execute("select org from agent_ptr where ip=? and ts>datetime('now','-7 days')", (ip,)).fetchone()
+        if r:
+            _PTR[ip] = r[0]; return r[0]
+    import concurrent.futures as cf, socket  # noqa: PLC0415,E401
+    ex = cf.ThreadPoolExecutor(1)
+    try:
+        name = ex.submit(socket.gethostbyaddr, ip).result(timeout=2)[0]
+        _PTR[ip] = ".".join(name.rstrip(".").split(".")[-2:]).lower()
+    except Exception:  # noqa: BLE001
+        _PTR[ip] = ""
+    finally:
+        ex.shutdown(wait=False)
+    if con is not None:
+        con.execute("insert or replace into agent_ptr(ip,org,ts) values(?,?,datetime('now'))", (ip, _PTR[ip]))
+    return _PTR[ip]
+
+
+def known_provider(con, agent, dest, port):
+    """A dest this agent already uses on the same network: same /16, or same reverse-DNS domain. '' if none."""
+    if not IPV4.fullmatch(dest):
+        return ""
+    p16 = ".".join(dest.split(".")[:2]) + ".%"
+    r = con.execute("select dest from agent_conns where agent=? and dest!=? and dest like ? limit 1",
+                    (agent, dest, p16)).fetchone()
+    if r:
+        return f"same /16 as `{r[0]}`"
+    org = _ptr_org(dest, con)
+    if org:
+        for (o,) in con.execute("select dest from agent_conns where agent=? and dest!=?", (agent, dest)).fetchall():
+            if IPV4.fullmatch(o) and _ptr_org(o, con) == org:
+                return f"same provider ({org}) as `{o}`"
+    return ""
+
+
 # ── scoring a NEW destination (mirrors devicewatch) ──────────────────────────────
 def score(f):
     s, why = 40, ["a destination this agent has not used before"]
@@ -340,6 +386,8 @@ def score(f):
         s += 10; why.append("a raw IP with no resolved name")
     if f["port"] not in (443, 80):
         s += 10; why.append(f"port {f['port']} (not plain web)")
+    if f.get("known_provider"):
+        s -= 35; why.append(f["known_provider"] + " it already uses")
     return max(0, min(100, s)), why
 
 
@@ -365,11 +413,11 @@ def explain(f):
 
 
 def card(f, s, why, read):
-    return (f"🕵️ **New destination for `{f['agent']}`** on {f['host']} → `{f['dest']}`"
-            f"{' :' + str(f['port']) if f['port'] not in (443, 80) else ''} · {f['first_seen_local']}\n"
-            f"Score **{s}**: {'; '.join(why)}.\nUsually talks to: {f['usual'] or 'nothing else yet'}\n"
-            + (f"Hermes (advisory): {read}\n" if read else "")
-            + "✅ = expected, learn it · ❌ = not expected, I'll look")
+    org = _ptr_org(f["dest"]) if IPV4.fullmatch(f["dest"]) else ""
+    return (f"🕵️ **New destination** `{f['agent']}` on {f['host']} → `{f['dest']}`"
+            f"{' :' + str(f['port']) if f['port'] not in (443, 80) else ''}{f' ({org})' if org else ''} · score **{s}**\n"
+            f"-# {'; '.join(why[1:])}" + (f" · Hermes: {read[:160]}" if read else "") + "\n"
+            "✅ learn it · ❌ I'll look")
 
 
 # ── run ───────────────────────────────────────────────────────────────────────
@@ -455,7 +503,8 @@ def run(dry=False):
             lt = datetime.strptime(first_dest["first_seen"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone(TZ)
             f = {"agent": agent, "host": host, "dest": dest, "port": port, "domain": dom,
                  "tld": dom.rsplit(".", 1)[-1] if "." in dom else "", "hour": lt.hour,
-                 "first_seen_local": lt.strftime("%a %d %b %H:%M"), "other_agents_using_it": others, "usual": usual}
+                 "first_seen_local": lt.strftime("%a %d %b %H:%M"), "other_agents_using_it": others, "usual": usual,
+                 "known_provider": known_provider(con, agent, dest, port)}
             s, why = score(f)
             d = decision(s)
             counts[d] += 1
