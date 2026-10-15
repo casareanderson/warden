@@ -19,7 +19,7 @@ Feeds (all free, cached in data/intel/, refused if a download looks truncated):
   IPs:     abuse.ch Feodo Tracker (botnet C2), FireHOL level1 (bogons, Spamhaus DROP/EDROP, DShield top, Feodo, …)
 Also flagged: any LAN device connecting to a redlist.yml `watch` country (DB-IP geo), and NXDOMAIN bursts
 (≥150 failed lookups by one device in a run = DGA-style malware behaviour, or a broken app).
-Alerts → the alert channel (wlib.notify), deduped per (device, indicator) for 12 h, device named from netscan's inventory.
+Alerts → the alert channel (wlib.notify), deduped per (device, indicator) for 7 days, device named from netscan's inventory.
 """
 import ipaddress
 import json
@@ -298,7 +298,7 @@ def main():
         con.execute("insert into intel_hits(ts,device,device_name,kind,indicator,feed,detail) values(?,?,?,?,?,?,?)",
                     (now(), dev, name, kind, ind, feed, detail))
         dup = con.execute("select 1 from intel_hits where device=? and indicator=? and notified=1 and "
-                          "ts > datetime('now','-12 hours')", (dev, ind)).fetchone()
+                          "ts > datetime('now','-7 days')", (dev, ind)).fetchone()   # was 12 h: the same hit re-posted every day
         if not dup:
             con.execute("update intel_hits set notified=1 where id=last_insert_rowid()")
             loud.append(f"**{name or dev}** ({dev}) — {kind}: `{ind}` [{feed}] {detail}")
