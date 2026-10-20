@@ -220,6 +220,25 @@ class FakeCF:
         return FakeResp(payload)
 
 
+class FakeCFRequests:                              # edgeban.py talks to Cloudflare over requests
+    def __init__(self, extra=None):
+        self.rules = list(extra or [])
+        self.calls = []
+
+    def request(self, method, url, **kw):
+        body = kw.get("json")
+        path = url.split("/client/v4", 1)[1] if "/client/v4" in url else url
+        self.calls.append((method, path, body))
+        if method == "PUT":
+            self.rules = body["rules"]
+
+        class Resp:
+            @staticmethod
+            def json():
+                return {"success": True, "result": {"id": "rs1", "rules": list(self.rules)}}
+        return Resp()
+
+
 def _cf_home(home, monkeypatch):
     (home / "warden.yml").write_text(
         "cloudflare:\n  zone_id: 0123456789abcdef0123456789abcdef\n  token_secret: CF_API_TOKEN\n")
@@ -268,6 +287,28 @@ def test_cf_unban_removes_address(home, monkeypatch):
     puts = [c for c in client.calls if c[0] == "PUT"]
     block = next(r for r in puts[-1][2]["rules"] if r["description"] == w.DESC)
     assert block["expression"] == "(ip.src in {198.51.100.0/24})"
+
+
+def test_cf_ban_shape_matches_edgeban_sync(home, monkeypatch):
+    """cf_ban's requests are byte-for-byte the ones edgeban.py sync produces —
+    the shape the owner validates with `edgeban.py sync` against a live account."""
+    w, wclient = _cf_home(home, monkeypatch)
+    assert w.cf_ban("203.0.113.9", "sqli", {})[0]
+
+    eb = load("edgeban")
+    eclient = FakeCFRequests(extra=[
+        {"id": "x", "action": "challenge", "expression": 'http.request.uri.path contains "/admin"',
+         "description": "existing rule", "enabled": True}])
+    monkeypatch.setattr(eb.requests, "request", eclient.request)
+    con = eb.db()
+    con.execute("insert into edge_bans(target, reason, score, status, created) "
+                "values('203.0.113.9', 'sqli', 20, 'active', datetime('now'))")
+    con.commit()
+    assert "1 entry" in eb.sync(con)
+
+    wshape = [(m, u.split("/client/v4", 1)[1] if "/client/v4" in u else u, b)
+              for m, u, b in wclient.calls]
+    assert wshape == eclient.calls
 
 
 def test_expire_lapsed_unbans_only_expired(home, monkeypatch):
