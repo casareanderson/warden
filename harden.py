@@ -5,7 +5,7 @@ Owner's choice 2026-10-07: "temporary Lynis run". Per box: copy the VERIFIED Lyn
 `lynis audit system --quick` (read-only audit), read its report file, delete everything — nothing stays installed.
 
   harden.py              audit every box (timer: Sun 05:00)
-  harden.py <target>     audit one box (ct:101, node:example, host:mybox)
+  harden.py <target>     audit one box (ct:101, node:10.0.0.2, host:10.0.0.6)
   harden.py --fetch      download + verify Lynis (sha256 pinned below, from cisofy.com/downloads/lynis)
   harden.py --list       scores
 
