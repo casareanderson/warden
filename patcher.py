@@ -358,10 +358,31 @@ def node_of(t):
     return t["node"]
 
 
+def window_hook(phase, t):
+    """Optional `patch.window_hook` command, run as `<cmd> start|end <target> <vmid> <node> <name>` around a job so
+    a site can quiet its own monitoring/auto-healing while a box is being patched. Failures never block a patch."""
+    cmd = config.get("patch.window_hook")
+    if not cmd:
+        return
+    try:
+        subprocess.run([cmd, phase, t["target"], str(t.get("vmid") or ""), str(t.get("node") or ""), t["name"]],
+                       capture_output=True, timeout=180)
+    except Exception as e:  # noqa: BLE001
+        log(f"window_hook {phase} {t['target']}: {e}")
+
+
 def execute(con, job):
     t = target_info(con, job["target"])
     if t["kind"] == "container":
         return execute_container(con, job, t)
+    window_hook("start", t)
+    try:
+        return _execute(con, job, t)
+    finally:
+        window_hook("end", t)
+
+
+def _execute(con, job, t):
     mid = job["message_id"]
     con.execute("update patch_jobs set status='running', decided=? where id=?", (iso(), job["id"])); con.commit()
     notify.resolve(mid, "▶️ approved — running")
