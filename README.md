@@ -10,6 +10,7 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 
 ## Contents
 
+- [What's new in v3.4](#whats-new-in-v34)
 - [What's new in v3](#whats-new-in-v3)
 - [What's new in v2](#whats-new-in-v2)
 - [What it does](#what-it-does)
@@ -26,6 +27,14 @@ A lightweight, self-hosted security console for a homelab or small estate. warde
 - [Status, limits and real results](#status-limits-and-real-results)
 - [Roadmap](#roadmap)
 - [Support and licence](#support-and-licence)
+
+## What's new in v3.4
+
+The approval queue gets a second opinion, and a patch can ask your monitoring to hold its fire.
+
+- **AI recommendations for the approval queue** — for every pending approval, a model reads the facts warden has already gathered and returns a ✅ (approve) or ❌ (reject) with a one-line reason. **It recommends, never decides**: the model weighs facts that detectors collected, so the rule "scripts gather facts, models never invent them" still holds, and you still press the button. Answers are cached per approval id, so a page refresh does not re-call the model. The console gains **Approve all**, **Recommend** and **Apply AI picks** buttons over a read-only `/api/recommend` endpoint. Configure it under the same `vuln.brief` block as the vulnerability briefing.
+- **`patch.window_hook`** — an optional command that runs as `<cmd> start|end <target> <vmid> <node> <name>` around every patch job (the `end` runs in a `finally`), so a site can pause its own monitoring and auto-healing while a box is being patched. **Hook failures never block a patch** — they are logged and the patch continues.
+- **"database is locked" fixed** — several collectors held warden.db's write lock across slow work, so one long scan blocked every other warden job. The OSV collector now commits before its network fetch and batches its writes into one short transaction; the LAN sweep completes every network before its first insert and commits before the multi-minute port scan; and a container sweep is capped at 60s so one hung `pct exec` cannot stall the run.
 
 ## What's new in v3.3
 
@@ -223,6 +232,8 @@ warden proposes; you decide. Patch plans, edge-block proposals and integrity cha
 
 Unanswered proposals expire and nothing changes.
 
+If you set a `vuln.brief` block, the console's **Recommend** button adds a second opinion on every pending item: a model reads the facts warden has already gathered and suggests ✅ or ❌ with a one-line reason. It recommends, never decides — you still press the button, or **Apply AI picks** to take the model's picks in one go.
+
 ## Configuration
 
 `warden-setup init` writes `warden.yml`; [warden.yml.example](warden.yml.example) documents every key. The sections:
@@ -236,6 +247,8 @@ Unanswered proposals expire and nothing changes.
 | `notify` | `discord`, `webhook`, `ntfy` or `none`. |
 | `secrets` | Names only. Values come from the environment, `data/secrets.env` (mode 600, `warden-setup secret NAME`), Infisical or a command. |
 | `cloudflare`, `ids`, `router` | Optional integrations. |
+| `vuln.brief` | Optional AI endpoint (any OpenAI-compatible one). Also powers the approval-queue recommendations. |
+| `patch` | Patch window, expiry, snapshot retention, and an optional `window_hook` command run around every patch job. |
 | `ui`, `api`, `dashboard` | Console bind address and auth, the public URL agents use, and the default home layout. |
 
 ## How it works
@@ -274,12 +287,12 @@ warden/
 ├── warden.py            log collectors, scoring, ban proposals
 ├── warden-ui.py/.html   console + REST API + MCP
 ├── warden-setup         init, check, add-host, tokens, connect, units
-├── wlib/                config, secrets, notify/approvals, hosts, views, mcp, tokens, setup, units
+├── wlib/                config, secrets, notify/approvals, hosts, views, mcp, recommend, tokens, setup, units
 ├── netscan.py  vulnscan.py  images.py  patcher.py  integrity.py  harden.py
 ├── intel.py  edgeban.py  cfsec.py  netids.py  netintel.py  siemalert.py  geo.py  warden-facts.py
 ├── edge-sentry/         report-only Cloudflare Worker (+ 11 offline tests)
 ├── tools/demo.py        demo data for screenshots and try-outs
-├── tests/               36 tests: API, MCP traps, read-only guard, hosts, patch timing, intel
+├── tests/               175 tests: API, MCP traps, read-only guard, hosts, patch timing, intel
 └── KNOWN-ISSUES.md      read before enforce: true
 ```
 
@@ -322,7 +335,7 @@ incidents:
 
 ## Status, limits and real results
 
-Status: v3.3, running in detect-only mode on the author's estate since September 2026. It's a second opinion, not a replacement for CrowdSec or a WAF: it reads what they miss.
+Status: v3.4, running in detect-only mode on the author's estate since September 2026. It's a second opinion, not a replacement for CrowdSec or a WAF: it reads what they miss.
 
 Measured on that estate:
 

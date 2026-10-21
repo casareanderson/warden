@@ -100,8 +100,8 @@ def collect(t, deep):
     script = f"DEEP={int(deep)}\nHOSTK={int(t['kind'] in ('node', 'host', 'local'))}\n" + COLLECT
     # plain hosts need root to read shadow/sudoers: sudo -S with the host's sudo_secret, over stdin
     # Containers via pct exec are fragile over SSH; 60s per host prevents one hung host
-    # from blocking the entire sweep. Non-container hosts get full timeout.
-    host_timeout = 60 if t["kind"] == "ct" else 300
+    # from blocking the entire sweep. Non-container hosts get the full timeout.
+    host_timeout = 60 if t["kind"] == "ct" else 900
     rc, out, se = hosts.remote(t, script, timeout=host_timeout, root=t["kind"] in ("host", "local"))
     out = out or ""
     facts, stale = {}, set()

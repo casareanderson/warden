@@ -23,9 +23,11 @@ MODEL = "qwen/qwen3.7-flash"          # cheap + tool-capable; these calls are ~2
 
 
 def _model_cfg():
-    b = config.get("brief") or {}
+    """The AI endpoint for recommendations comes from the same `vuln.brief` block as the vulnerability briefing:
+    `url`, `key_secret` and the model list. `recommend_model` (optional) names a cheaper model for this job."""
+    b = config.get("vuln.brief") or {}
     url = (b.get("url") or "https://openrouter.ai/api/v1").rstrip("/") + "/chat/completions"
-    model = (b.get("recommend_model") or MODEL)
+    model = b.get("recommend_model") or (b.get("models") or [b.get("model") or MODEL])[0]
     key = secrets.get(b.get("key_secret") or "OPENROUTER_API_KEY") or ""
     return url, model, key
 

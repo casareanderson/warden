@@ -62,11 +62,17 @@ patch:
   night: "02:30"
   expire_hours: 24                  # an unanswered plan expires; nothing changes
   snapshot_keep_days: 7
+  # optional: run this around every patch job, so your monitoring can hold its fire:
+  #   <cmd> start|end <target> <vmid> <node> <name>
+  # A failure is logged and the patch continues. The command is yours, so it stays out of this repo.
+  # window_hook: /opt/warden/hooks/patch_window.py
 
 # vulnerability scanning needs no settings: advisories come from api.osv.dev (+ Alpine secdb), exploit data from
 # CISA KEV and FIRST EPSS. Optional AI "fix first" briefing (vulnbrief.py, any OpenAI-compatible endpoint):
 vuln:
   brief: {url: https://openrouter.ai/api/v1, models: [deepseek/deepseek-v4-flash-0731], key_secret: OPENROUTER_API_KEY}
+  # the same block powers the approval-queue recommendations (wlib/recommend.py). Optional
+  # recommend_model: a cheaper model for that job; it recommends, it never decides.
 
 # ── alerts and approvals ────────────────────────────────────────────────────
 # discord can read ✅/❌ reactions back; webhook/ntfy/none approve in the dashboard (Settings).
