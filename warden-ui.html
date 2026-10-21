@@ -1858,9 +1858,21 @@ async function loadSettings() {
   const fmtAppr = t => esc(t).split("\n")
       .filter(l => l.trim() !== "" && !/=\s*expected, accept as the new baseline/.test(l))
       .join("\n").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
-  $("#appr").innerHTML = ap.length ? `<div class="appr-legend q">${APPR_LEGEND}</div>` + ap.map(a => { const ch = JSON.parse(a.choices || "[]");
-    return `<div class="appr"><div class="apx">${fmtAppr(a.text)}</div><div class="apb">${ch.map(c =>
-      `<button class="btn ${c === "❌" ? "ghost" : ""} sm" data-appr="${esc(a.id)}" data-c="${c}">${c} ${{"✅": "approve", "❌": "reject", "⚡": "now"}[c] || ""}</button>`).join("")}</div></div>`; }).join("")
+  const rec = window._rec || {};
+  const hasRec = Object.values(rec).some(r => r && r.choice);
+  $("#appr").innerHTML = ap.length
+    ? `<div class="appr-legend q">${APPR_LEGEND}</div>
+       <div class="row" style="margin:0 0 10px">
+         <button class="btn sm" id="appr-all">✅ Approve all (${ap.length})</button>
+         <button class="btn ghost sm" id="appr-rec">🤖 Recommend</button>
+         <button class="btn sm" id="appr-ai" ${hasRec ? "" : "hidden"}>Apply AI picks</button>
+         <span class="q" id="appr-ai-msg"></span>
+       </div>`
+      + ap.map(a => { const ch = JSON.parse(a.choices || "[]"); const r = rec[a.id];
+        return `<div class="appr"><div class="apx">${fmtAppr(a.text)}</div>
+          ${r && r.choice ? `<div class="apx" style="margin-top:5px;font-size:12px"><span class="q">🤖 ${esc(r.model || "ai")}:</span> <b>${esc(r.choice)}</b> ${esc(r.reason || "")}</div>` : ""}
+          <div class="apb">${ch.map(c =>
+          `<button class="btn ${c === "❌" ? "ghost" : ""} sm" data-appr="${esc(a.id)}" data-c="${c}">${c} ${{"✅": "approve", "❌": "reject", "⚡": "now"}[c] || ""}</button>`).join("")}</div></div>`; }).join("")
     : '<div class="empty">Nothing waiting for a decision.</div>';
   const sc = SET.score; $("#setup-score").textContent = `${sc.required_ok}/${sc.required} required · ${sc.optional_ok}/${sc.optional} optional`;
   table("setup", [{h: "", f: r => r.ok ? '<span class="y">✓</span>' : r.optional ? '<span class="q">○</span>' : '<span class="n">✗</span>'},
@@ -1880,6 +1892,27 @@ document.addEventListener("click", async e => {
   const a = e.target.closest("[data-appr]");
   if (a) { a.disabled = true; const r = await post("api/approvals", "approvals", {id: a.dataset.appr, choice: a.dataset.c});
     if (!r.ok) alert("Could not record that — it may already be decided."); loadSettings(); return; }
+  if (e.target.id === "appr-all") {
+    const n = (SET.approvals || []).length;
+    if (!n || !confirm(`Approve ALL ${n} pending item(s) with ✅?`)) return;
+    for (const x of SET.approvals) await post("api/approvals", "approvals", {id: x.id, choice: "✅"});
+    loadSettings(); return;
+  }
+  if (e.target.id === "appr-rec") {
+    e.target.disabled = true; const o = e.target.textContent; e.target.textContent = "🤖 thinking…";
+    try { const r = await getj("api/recommend");
+      window._rec = Object.fromEntries((r.recommendations || []).map(x => [x.id, x])); }
+    catch { alert("Recommendation failed (model unreachable)."); }
+    e.target.textContent = o; loadSettings(); return;
+  }
+  if (e.target.id === "appr-ai") {
+    const rec = window._rec || {};
+    const acts = (SET.approvals || []).filter(x => rec[x.id] && (rec[x.id].choice === "✅" || rec[x.id].choice === "❌"));
+    if (!acts.length) { alert("No AI picks yet — click 🤖 Recommend first."); return; }
+    if (!confirm(`Apply the AI's pick to ${acts.length} item(s)?`)) return;
+    for (const x of acts) await post("api/approvals", "approvals", {id: x.id, choice: rec[x.id].choice});
+    window._rec = {}; loadSettings(); return;
+  }
   const rv = e.target.closest("[data-revoke]");
   if (rv && confirm("Revoke this token? Anything using it stops working immediately.")) { await post("api/tokens", "tokens", {revoke: +rv.dataset.revoke}); loadSettings(); return; }
   if (e.target.id === "tok-new") {

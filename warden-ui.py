@@ -36,7 +36,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from wlib import auth, config, mcp, notify, secrets, setup, tokens, views  # noqa: E402
+from wlib import auth, config, mcp, notify, recommend, secrets, setup, tokens, views  # noqa: E402
 
 PAGE = Path(__file__).with_name("warden-ui.html")
 LOGIN_PAGE = Path(__file__).with_name("warden-login.html")
@@ -258,6 +258,8 @@ class H(BaseHTTPRequestHandler):
             self.send(views.search(_a(qs, "q")[:200]))
         elif u.path == "/api/settings":
             self.send(settings_payload())
+        elif u.path == "/api/recommend":
+            self.send({"recommendations": recommend.recommendations(refresh=_a(qs, "refresh") == "1")})
         else:
             self.send({"error": "not found"}, status=404)
 
