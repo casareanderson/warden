@@ -99,7 +99,10 @@ def collect(t, deep):
     # containers see the HOST's /proc/modules — only real hosts report kernel modules
     script = f"DEEP={int(deep)}\nHOSTK={int(t['kind'] in ('node', 'host', 'local'))}\n" + COLLECT
     # plain hosts need root to read shadow/sudoers: sudo -S with the host's sudo_secret, over stdin
-    rc, out, se = hosts.remote(t, script, timeout=900, root=t["kind"] in ("host", "local"))
+    # Containers via pct exec are fragile over SSH; 60s per host prevents one hung host
+    # from blocking the entire sweep. Non-container hosts get full timeout.
+    host_timeout = 60 if t["kind"] == "ct" else 300
+    rc, out, se = hosts.remote(t, script, timeout=host_timeout, root=t["kind"] in ("host", "local"))
     out = out or ""
     facts, stale = {}, set()
     for line in out.splitlines():

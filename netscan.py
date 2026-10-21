@@ -330,9 +330,11 @@ def main():
         print(f"netscan: LEARNING (first run {first_run}, window "
               f"{cfg['learn_hours']}h) — new devices adopted silently")
 
+    # Sweep EVERY network before the first write: sqlite opens a write transaction at the first insert, and
+    # holding it across the next nmap run locked warden.db for the other warden jobs (2026-10-18).
+    swept = [(net, discover(net)) for net in cfg["networks"]]
     found = []
-    for net in cfg["networks"]:
-        hs = discover(net)
+    for net, hs in swept:
         con.execute("insert into net_runs(ts,network,hosts,note) values(?,?,?,?)",
                     (now, net, len(hs),
                      "baseline" if baseline else ("learning" if learning else "")))
@@ -431,6 +433,7 @@ def main():
 
     # --- ports ----------------------------------------------------------
     if cfg["port_scan"]:
+        con.commit()        # the port scan takes minutes: never hold warden.db's write lock across it
         ip_by_mac = {h["mac"]: h["ip"] for h in found if h["mac"]}
         portmap = scan_ports(sorted(set(ip_by_mac.values())), cfg["top_ports"])
         for mac, ip in ip_by_mac.items():
