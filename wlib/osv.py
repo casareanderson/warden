@@ -495,6 +495,9 @@ class OSV:
     def get(self, pairs):
         """{id: modified} → {id: body}, fetching only ids that are new or changed since the cached copy."""
         self.con.execute("delete from osv_vulns where modified='missing' and fetched < datetime('now','-1 day')")
+        # commit NOW: sqlite3 opens a write transaction at the DELETE, and holding it across the network fetch
+        # below (minutes on a big host) locked warden.db for every other warden job (2026-10-18 "database is locked")
+        self.con.commit()
         have = {}
         ids = list(pairs)
         for k in range(0, len(ids), 500):
@@ -521,10 +524,11 @@ class OSV:
                     self._wait(r, attempt)
             return i, None
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        writes = []                         # fetch everything first, then write in ONE short transaction
         with ThreadPoolExecutor(16) as ex:
             for i, body in ex.map(one, need):
                 if body is False:
-                    self.con.execute("insert or replace into osv_vulns values(?,?,?,?)", (i, "missing", "null", now))
+                    writes.append((i, "missing", "null", now))
                     continue
                 if body is None:
                     if pairs[i]:                    # a real hit we could not read (not an optional alias lookup)
@@ -532,8 +536,9 @@ class OSV:
                     continue
                 self.fetched += 1
                 have[i] = (body.get("modified", ""), json.dumps(body, separators=(",", ":")))
-                self.con.execute("insert or replace into osv_vulns values(?,?,?,?)",
-                                 (i, have[i][0], have[i][1], now))
+                writes.append((i, have[i][0], have[i][1], now))
+        if writes:
+            self.con.executemany("insert or replace into osv_vulns values(?,?,?,?)", writes)
         self.con.commit()
         out = {}
         for i, (m, b) in have.items():

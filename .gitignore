@@ -12,3 +12,8 @@ data/
 .venv/
 __pycache__/
 *.pyc
+
+# estate-local: a site's own monitoring/auto-healing hook, wired up as
+# patch.window_hook in warden.yml. It names that estate's hosts, so it never
+# belongs in the public repo.
+hooks/
