@@ -10,10 +10,14 @@
  * of that and sees the request as Cloudflare sees it: true client IP, country,
  * ASN, bot score, and whether the edge challenged it.
  *
- * It is DETECT-AND-REPORT ONLY. It never blocks — blocking is the WAF's job,
- * where the rules are visible in the dashboard and can be switched off without
- * a redeploy. A Worker that blocks is a Worker that can lock you out of your
- * own estate at 3am with no UI to turn it off.
+ * It is DETECT-AND-REPORT ONLY, plus one purely additive job: it sets the
+ * security headers (HSTS / X-Frame-Options / X-Content-Type-Options) that
+ * warden's webscan.py reports as missing. Setting a response header can never
+ * block, redirect or drop a response, so that stays inside the fail-open
+ * contract too. It never blocks — blocking is the WAF's job, where the rules
+ * are visible in the dashboard and can be switched off without a redeploy. A
+ * Worker that blocks is a Worker that can lock you out of your own estate at
+ * 3am with no UI to turn it off.
  *
  * ⚠️ FAIL-OPEN, ALWAYS. Every code path returns fetch(request). If the
  * scoring throws, if the alert POST hangs, if a binding is missing — the
@@ -104,6 +108,28 @@ async function report(env, cf, req, url, hit) {
   });
 }
 
+// Security headers, set on every response. Order matters only for readability.
+// Each entry is [header name, default value, env key] — env overrides the value
+// (set the env var to "" to skip that header). Setting a header is purely
+// additive: it can never block, redirect or drop a response, so this stays
+// inside the fail-open contract. HSTS is ignored by browsers over plain HTTP,
+// so it is harmless even on the rare non-HTTPS path.
+const SECURITY_HEADERS = [
+  ["Strict-Transport-Security", "max-age=31536000; includeSubDomains", "HSTS"],
+  ["X-Frame-Options", "SAMEORIGIN", "XFO"],
+  ["X-Content-Type-Options", "nosniff", "XCTO"],
+];
+
+function harden(res, env) {
+  const headers = new Headers(res.headers);
+  for (const [name, dflt, key] of SECURITY_HEADERS) {
+    const want = env && env[key] !== undefined ? env[key] : dflt;
+    // Never override a value the origin set deliberately — its CSP/XFO is authoritative.
+    if (want && !headers.has(name)) headers.set(name, want);
+  }
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 export default {
   async fetch(request, env, ctx) {
     try {
@@ -118,6 +144,11 @@ export default {
     } catch (_) {
       // Deliberately swallowed — see the fail-open note in the header.
     }
-    return fetch(request);
+    const res = await fetch(request);
+    try {
+      return harden(res, env);
+    } catch (_) {
+      return res;   // fail-open: adding headers must never drop a response
+    }
   },
 };

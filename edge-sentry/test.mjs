@@ -55,6 +55,33 @@ r = await hit("/.env", { ip: "203.0.113.10" });
 console.log(`${!r.alerted ? "PASS" : "FAIL"}  own WAN address suppressed`);
 if (r.alerted) bad++;
 
+// security headers are set on the pass-through response
+{
+  const req = new Request("https://photos.example.com/");
+  req.cf = {};
+  const res = await worker.fetch(req, env, ctx);
+  const h = res.headers;
+  const ok = h.get("Strict-Transport-Security") === "max-age=31536000; includeSubDomains" &&
+             h.get("X-Frame-Options") === "SAMEORIGIN" &&
+             h.get("X-Content-Type-Options") === "nosniff";
+  console.log(`${ok ? "PASS" : "FAIL"}  security headers set on pass-through`);
+  if (!ok) bad++;
+}
+
+// an origin's own header is kept; the missing ones are still added
+{
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("origin", { headers: { "X-Frame-Options": "DENY" } });
+  const req = new Request("https://photos.example.com/");
+  req.cf = {};
+  const res = await worker.fetch(req, env, ctx);
+  globalThis.fetch = origFetch;
+  const ok = res.headers.get("X-Frame-Options") === "DENY" &&
+             res.headers.get("X-Content-Type-Options") === "nosniff";
+  console.log(`${ok ? "PASS" : "FAIL"}  origin header kept, missing ones added`);
+  if (!ok) bad++;
+}
+
 // scoring throws -> request still served (fail-open)
 const boom = new Request("https://photos.example.com/.env");
 Object.defineProperty(boom, "url", { get() { throw new Error("boom"); } });

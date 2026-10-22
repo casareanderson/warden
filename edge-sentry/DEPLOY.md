@@ -11,6 +11,15 @@ Reports hostile requests to Discord from the Cloudflare edge, in real time,
 with the true client IP, country and ASN. It never blocks — see the header
 comment in `worker.js` for why blocking belongs in the WAF rules instead.
 
+It also sets the security headers that warden's `webscan.py` reports as missing
+— HSTS, X-Frame-Options, X-Content-Type-Options — on every response. This is a
+purely additive change (it cannot block, redirect or drop a response), and it
+never overrides a header the origin set deliberately. Values are overridable
+per header via Worker secrets; set one to empty to skip it:
+  - `HSTS` (default `max-age=31536000; includeSubDomains`)
+  - `XFO`  (default `SAMEORIGIN`)
+  - `XCTO` (default `nosniff`)
+
 ## Prerequisites
 1. A Cloudflare API token with **Account → Workers Scripts:Edit** and
    **Zone → Workers Routes:Edit** on `example.com`.
