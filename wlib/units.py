@@ -86,7 +86,7 @@ GROUPS = {
     "agents": "an agent host (agents.include_local defaults on)",
     "github": "github.owner set",
     "shell": "at least one host declared",
-    "webscan": "nuclei installed",
+    "webscan": "always (built-in checks; nuclei optional)",
 }
 
 
@@ -106,7 +106,7 @@ def enabled_groups():
         "agents": bool(config.get("agents.include_local", True)) or any(h.get("agents") for h in hosts.declared()),
         "github": bool(config.get("github.owner")),
         "shell": have_hosts,
-        "webscan": bool(shutil.which("nuclei")),
+        "webscan": True,
     }
 
 

@@ -194,15 +194,15 @@ github:
 # with any `KEY=value` redacted. On by default wherever hosts are declared.
 # shell: {}
 
-# ── app-layer web vulnerability scan (optional, needs nuclei) ─────────────────
-# webscan.py runs nuclei against your OWN public sites (the attack-surface names warden already knows + any extra you
-# name) and reports app-layer findings — missing headers, exposed panels, known-CVE services, default creds. Detect-only:
-# an app bug is fixed in code, not patched, so it reports and never "fixes". Off until nuclei is installed.
+# ── app-layer web vulnerability scan ─────────────────────────────────────────
+# webscan.py scans your OWN public sites (the attack-surface names warden already knows + any extra you name). Built-in
+# checks always run (no install): missing security headers, exposed .env/.git/config/aws-credentials, and exposed admin
+# panels. nuclei (optional) adds the full ProjectDiscovery template library if it's installed. Detect-only: an app bug is
+# fixed in code, not patched, so it reports and never "fixes".
 # webscan:
-#   nuclei: ""                 # path to nuclei; "" = find it on PATH
+#   nuclei: ""                 # path to nuclei; "" = find it on PATH (optional — built-in checks don't need it)
 #   targets: []                # extra URLs to scan on top of your public names
 #   auto_targets: true         # also scan the public names in warden's attack-surface snapshot
-#   tags: cves,exposures,misconfig,technologies
 #   severity: medium,high,critical
 #   rate_limit: 10             # requests/second — be gentle with your own sites
 

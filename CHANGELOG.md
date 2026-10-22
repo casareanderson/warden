@@ -25,10 +25,12 @@ a reset history is re-baselined silently. MCP `warden_shell_history`, REST
 (`warden-patch plan root@box`, `warden-patch apply root@box`), matching sieve and
 ephor: no warden, no database, no Discord — it asks y/N on the command line.
 
-**Web-app scan (`webscan.py`).** Optional app-layer (DAST) scanning with nuclei
-against your own public sites — missing headers, exposed panels, known-CVE
-services, default creds. Detect-only (fix in code, never patched). MCP
-`warden_web`, REST `/api/v1/webscan`, Attack-surface tab.
+**Web-app scan (`webscan.py`).** App-layer (DAST) scanning of your own public
+sites with a built-in check set (no install): missing security headers, exposed
+`.env`/`.git`/AWS-credentials, and exposed admin panels, content-signature
+matched so a single-page app's 200 shell isn't a false positive. nuclei is an
+optional layer on top. Detect-only (fix in code, never patched). MCP `warden_web`,
+REST `/api/v1/webscan`, Attack-surface tab.
 
 ## v3.4
 

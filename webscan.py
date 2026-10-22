@@ -2,30 +2,29 @@
 """webscan.py — app-layer web vulnerability scan (DAST) for the estate's own sites (built 2026-10-22). No LLM.
 
 warden already scans the PACKAGES behind a public site (vulnscan.py → OSV.dev) and the EXPOSURE/config (intel.py).
-This fills the gap the package scan can't: the web application itself — missing security headers, exposed panels,
-known-CVE services (a vulnerable WordPress/Jenkins/etc.), default creds, and other signature-based web findings.
+This fills the gap the package scan can't: the web application itself. It runs TWO layers, both detect-only:
 
-It runs `nuclei` (a fast, template-based DAST scanner) against the public names warden already knows (the attack
-surface) plus anything named in `webscan.targets`, stores each finding, and posts NEW critical/high findings to
-Discord. Detect-only and advisory: an app-layer bug is fixed in your code, not by `apt`, so nothing here patches
-anything — it reports so you can.
+  1. built-in checks (always, no install): security headers (HSTS/X-Frame-Options/X-Content-Type-Options), exposed
+     sensitive files (/.env, /.git/config, /.aws/credentials, wp-config backups…), and exposed admin panels
+     (Tomcat manager, phpMyAdmin, Spring actuator, Jenkins, Grafana…). Content-signature matched, so a single-page
+     app returning its 200 shell for every path is NOT a false positive.
+  2. nuclei (optional, if installed): the full ProjectDiscovery template library on top.
 
-    webscan.py            run one scan (timer: daily 04:00, after the 03:30 vuln scan)
+    webscan.py            run one scan (timer: daily 04:10, after the 03:30 vuln scan)
     webscan.py --list     recent findings
 
 warden.yml:
     webscan:
-      nuclei: ""                 # path to the nuclei binary; "" = look on PATH. Off until nuclei is installed.
-      targets: []                # extra URLs (https://host[:port]) to scan on top of the public names warden knows
+      nuclei: ""                 # path to nuclei; "" = look on PATH. Built-in checks run with or without it.
+      targets: []                # extra URLs (https://host[:port]) on top of the public names warden already knows
       auto_targets: true         # also scan the public names in warden's attack-surface snapshot
-      tags: cves,exposures,misconfig,technologies   # non-intrusive templates; leave fuzzing/dos out
-      severity: medium,high,critical               # record/alert at or above this
+      severity: medium,high,critical   # record/alert at or above this
       rate_limit: 10             # requests per second (be gentle with your own sites)
 
 Hard rules:
   - Only the estate's own targets are ever scanned (public names from the surface snapshot + webscan.targets).
-  - Detect-only. No finding here is ever auto-fixed; there is no patch path for app code.
-  - No nuclei binary → silent skip, recorded in the runs table (never a crash).
+  - Detect-only. No finding here is ever auto-fixed — an app bug is fixed in code, not by `apt`, so it reports and
+    you fix it. There is deliberately no patch path.
 """
 import json
 import os
@@ -40,8 +39,35 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wlib import config, notify  # noqa: E402
 
 DB = config.DB
-DEFAULT_TAGS = "cves,exposures,misconfig,technologies"
-DEFAULT_SEVERITY = "medium,high,critical"
+UA = "warden-webscan/1.0"
+
+# (path, name, severity, content-signature regex or None for "non-HTML content")
+SENSITIVE = [
+    ("/.env", "Exposed .env file", "high", r"(?im)^\s*[A-Za-z_][A-Za-z0-9_]*="),
+    ("/.git/config", "Exposed git repository", "high", r"(?i)\[(core|remote)\]"),
+    ("/.git/HEAD", "Exposed git repository", "high", r"(?i)^\s*ref:\s*refs/"),
+    ("/.aws/credentials", "Exposed AWS credentials", "critical", r"(?i)aws_access_key_id"),
+    ("/wp-config.php.bak", "WordPress config backup", "high", r"(?i)(DB_PASSWORD|DB_NAME|DB_USER)"),
+    ("/config.json", "Exposed config.json", "medium", r"^\s*[\{\[]"),
+    ("/.DS_Store", "Exposed .DS_Store", "low", None),
+    ("/server-status", "Apache server-status", "medium", r"(?i)(apache server status|server version)"),
+]
+PANELS = [
+    ("/manager/html", "Apache Tomcat manager", "high", r"(?i)apache tomcat"),
+    ("/phpmyadmin/", "phpMyAdmin", "high", r"(?i)phpmyadmin"),
+    ("/actuator/env", "Spring Boot actuator (env)", "critical", r"(?i)(java\.home|spring\.datasource|user\.home|os\.arch)"),
+    ("/actuator", "Spring Boot actuator", "high", r"(?i)spring boot"),
+    ("/jenkins/login", "Jenkins", "medium", r"(?i)jenkins"),
+    ("/grafana/login", "Grafana", "low", r"(?i)grafana"),
+    ("/solr/", "Apache Solr", "medium", r"(?i)apache solr"),
+    ("/wp-login.php", "WordPress login", "low", r"(?i)wordpress"),
+]
+# (header name, finding name, severity) — HSTS matters most; CSP/Referrer-Policy are near-universally absent so left out.
+HEADERS = [
+    ("strict-transport-security", "Missing HSTS", "medium"),
+    ("x-frame-options", "Missing X-Frame-Options", "low"),
+    ("x-content-type-options", "Missing X-Content-Type-Options", "low"),
+]
 
 
 def db():
@@ -68,8 +94,7 @@ def _targets():
     out = set(x for x in (config.get("webscan.targets") or []) if x)
     if config.get("webscan.auto_targets", True):
         try:
-            import sqlite3 as _s
-            c = _s.connect(f"file:{config.DB}?mode=ro", uri=True, timeout=10)
+            c = sqlite3.connect(f"file:{config.DB}?mode=ro", uri=True, timeout=10)
             row = c.execute("select data from surface_snap order by id desc limit 1").fetchone()
             c.close()
             if row:
@@ -83,12 +108,13 @@ def _targets():
     return sorted(out)
 
 
+# ── nuclei layer (optional) ─────────────────────────────────────────────────
 def _cmd(bin, targets):
     return [bin, "-jsonl", "-silent", "-no-color",
-            "-severity", config.get("webscan.severity") or DEFAULT_SEVERITY,
+            "-severity", config.get("webscan.severity") or "medium,high,critical",
             "-rate-limit", str(int(config.get("webscan.rate_limit") or 10)),
             "-timeout", "15", "-retries", "1",
-            "-tags", config.get("webscan.tags") or DEFAULT_TAGS] + \
+            "-tags", config.get("webscan.tags") or "cves,exposures,misconfig,technologies"] + \
         [u for t in targets for u in ("-u", t)]
 
 
@@ -112,32 +138,66 @@ def parse(lines):
     return out
 
 
-def scan():
-    con = db()
-    bin = nuclei_bin()
-    if not bin:
-        con.execute("insert into runs(ts,source,lines,parsed,note) values(datetime('now'),'webscan',0,0,"
-                    "'nuclei not installed — skipped (see webscan: in warden.yml)')")
-        con.commit()
-        print("webscan: nuclei not installed — skipped")
-        return 0
-    targets = _targets()
-    if not targets:
-        con.execute("insert into runs(ts,source,lines,parsed,note) values(datetime('now'),'webscan',0,0,"
-                    "'no targets (no surface snapshot yet, and webscan.targets empty)')")
-        con.commit()
-        print("webscan: no targets — skipped")
-        return 0
-    cmd = _cmd(bin, targets)
+# ── built-in layer (always, no install) ─────────────────────────────────────
+def _session():
+    import requests  # noqa: PLC0415
+    s = requests.Session()
+    s.headers["User-Agent"] = UA
+    return s
+
+
+def _get(s, url, redirects=True):
+    import requests  # noqa: PLC0415
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-    except subprocess.TimeoutExpired:
-        con.execute("insert into runs(ts,source,lines,parsed,note) values(datetime('now'),'webscan',0,0,'timed out')")
-        con.commit(); print("webscan: timed out"); return 0
-    rows = parse((p.stdout or "").splitlines())
+        return s.get(url, timeout=20, allow_redirects=redirects)
+    except requests.RequestException:
+        return None
+
+
+def _headers(s, base):
+    r = _get(s, base)
+    if r is None:
+        return []
+    have = {k.lower() for k in r.headers}
+    return [{"host": base, "template": "builtin:headers:" + h, "name": name, "severity": sev,
+             "matched": base, "curl": f"curl -sI {base}"}
+            for h, name, sev in HEADERS if h not in have]
+
+
+def _paths(s, base, checks, kind):
+    out = []
+    for path, name, sev, sig in checks:
+        url = base + path
+        r = _get(s, url, redirects=False)
+        if r is None or r.status_code != 200:
+            continue
+        ct = (r.headers.get("content-type") or "").lower()
+        if sig:
+            if not re.search(sig, r.text[:4000]):
+                continue                          # an SPA's 200 shell is not the file/panel it pretends to be
+        elif "text/html" in ct:
+            continue
+        out.append({"host": base, "template": f"builtin:{kind}:{path.strip('/')}", "name": name, "severity": sev,
+                    "matched": url, "curl": f"curl -s {url}"})
+    return out
+
+
+def builtin_checks(targets):
+    s = _session()
+    out = []
+    delay = max(0.05, 1.0 / max(1, int(config.get("webscan.rate_limit") or 10)))
+    for t in targets:
+        out += _headers(s, t)
+        out += _paths(s, t, SENSITIVE, "file")
+        out += _paths(s, t, PANELS, "panel")
+        time.sleep(delay)
+    return out
+
+
+def _store(con, findings):
     new = 0
     alerts = []
-    for f in rows:
+    for f in findings:
         cur = con.execute("insert or ignore into web_findings(ts,host,template,name,severity,matched,curl,seen) "
                           "values(datetime('now'),?,?,?,?,?,?,0)", (f["host"], f["template"], f["name"],
                                                                     f["severity"], f["matched"], f["curl"]))
@@ -149,13 +209,37 @@ def scan():
         if f["severity"] in ("critical", "high"):
             alerts.append(f"🕸 **{f['name']}** — `{f['template']}` on {f['host']}\n   {f['matched']}")
     con.commit()                                    # commit BEFORE any notify call
+    return new, alerts
+
+
+def scan():
+    con = db()
+    targets = _targets()
+    if not targets:
+        con.execute("insert into runs(ts,source,lines,parsed,note) values(datetime('now'),'webscan',0,0,"
+                    "'no targets (no surface snapshot yet, and webscan.targets empty)')")
+        con.commit()
+        print("webscan: no targets — skipped")
+        return 0
+    findings = builtin_checks(targets)
+    layers = ["built-in"]
+    bin = nuclei_bin()
+    if bin:
+        try:
+            p = subprocess.run(_cmd(bin, targets), capture_output=True, text=True, timeout=3600)
+            findings += parse((p.stdout or "").splitlines())
+            layers.append("nuclei")
+        except subprocess.TimeoutExpired:
+            con.execute("insert into runs(ts,source,lines,parsed,note) values(datetime('now'),'webscan',0,0,'nuclei timed out')")
+            con.commit()
+    new, alerts = _store(con, findings)
     if alerts:
         notify.send("🌐 **Web app findings** (app-layer, detect-only — fix in code)\n" + "\n".join(alerts[:10])
                     + (f"\n… +{len(alerts) - 10} more → warden · Attack surface" if len(alerts) > 10 else ""))
     con.execute("insert into runs(ts,source,lines,parsed,note) values(datetime('now'),'webscan',?,?,?)",
-                (len(rows), new, f"{new} new finding(s) across {len(targets)} target(s)"))
+                (len(findings), new, f"{new} new finding(s) across {len(targets)} target(s) · {'+'.join(layers)}"))
     con.commit()
-    print(f"webscan: {new} new / {len(rows)} total findings, {len(targets)} target(s)")
+    print(f"webscan: {new} new / {len(findings)} total findings, {len(targets)} target(s) · {'+'.join(layers)}")
     return 0
 
 
