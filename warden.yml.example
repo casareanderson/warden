@@ -182,12 +182,15 @@ github:
   channel: ""                       # optional: another Discord channel id for GitHub activity ("" = the alert channel)
 
 # ── AI code review (mentor) ──────────────────────────────────────────────────
-# review.py runs mentor over PRs that opened or got new commits and posts the verdict to Discord. Read-only: it never
-# edits, commits, pushes or merges. Uses the endpoint below; without `review:` it falls back to `vuln.brief`.
+# review.py runs mentor over PRs that opened or got new commits, fact-checks the findings against the diff, posts the
+# verdict to Discord, and — with post_to_github — onto the PR itself as a review. Read-only in spirit: the review can
+# be APPROVE / COMMENT / REQUEST_CHANGES, but a human still merges.
 # review:
 #   url: https://openrouter.ai/api/v1
 #   model: qwen/qwen3.7-flash
 #   key_secret: OPENROUTER_API_KEY
+#   post_to_github: true                    # also POST the review onto the PR (needs the write token below)
+#   write_token_secret: GITHUB_REVIEW_TOKEN # fine-grained token with pull_request:write on the watched repos
 
 # ── shell-command audit (optional, on with hosts) ────────────────────────────
 # shellhistory.py reads each box's bash/zsh history (root + every login user)

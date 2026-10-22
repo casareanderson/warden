@@ -32,6 +32,14 @@ matched so a single-page app's 200 shell isn't a false positive. nuclei is an
 optional layer on top. Detect-only (fix in code, never patched). MCP `warden_web`,
 REST `/api/v1/webscan`, Attack-surface tab.
 
+**mentor code review (fact-checked + GitHub write-back).** `review.py` now fetches
+the PR title and body (previously the title was silently empty), runs mentor with
+that context, and **fact-checks every finding against the diff**: a finding that
+names a file not in the diff is dropped, and a line outside that file's hunks is
+cleared. With `review.post_to_github`, the verdict lands back on the PR as a
+review (APPROVE / COMMENT / REQUEST_CHANGES) via a fine-grained `pull_request:
+write` token — a human still merges.
+
 ## v3.4
 
 **AI recommendations for the approval queue.** For every pending approval, a

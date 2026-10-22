@@ -70,7 +70,8 @@ DEFAULTS = {
     # optional: track GitHub pushes, commits, PRs and reviews (see github.py). Off without a token.
     "github": {"token_secret": "GITHUB_TOKEN", "owner": "", "repos": [], "notify": True, "channel": ""},
     # optional: AI code review (wlib/review.py + review.py). Falls back to vuln.brief's endpoint.
-    "review": {"url": "", "model": "", "key_secret": ""},
+    "review": {"url": "", "model": "", "key_secret": "", "post_to_github": False,
+               "write_token_secret": "GITHUB_REVIEW_TOKEN"},
     # optional: agentless shell-command audit on every watched box (see shellhistory.py). On with hosts.
     "shell": {},
     # optional: app-layer web vulnerability scan (webscan.py, nuclei). Off until nuclei is installed.

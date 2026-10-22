@@ -35,3 +35,52 @@ def test_review_calls_endpoint(monkeypatch):
     monkeypatch.setattr("requests.post", lambda url, **kw: Resp())
     d = R.review("+ x = 1", title="add x")
     assert d["verdict"] == "comment" and d["model"] == "m"
+
+
+DIFF = """diff --git a/warden/github.py b/warden/github.py
+--- a/warden/github.py
++++ b/warden/github.py
+@@ -10,6 +10,8 @@
+ old
++new one
++new two
+ more
+diff --git a/tools/demo.py b/tools/demo.py
+--- a/tools/demo.py
++++ b/tools/demo.py
+@@ -1,3 +1,4 @@
+ first
+ second
++third
+"""
+
+
+def test_check_drops_hallucinated_file():
+    kept, dropped = review.check(DIFF, [
+        {"severity": "high", "file": "warden/github.py", "line": 11, "title": "t", "why": "w"},
+        {"severity": "high", "file": "not-in-diff.py", "line": 1, "title": "t", "why": "w"},
+        {"severity": "med", "file": "github.py", "line": 0, "title": "t", "why": "w"},   # partial path, no line
+        {"severity": "low", "file": "", "line": 0, "title": "t", "why": "w"},            # unlocatable, kept
+    ])
+    assert dropped == 1
+    assert [f["file"] for f in kept] == ["warden/github.py", "github.py", ""]
+
+
+def test_check_clears_out_of_range_line():
+    kept, dropped = review.check(DIFF, [
+        {"severity": "high", "file": "github.py", "line": 11, "title": "t", "why": "w"},   # in @@ 10..17
+        {"severity": "med", "file": "github.py", "line": 999, "title": "t", "why": "w"},   # out of range
+    ])
+    assert kept[0]["line"] == 11
+    assert kept[1]["line"] == 0 and kept[1].get("line_unverified") is True
+
+
+def test_verdict_event_mapping():
+    assert review.VERDICT_EVENT == {"approve": "APPROVE", "comment": "COMMENT", "changes": "REQUEST_CHANGES"}
+
+
+def test_render_body():
+    b = review.render_body("changes", "fix the injection", [
+        {"severity": "high", "file": "x.py", "line": 4, "title": "SQLi", "why": "unsanitised"},
+    ])
+    assert "changes" not in b and "**`x.py:4`** — SQLi" in b and "fix the injection" in b
