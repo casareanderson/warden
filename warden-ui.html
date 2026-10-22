@@ -133,6 +133,7 @@ td.ts{color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
 .tbl-tools{display:flex;gap:8px;align-items:center;margin:0 0 8px}
 .tbl-tools input{background:var(--panel);border:1px solid var(--line2);border-radius:6px;color:var(--fg);padding:5px 9px;font:inherit;font-size:var(--fs-sm);min-width:220px}
 .tbl-tools .n{color:var(--faint);font-size:12px}
+.pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:6px}
 /* badges + chips */
 .b{display:inline-block;padding:0 7px;border-radius:99px;font-size:11px;border:1px solid var(--line2);color:var(--dim);white-space:nowrap}
 .b.high,.b.red,.b.block,.b.critical{color:var(--red);border-color:var(--red-line);background:var(--red-bg)}
@@ -504,6 +505,10 @@ html[data-density=compact] nav button{padding:7px 10px}
 <section class="tab" id="t-agents">
   <div class="banner ok" style="margin-bottom:16px"><b>Watch what your AI agents do.</b> Any autonomous agent on the estate — Hermes profiles, OpenCode, a ChatGPT/Muse bridge, a scraper, your own bot — is attributed to the process that made each outbound connection, so you can see where it reaches, what it can access, and whether it ever touched a known-bad host. Detect-only: warden reads <code>/proc</code> and sockets, never blocks or kills. Name your own agents with <code>agents.patterns</code> in <code>warden.yml</code>.</div>
   <div class="kpis" id="ag-kpis"></div>
+  <div class="grid g2" style="margin-bottom:12px">
+    <div class="card"><h3>Where agents reach <span class="q">destinations by zone</span></h3><div id="ag-zone"></div></div>
+    <div class="card"><h3>Per-agent egress</h3><div id="ag-per"></div></div>
+  </div>
   <h2>Reached a known-bad destination <span class="hint">an agent connected to a host on a threat feed — detect-only, nothing was blocked</span></h2>
   <div class="wrap"><table id="ag-alerts"></table></div>
   <div class="card" style="margin:12px 0"><h3>Agent map <span class="q" id="ag-map-h"></span></h3><div id="ag-map"></div>
@@ -524,6 +529,31 @@ html[data-density=compact] nav button{padding:7px 10px}
   <h2>Coverage</h2>
   <div class="wrap"><table id="ag-runs"></table></div>
   <div class="note"><code>ss</code> is a snapshot every 10 minutes, so a connection that opens and closes between polls is missed, and bytes are that socket's lifetime at the moment it was sampled — a real download shows up big, but short transfers can be undercounted. Without root on a host, only warden's own user's sockets are attributed — never guessed.</div>
+</section>
+
+<!-- GITHUB -->
+<section class="tab" id="t-github">
+  <div class="banner ok" style="margin-bottom:16px"><b>Your repos, tracked.</b> Every push, commit, pull request and review on the repos warden watches, stored here and posted to Discord. Read-only — it never creates, pushes, merges or approves.</div>
+  <div class="kpis" id="gh-kpis"></div>
+  <h2>Pushes · pull requests · reviews <span class="hint">newest first · each event recorded once</span></h2>
+  <div class="wrap"><table id="gh-events"></table></div>
+  <h2>Commits <span class="hint">author + first line of the message</span></h2>
+  <div class="wrap"><table id="gh-commits"></table></div>
+</section>
+
+<!-- REVIEWS -->
+<section class="tab" id="t-reviews">
+  <div class="banner ok" style="margin-bottom:16px"><b>mentor's code review.</b> New and updated pull requests get an AI review — verdict, summary and findings. Advisory only: it never changes, merges or approves anything.</div>
+  <div id="rv-list"></div>
+</section>
+
+<!-- SHELL -->
+<section class="tab" id="t-shell">
+  <div class="banner ok" style="margin-bottom:16px"><b>What got typed.</b> The shell commands run on each box (root + every login user), with the suspicious ones flagged. Only flags reach Discord, and any <code>KEY=value</code> is redacted there.</div>
+  <h2>Flagged <span class="hint">privilege · destructive · force-push · pipe-to-shell · secrets in history</span></h2>
+  <div class="wrap"><table id="sh-flagged"></table></div>
+  <h2>Recent commands <span class="hint">every new command, newest first</span></h2>
+  <div class="wrap"><table id="sh-recent"></table></div>
 </section>
 
 <!-- HEALTH -->
@@ -675,6 +705,7 @@ const NAV = [
   {id:"review",   label:"Review"},
   {id:"threats",  label:"Threats",  kids:[["detections","Detections"],["edge","Edge · Cloudflare"],["network","Network"],["incidents","Incidents"],["geo","Geo & red list"]]},
   {id:"agents",   label:"Agents"},
+  {id:"code",     label:"Code",     kids:[["github","GitHub"],["reviews","Reviews"],["shell","Shell"]]},
   {id:"posture",  label:"Posture",  kids:[["surface","Attack surface"],["vulns","Vulnerabilities"],["endpoints","Endpoints"],["health","Health"]]},
   {id:"connect",  label:"Connect"},
   {id:"hub",      label:"Settings", kids:[["settings","Settings"],["account","Account"]]},
@@ -699,6 +730,7 @@ function renderSub(parent) {
   const active = CUR_SUB[parent];
   sn.innerHTML = NAV.find(n => n.id === parent).kids.map(([id, label]) =>
     `<button data-sub="${id}" class="${id === active ? "on" : ""}">${label}<span class="count" id="c-${id}" hidden></span></button>`).join("");
+  sn.onclick = e => { const b = e.target.closest("button"); if (b) show(b.dataset.sub); };   // the sub-tabs were never wired to a click handler
   KIDS[parent].forEach(applyCount);
 }
 function show(id) {
@@ -766,6 +798,29 @@ function table(id, cols, rows, empty) {
       return `<td class="${c.cls || ""}"${c.ip ? ` data-ip="${esc(r[c.k])}"` : ""}${c.title ? ` title="${esc(r[c.k])}"` : ""}>${v}</td>`;
     }).join("")}</tr>`).join("") + "</tbody>";
   const n = $("#" + id + "-n"); if (n) n.textContent = rows.length + " rows";
+}
+
+const PAGE = {};
+function pagedTable(id, cols, rows, empty, pageSize = 10) {
+  // table(), but pageSize rows at a time with Prev/Next — for lists that grow long (the edge blocklist).
+  const t = $("#" + id), total = rows.length, pages = Math.max(1, Math.ceil(total / pageSize));
+  let p = Math.min(PAGE[id] || 0, pages - 1); PAGE[id] = p;
+  const slice = rows.slice(p * pageSize, (p + 1) * pageSize);
+  t.innerHTML = !total ? `<tr><td class="empty">${empty || "Nothing to show."}</td></tr>`
+    : `<thead><tr>${cols.map(c => `<th${c.num ? ' style="text-align:right"' : ""}>${c.h}</th>`).join("")}</tr></thead><tbody>` +
+      slice.map(r => `<tr data-s="${esc(Object.values(r).join(" ").toLowerCase())}">${cols.map(c => {
+        const v = c.f ? c.f(r) : esc(r[c.k]);
+        return `<td class="${c.cls || ""}"${c.ip ? ` data-ip="${esc(r[c.k])}"` : ""}${c.title ? ` title="${esc(r[c.k])}"` : ""}>${v}</td>`;
+      }).join("")}</tr>`).join("") + "</tbody>";
+  const n = $("#" + id + "-n"); if (n) n.textContent = total + " rows";
+  let pg = $("#" + id + "-pager");
+  if (!pg) { pg = document.createElement("div"); pg.className = "pager"; pg.id = id + "-pager"; t.insertAdjacentElement("afterend", pg); }
+  if (pages <= 1) { pg.innerHTML = ""; return; }
+  pg.innerHTML = `<button class="btn ghost sm" ${p === 0 ? "disabled" : ""} data-pg="-1">← Prev</button>` +
+    `<span class="q">page ${p + 1} of ${pages} · ${total} total</span>` +
+    `<button class="btn ghost sm" ${p === pages - 1 ? "disabled" : ""} data-pg="1">Next →</button>`;
+  pg.onclick = e => { const b = e.target.closest("[data-pg]"); if (!b || b.disabled) return;
+    PAGE[id] = p + Number(b.dataset.pg); pagedTable(id, cols, rows, empty, pageSize); };
 }
 
 // ── drawer: one place for "tell me more" (box CVEs, one CVE, a Lynis report) ─────
@@ -859,11 +914,11 @@ function render() {
   table("bans", [{h: "When", k: "ts", cls: "ts"}, {h: "Address", k: "ip", cls: "ip", ip: 1}, {h: "Country", f: r => ccCell(r.cc, r.red)},
     {h: "Score", k: "score", cls: "num", num: 1}, {h: "State", f: r => `<span class="b ${r.state === "active" ? "red" : "amb"}">${esc(r.state)}</span>`},
     {h: "Reasons", k: "reasons", cls: "det", title: 1}], d.bans, "No ban proposals. That is normal: the threshold is deliberately high.");
-  table("ebans", [{h: "Target", k: "target", cls: "ip mono", ip: 1}, {h: "Country", f: r => ccCell(r.cc, false)},
+  pagedTable("ebans", [{h: "Target", k: "target", cls: "ip mono", ip: 1}, {h: "Country", f: r => ccCell(r.cc, false)},
     {h: "Status", f: r => `<span class="b ${{active: "block", pending: "amb", rejected: "acc", lapsed: "acc", failed: "red"}[r.status] || ""}">${esc(r.status)}</span>`},
     {h: "Why", k: "reason", cls: "wrapd"}, {h: "Proposed", k: "created", cls: "ts"}, {h: "Until", f: r => esc((r.expires || "—").slice(0, 10)), cls: "ts"},
     {h: "", f: r => r.status === "pending" && r.message_id ? `<button class="btn" data-ban="${esc(r.message_id)}" data-c="✅" data-t="${esc(r.target)}">Block</button> <button class="btn ghost" data-ban="${esc(r.message_id)}" data-c="❌" data-t="${esc(r.target)}">Leave</button>` : ""}],
-    d.edge_bans || [], "No proposals yet.");
+    d.edge_bans || [], "No proposals yet.", 10);
   badge("detections", (d.edge_bans || []).filter(b => b.status === "pending").length, false);
   table("recent", [{h: "When", k: "ts", cls: "ts"}, {h: "Source", f: r => `<span class="b">${esc(r.source)}</span>`},
     {h: "Address", k: "ip", cls: "ip", ip: 1}, {h: "Country", f: r => ccCell(r.cc, r.red)}, {h: "Kind", k: "kind", cls: "mono"},
@@ -1249,20 +1304,29 @@ function renderAgents(A) {
     {h: "Feed", k: "feed"}, {h: "Detail", k: "detail", cls: "det"}], A.alerts, "No agent has reached a known-bad destination. \ud83c\udf89");
   drawAgentMap(A);
   renderAgentPerms(A.perms || []);
+  const badIp = new Set((A.alerts || []).map(a => a.dest_ip));
+  const zones = {};
+  (A.dests || []).forEach(r => { const z = zoneOf(r.dest_ip, r.bad || badIp.has(r.dest_ip)).t;
+    const k = /known-bad/.test(z) ? "known-bad" : /Cloudflare/.test(z) ? "Cloudflare" : /LAN/.test(z) ? "LAN" : /mesh/.test(z) ? "mesh" : "internet";
+    zones[k] = (zones[k] || 0) + 1; });
+  donut($("#ag-zone"), Object.entries(zones).map(([k, n]) => ({k, n, red: k === "known-bad"})), {unit: "destinations", empty: "No destinations recorded yet."});
+  const per = {};
+  (A.dests || []).forEach(r => (r.agents || "").split(",").filter(Boolean).forEach(a => per[a.trim()] = (per[a.trim()] || 0) + 1));
+  donut($("#ag-per"), Object.entries(per).map(([k, n]) => ({k, n})), {unit: "destinations", empty: "No egress recorded yet."});
   table("ag-agents", [{h: "Agent", f: r => `<b>${esc(r.agent)}</b>`}, {h: "Host", k: "host"},
     {h: "Destinations", k: "dests", cls: "num", num: 1}, {h: "Connections", k: "conns", cls: "num", num: 1},
     {h: "Last seen", f: r => ago(r.last_seen), cls: "ts"},
     {h: "Flags", f: r => r.alerts ? `<span class="b red">${r.alerts} alert${r.alerts > 1 ? "s" : ""}</span>` : '<span class="q">\u2014</span>'}],
     A.agents, "agents.py has not run yet.");
-  table("ag-dests", [{h: "Destination", f: r => esc(r.domain || r.dest) + badDest(r), cls: "mono"},
+  pagedTable("ag-dests", [{h: "Destination", f: r => esc(r.domain || r.dest) + badDest(r), cls: "mono"},
     {h: "IP", k: "dest_ip", cls: "ip mono", ip: 1}, {h: "Agents", f: r => esc(r.agents || ""), cls: "det"},
     {h: "Hits", k: "hits", cls: "num", num: 1}, {h: "Received", f: r => bytes(r.bytes_recv), cls: "num", num: 1},
     {h: "First", f: r => ago(r.first_seen), cls: "ts"}, {h: "Last", f: r => ago(r.last_seen), cls: "ts"}],
-    A.dests || [], "No destinations recorded.");
-  table("ag-conns", [{h: "Agent", k: "agent", cls: "mono"}, {h: "Destination", f: r => esc(r.domain || r.dest) + badDest(r), cls: "mono"},
+    A.dests || [], "No destinations recorded.", 10);
+  pagedTable("ag-conns", [{h: "Agent", k: "agent", cls: "mono"}, {h: "Destination", f: r => esc(r.domain || r.dest) + badDest(r), cls: "mono"},
     {h: "IP", k: "dest_ip", cls: "ip mono", ip: 1}, {h: "Port", k: "port", cls: "num"}, {h: "Seen", k: "hits", cls: "num", num: 1},
     {h: "Received", f: r => bytes(r.bytes_recv), cls: "num", num: 1},
-    {h: "Last", f: r => ago(r.last_seen), cls: "ts"}, {h: "In", k: "container", cls: "det q"}], A.conns, "No destinations recorded.");
+    {h: "Last", f: r => ago(r.last_seen), cls: "ts"}, {h: "In", k: "container", cls: "det q"}], A.conns, "No destinations recorded.", 10);
   table("ag-find", [{h: "When", f: r => ago(r.ts), cls: "ts"}, {h: "Agent", k: "agent", cls: "mono"}, {h: "Destination", k: "dest", cls: "mono"},
     {h: "Score", k: "score", cls: "num", num: 1}, {h: "Why", f: r => esc((JSON.parse(r.reasons || "[]")).slice(1).join("; ")), cls: "det", title: 1},
     {h: "Verdict", f: r => r.verdict ? `<span class="b ${r.verdict === "suspicious" ? "red" : r.verdict === "normal" ? "ok" : ""}">${esc(r.verdict)}</span>` : '<span class="b amb">open</span>'}],
@@ -1349,6 +1413,42 @@ document.addEventListener("click", e => {          // agent map: click an agent 
   });
   $("#ag-agents").scrollIntoView({behavior: "smooth", block: "center"});
 });
+function renderGithub(G) {
+  if (!G || !G.enabled) { $("#gh-kpis").innerHTML = '<div class="empty">GitHub tracking is off — set github.owner and a GITHUB_TOKEN in warden.yml.</div>'; return; }
+  const kinds = {}; (G.events || []).forEach(e => kinds[e.kind] = (kinds[e.kind] || 0) + 1);
+  $("#gh-kpis").innerHTML = [["Events", (G.events || []).length, "pushes · PRs · reviews"],
+    ["Commits", (G.commits || []).length, "recorded"], ["Repos", (G.by_repo || []).length, "watched"]]
+    .map(([t, v, s]) => `<div class="kpi"><div class="k">${t}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join("");
+  table("gh-events", [{h: "When", k: "ts", cls: "ts"}, {h: "Repo", f: r => `<span class="mono">${esc(r.repo.split("/").pop())}</span>`},
+    {h: "Kind", f: r => `<span class="b">${esc((r.kind || "").replace("_", " "))}</span>`}, {h: "Actor", k: "actor"},
+    {h: "Ref / title", f: r => esc(r.ref || r.title || "")}, {h: "Head", f: r => esc((r.head || "").slice(0, 8)), cls: "mono"},
+    {h: "Commits", k: "n_commits", cls: "num", num: 1}], G.events || [], "No activity yet.");
+  table("gh-commits", [{h: "When", k: "ts", cls: "ts"}, {h: "Repo", f: r => `<span class="mono">${esc(r.repo.split("/").pop())}</span>`},
+    {h: "Author", k: "author"}, {h: "Message", k: "message", cls: "det", title: 1}], G.commits || [], "No commits yet.");
+}
+
+function renderReviews(R) {
+  const el = $("#rv-list"); if (!el) return;
+  if (!R || !R.enabled || !R.rows.length) { el.innerHTML = '<div class="empty">No code reviews yet — review.py runs mentor over new PRs once the AI endpoint and GITHUB_TOKEN are set.</div>'; return; }
+  const sev = {high: "🔴", med: "🟠", low: "🟡"};
+  const vb = {approve: "ok", comment: "amb", changes: "red"};
+  el.innerHTML = R.rows.map(r => `<div class="card" style="margin-bottom:10px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><h3 style="margin:0">${esc(r.repo.split("/").pop())}#${r.number}</h3>
+      <span class="b ${vb[r.verdict] || ""}">${esc(r.verdict)}</span><span class="q" style="margin-left:auto">${ago(r.ts)}</span></div>
+    ${r.summary ? `<p style="margin:6px 0 0">${esc(r.summary)}</p>` : ""}
+    ${(r.findings || []).map(f => `<div class="note" style="margin:4px 0">${sev[f.severity] || "•"} <b>${esc(f.file || "?")}${f.line ? ":" + f.line : ""}</b> ${esc(f.title || "")} — ${esc(f.why || "")}</div>`).join("")}
+  </div>`).join("");
+}
+
+function renderShell(S) {
+  if (!S || !S.enabled) return;
+  table("sh-flagged", [{h: "When", k: "ts", cls: "ts"}, {h: "Box", f: r => `<span class="mono">${esc(r.target)}</span>`},
+    {h: "User", k: "user"}, {h: "Flag", f: r => `<span class="b red">${esc(r.why)}</span>`},
+    {h: "Command", k: "command", cls: "det mono", title: 1}], S.flagged || [], "Nothing flagged. 🎉");
+  pagedTable("sh-recent", [{h: "When", k: "ts", cls: "ts"}, {h: "Box", f: r => `<span class="mono">${esc(r.target)}</span>`},
+    {h: "User", k: "user"}, {h: "Command", k: "command", cls: "det mono", title: 1}], S.recent || [], "No commands recorded yet.", 10);
+}
+
 function renderNetsec(N) {
   if (!N) return;
   donut($("#ch-ids"), N.ids_top.map(x => ({k: x.k, n: x.n, red: x.sev === 1})), {unit: "alerts", q: x => "type:ids " + x.k.split(" ").slice(0, 3).join(" ")});
@@ -1923,7 +2023,7 @@ document.addEventListener("click", async e => {
 });
 
 async function load() {
-  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); renderAgents(D.agents); shieldCode();
+  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); renderAgents(D.agents); renderGithub(D.github); renderReviews(D.reviews); renderShell(D.shell); shieldCode();
         const a = document.activeElement;   // don't wipe a half-typed setting/token on the 60-s refresh
         if (!(a && /INPUT|SELECT/.test(a.tagName) && a.closest("#t-settings,#t-account,#t-connect"))) loadSettings(); }
   catch (e) { console.error("warden render:", e); $("#updated").textContent = "⚠ refresh failed"; }

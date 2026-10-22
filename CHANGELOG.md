@@ -3,6 +3,28 @@
 warden's release history. The [README](README.md) is the home page — it covers
 what warden does today and how to run it; this file is what changed, and when.
 
+## Unreleased
+
+**GitHub activity tracking (`github.py`).** A new collector polls the GitHub
+events API for the repos you name (defaults to warden, sieve, ephor) and records
+every push, commit, pull request and review in warden, posting new activity to
+Discord. This is the estate's own code-review trail — what changed, who changed
+it, who reviewed it — where before only issues/PRs/stars reached `#github` and
+nothing was stored. Dedup by GitHub's global event id; read-only. MCP
+`warden_github`, REST `/api/v1/github`, search `type:gh`.
+
+**Shell-command audit (`shellhistory.py`).** Reads each watched box's bash/zsh
+history (root + every login user) over the same agentless path integrity.py
+uses, and flags the suspicious commands: privilege escalation, destructive
+(`rm -rf`, `pct destroy`, …), force-pushes, pipe-to-shell, and secrets typed into
+history (redacted before they reach Discord). First sweep is the baseline;
+a reset history is re-baselined silently. MCP `warden_shell_history`, REST
+`/api/v1/shell-history`, search `type:shell`.
+
+**`warden-patch`.** The patch engine's plan-and-apply core as a standalone CLI
+(`warden-patch plan root@box`, `warden-patch apply root@box`), matching sieve and
+ephor: no warden, no database, no Discord — it asks y/N on the command line.
+
 ## v3.4
 
 **AI recommendations for the approval queue.** For every pending approval, a

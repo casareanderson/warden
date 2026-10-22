@@ -279,7 +279,7 @@ def test_patcher_quotes_compose_labels(estate, monkeypatch):
     con.row_factory = sqlite3.Row
     con.execute("create table patch_jobs(id integer primary key, target text, status text, requested_by text, "
                 "message_id text, plan text, result text, finished text, timing text, run_after text, "
-                "timing_why text, n_pkgs int, n_remove int, decided text)")
+                "timing_why text, urgent int, n_pkgs int, n_remove int, decided text)")
     con.execute("insert into patch_jobs(id,target,status,requested_by,message_id) "
                 "values(1,'ctr:nas:app','running','me','mid')")
     job = {"id": 1, "message_id": "mid", "requested_by": "me"}

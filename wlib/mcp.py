@@ -49,9 +49,10 @@ TOOLS = [
                     "its log events, edge events, ban history and LAN identity.",
      "inputSchema": _obj({"ip": {"type": "string"}}, ["ip"]), "fn": lambda a: views.lookup_ip(a["ip"])},
     {"name": "warden_search",
-     "description": "Search across log events, edge events, LAN hosts, LAN alerts, CVEs, IDS and threat-intel hits. "
+     "description": "Search across log events, edge events, LAN hosts, LAN alerts, CVEs, IDS, threat-intel hits, "
+                    "GitHub activity and shell-command flags. "
                     "Free text, or field:value with ip: cc: kind: src: host: type: (type is log|edge|host|net-alert|"
-                    "vuln|ids|intel). Returns the newest 500.",
+                    "vuln|ids|intel|gh|shell). Returns the newest 500.",
      "inputSchema": _obj({"q": {"type": "string"}}, ["q"]), "fn": lambda a: views.search(a["q"][:200])},
     {"name": "warden_bans",
      "description": "Ban proposals/active bans and the edge blocklist with status (pending/active/rejected/lapsed). "
@@ -120,6 +121,19 @@ TOOLS = [
      "description": "Is warden itself working: last run of each collector in 24 h, lines read/scored, and "
                     "alerts that were suppressed and why.",
      "inputSchema": _obj(), "fn": lambda a: views.health()},
+    {"name": "warden_github",
+     "description": "Tracked GitHub activity on the repos warden watches (pushes, commits, pull requests, reviews), "
+                    "newest first, plus per-repo counts. The estate's record of its own code changes and reviews.",
+     "inputSchema": _obj(), "fn": lambda a: views.github()},
+    {"name": "warden_reviews",
+     "description": "mentor's AI code reviews of new pull requests: the verdict (approve/comment/changes), a summary, "
+                    "and the findings with severity, file and line. Read-only and advisory — nothing was changed.",
+     "inputSchema": _obj(), "fn": lambda a: views.reviews()},
+    {"name": "warden_shell_history",
+     "description": "Shell commands run on each watched box, and the flagged (suspicious) ones with why — privilege "
+                    "escalation, destructive commands, force-pushes, pipe-to-shell, secrets typed into history.",
+     "inputSchema": _obj({"limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 200}}),
+     "fn": lambda a: views.shell_history(a.get("limit", 200))},
 ]
 BY_NAME = {t["name"]: t for t in TOOLS}
 

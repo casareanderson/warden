@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""warden-patch — a standalone CLI for patching Debian-family hosts over SSH (extracted 2026-10-22).
+
+This is patcher.py's plan-and-apply core, pulled out so it runs on its own: no warden, no database, no Discord.
+Feed it `user@host` targets, it dry-runs `apt full-upgrade`, shows you the plan, and — only if you say yes —
+applies it and reports whether a reboot is needed. It is the same "never act until a person says yes" rule,
+on the command line instead of in a chat channel.
+
+    warden-patch plan  root@box1 [root@box2 ...]     show what each host would change (nothing is changed)
+    warden-patch apply root@box1 [--reboot]         show the plan, ask y/N, apply, tell you if a reboot is due
+
+Options:
+    --sudo         the ssh user is not root; prefix commands with `sudo -n` (passwordless sudo must be set up)
+    --yes          apply without the y/N prompt
+    --reboot       reboot a host that reports /var/run/reboot-required or a changed kernel (default: just say so)
+    --no-update    skip `apt-get update` before the dry run
+
+Scope and hard rules (kept deliberately narrow — see patcher.py for the full flow):
+    - Debian/Ubuntu family only, reached over SSH with a key (BatchMode, no password prompts).
+    - Nothing else is touched: no snapshots, no containers, no Docker, no vendor firmware.
+    - A plan that would REMOVE proxmox-ve / pve-manager / systemd / openssh-server / sudo is refused.
+    - The sudo password is never accepted on the command line; use `--sudo` with passwordless sudo.
+"""
+import subprocess
+import sys
+import re
+
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new"]
+NEVER_REMOVE = re.compile(r"^(proxmox-ve|pve-manager|pve-kernel|proxmox-kernel-helper|systemd|openssh-server|sudo)$")
+APT_ENV = "DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a"
+APT_OPTS = "-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+
+
+def sh(cmd, timeout=900):
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return p.returncode, p.stdout, p.stderr
+
+
+def remote(host, cmd, sudo=False, timeout=900):
+    inner = f"sudo -n sh -c 'exec {cmd}'" if sudo else cmd
+    return sh(SSH + [host, inner], timeout=timeout)
+
+
+def plan(host, sudo, update=True):
+    """(rc, installed, removed, out) from an apt full-upgrade dry run. """
+    pre = "apt-get update -qq >/dev/null 2>&1; " if update else ""
+    rc, out, _ = remote(host, pre + "apt-get -s full-upgrade", sudo=sudo)
+    inst = re.findall(r"^Inst (\S+) (?:\[(\S+)\] )?\((\S+)", out, re.M)
+    remv = re.findall(r"^Remv (\S+)", out, re.M)
+    return rc, inst, remv, out
+
+
+def render(host, inst, remv):
+    lines = [f"🩹 {host} — {len(inst)} to install/upgrade, {len(remv)} to REMOVE"]
+    if inst:
+        lines.append("   upgrade: " + ", ".join(n for n, o, v in inst[:10]) + (f" … +{len(inst) - 10}" if len(inst) > 10 else ""))
+    if remv:
+        lines.append("   remove:  " + ", ".join(remv[:15]))
+    bad = [p for p in remv if NEVER_REMOVE.match(p)]
+    if bad:
+        lines.append(f"   🛑 REFUSED: removes {', '.join(bad)} — patch this host by hand.")
+    if not inst and not remv:
+        lines.append("   nothing to do — already up to date.")
+    return "\n".join(lines)
+
+
+def reboot_needed(host, sudo):
+    rc, out, _ = remote(host, "uname -r; [ -f /var/run/reboot-required ] && echo REBOOT; "
+                              "ls -1 /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | sort -V | tail -1",
+                        sudo=sudo, timeout=60)
+    parts = (out or "").split()
+    running = parts[0] if parts else ""
+    latest = parts[-1] if len(parts) > 1 else ""
+    return ("REBOOT" in out) or (running and latest and running != latest)
+
+
+def apply_one(host, sudo, reboot, update, confirm):
+    rc, inst, remv, _ = plan(host, sudo, update)
+    if rc != 0:
+        print(f"🛑 {host}: dry run failed (rc {rc})"); return 1
+    print(render(host, inst, remv))
+    if [p for p in remv if NEVER_REMOVE.match(p)]:
+        return 1
+    if not inst and not remv:
+        return 0
+    if not confirm:
+        ans = input(f"apply {host}? [y/N] ").strip().lower()
+        if ans not in ("y", "yes"):
+            print("   skipped"); return 0
+    rc, out, _ = remote(host, f"apt-get update -qq && {APT_ENV} apt-get -y {APT_OPTS} full-upgrade", sudo=sudo, timeout=3600)
+    if rc != 0:
+        print(f"🛑 {host}: upgrade failed (rc {rc}):\n{(out or '').strip().splitlines()[-4:]}")
+        return 1
+    need = reboot_needed(host, sudo)
+    if need and reboot:
+        remote(host, "nohup sh -c 'sleep 2; systemctl reboot' >/dev/null 2>&1 &", sudo=sudo, timeout=30)
+        print(f"✅ {host}: patched, reboot issued")
+    else:
+        print(f"✅ {host}: patched." + (" ⚠️ reboot needed (run with --reboot to do it)" if need else " no reboot needed"))
+    return 0
+
+
+def main():
+    argv = sys.argv[1:]
+    confirm = "--yes" in argv
+    sudo = "--sudo" in argv
+    reboot = "--reboot" in argv
+    update = "--no-update" not in argv
+    args = [a for a in argv if not a.startswith("--")]
+    if not args:
+        print(__doc__); return 2
+    cmd, hosts = args[0], args[1:]
+    if not hosts:
+        print("no hosts given"); return 2
+    if cmd not in ("plan", "apply"):
+        print(f"unknown command {cmd!r}"); return 2
+    rc = 0
+    for h in hosts:
+        if cmd == "plan":
+            r, inst, remv, _ = plan(h, sudo, update)
+            if r != 0:
+                print(f"🛑 {h}: unreachable or apt failed (rc {r})"); rc = 1; continue
+            print(render(h, inst, remv))
+        else:
+            rc |= apply_one(h, sudo, reboot, update, confirm)
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

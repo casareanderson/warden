@@ -64,6 +64,12 @@ UNITS = {
                                ["agents.py"], ("every", "10min", "5min"), ["TimeoutStartSec=300"]),
     "warden-devicewatch":     ("router", "warden — score fixed-function devices doing something new; ask the owner on odd ones",
                                ["devicewatch.py"], ("every", "10min", "9min"), ["TimeoutStartSec=1200"]),
+    "warden-github":          ("github", "warden — track GitHub pushes, commits, pull requests and reviews",
+                               ["github.py"], ("every", "10min", "6min"), ["TimeoutStartSec=300"]),
+    "warden-review":          ("github", "warden — mentor's AI code review of new pull requests (read-only)",
+                               ["review.py"], ("every", "10min", "9min"), ["TimeoutStartSec=600"]),
+    "warden-shell":           ("shell", "warden — audit the shell commands run on each box, flag suspicious ones",
+                               ["shellhistory.py"], ("calendar", "*-*-* *:30"), ["TimeoutStartSec=1800"]),
 }
 
 GROUPS = {
@@ -76,6 +82,8 @@ GROUPS = {
     "ids": "ids.suricata_host set",
     "router": "router.ssh set",
     "agents": "an agent host (agents.include_local defaults on)",
+    "github": "github.owner set",
+    "shell": "at least one host declared",
 }
 
 
@@ -93,6 +101,8 @@ def enabled_groups():
         "ids": bool(config.get("ids.suricata_host")),
         "router": bool(config.get("router.ssh")),
         "agents": bool(config.get("agents.include_local", True)) or any(h.get("agents") for h in hosts.declared()),
+        "github": bool(config.get("github.owner")),
+        "shell": have_hosts,
     }
 
 

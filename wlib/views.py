@@ -296,6 +296,9 @@ def payload():
         "topology": topology(),
         "incidents": incidents(),
         "agents": agents_payload(),
+        "github": github(),
+        "reviews": reviews(),
+        "shell": shell_history(100),
     }
 
 
@@ -674,6 +677,14 @@ def search(text):
         rows += [{"ts": r["ts"], "type": "intel", "source": r["feed"], "ip": r["device"], "kind": r["kind"],
                   "detail": f"{r['device_name']} {r['indicator']} {r['detail']}", "score": None}
                  for r in q("select * from intel_hits where kind!='false-positive' order by id desc limit 5000")]
+    if has("gh_events"):
+        rows += [{"ts": r["ts"], "type": "gh", "source": r["repo"], "ip": "", "kind": r["kind"],
+                  "detail": f"{r['title'] or r['ref'] or ''} {r['head'] or ''} by {r['actor'] or '?'}", "score": None}
+                 for r in q("select * from gh_events order by ts desc limit 5000")]
+    if has("shell_cmds"):
+        rows += [{"ts": r["ts"], "type": "shell", "source": r["target"], "ip": "", "kind": r["why"] or "cmd",
+                  "detail": f"{r['user']}: {r['command']}", "score": None}
+                 for r in q("select * from shell_cmds where flagged=1 order by id desc limit 5000")]
     tag(rows, watch)
     out = []
     for r in rows:
@@ -930,6 +941,42 @@ def integrity():
 def health():
     return {"collectors": payload()["health"],
             "suppressed": q("select ts,kind,detail,reason from alert_suppressed order by id desc limit 50")}
+
+
+def github():
+    """Tracked GitHub activity: pushes, commits, pull requests and reviews across the watched repos."""
+    if not has("gh_events"):
+        return {"enabled": False}
+    events = q("select ts,repo,kind,actor,ref,head,n_commits,title,url from gh_events order by ts desc limit 200")
+    return {"enabled": True,
+            "events": events,
+            "commits": q("select ts,repo,author,message,url from gh_commits order by ts desc limit 200"),
+            "by_repo": q("select repo, kind, count(*) n from gh_events group by repo, kind order by n desc")}
+
+
+def reviews():
+    """mentor's AI code reviews of new pull requests: verdict, summary and findings."""
+    if not has("reviews"):
+        return {"enabled": False}
+    rows = q("select ts,repo,number,verdict,summary,findings,model from reviews order by ts desc limit 100")
+    for r in rows:
+        try:
+            r["findings"] = json.loads(r["findings"] or "[]")
+        except ValueError:
+            r["findings"] = []
+    return {"enabled": True, "rows": rows}
+
+
+def shell_history(limit=200):
+    """Commands run on each box: the most recent, and the flagged (suspicious) ones with why."""
+    if not has("shell_cmds"):
+        return {"enabled": False}
+    limit = _clamp(limit, 1, 1000, 200)
+    return {"enabled": True,
+            "recent": q("select ts,target,user,path,command,why from shell_cmds order by id desc limit ?", (limit,)),
+            "flagged": q("select ts,target,user,command,why from shell_cmds where flagged=1 order by id desc limit ?",
+                         (limit,)),
+            "by_flag": q("select why, count(*) n from shell_cmds where flagged=1 group by why order by n desc")}
 
 
 def lookup_ip(ip):

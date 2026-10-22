@@ -50,6 +50,7 @@ DEFAULTS = {
     "router": {"ssh": "", "key": ""},
     "patch": {"night": "02:30", "expire_hours": 24, "snapshot_keep_days": 7,
               "log": "/var/log/warden-patcher.log",
+              "auto_after_days": 0,     # 0 = off; >0 = unanswered NON-urgent plans auto-apply after this long (night window)
               "advisor": "", "advisor_path": "",     # optional python module with choose(); rule-based without it
               "busy_probe": None},                  # optional {target, json_file, key}: "who is busy" fact for timing
     # vulnerability scanning (vulnscan.py, images.py): advisories from api.osv.dev, nothing to configure
@@ -65,6 +66,12 @@ DEFAULTS = {
     # optional: host health from Beszel (see wlib/hosthealth.py). Off unless enabled.
     "beszel": {"enabled": False, "snapshot": "", "url": "", "user": "", "password_secret": "BESZEL_PASSWORD",
                "link": "", "stale_s": 300, "ignore_hosts": [], "ignore_alerts": {}},
+    # optional: track GitHub pushes, commits, PRs and reviews (see github.py). Off without a token.
+    "github": {"token_secret": "GITHUB_TOKEN", "owner": "", "repos": [], "notify": True, "channel": ""},
+    # optional: AI code review (wlib/review.py + review.py). Falls back to vuln.brief's endpoint.
+    "review": {"url": "", "model": "", "key_secret": ""},
+    # optional: agentless shell-command audit on every watched box (see shellhistory.py). On with hosts.
+    "shell": {},
 }
 
 OVERRIDES = DATA / "overrides.yml"   # what the console's Settings editor changed (the UI can't write warden.yml)

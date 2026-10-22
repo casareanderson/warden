@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""mentor — a standalone AI code-review CLI (the fourth warden companion, next to sieve, ephor and warden-patch).
+
+Reads a diff and reports what is wrong with it, in a shape you can act on. It never edits, commits, pushes, merges or
+approves anything — it only reports. "part of warden but standalone": it reuses warden's review engine, but needs no
+warden database or config — point it at any OpenAI-compatible endpoint with environment variables.
+
+    mentor diff -                       review a diff from stdin
+    mentor diff path/to.patch           review a diff file
+    mentor pr owner/repo#123            fetch a PR's diff from GitHub and review it
+
+Environment:
+    OPENROUTER_API_KEY   (or MENTOR_API_KEY)   the API key
+    MENTOR_MODEL                                model name (default: the engine's own default)
+    GITHUB_TOKEN                                needed only for `mentor pr`
+"""
+import json
+import os
+import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from wlib import review  # noqa: E402
+
+
+def _env():
+    url = os.environ.get("MENTOR_URL") or os.environ.get("OPENROUTER_URL") or None
+    model = os.environ.get("MENTOR_MODEL") or None
+    key = os.environ.get("MENTOR_API_KEY") or os.environ.get("OPENROUTER_API_KEY") or None
+    return url, model, key
+
+
+def render(d):
+    sev = {"high": "🔴", "med": "🟠", "low": "🟡"}
+    lines = [f"mentor — {d.get('verdict', '?')}", d.get("summary", "").strip()]
+    for f in d.get("findings", []):
+        loc = f.get("file") or "?"
+        if f.get("line"):
+            loc += f":{f['line']}"
+        lines.append(f"  {sev.get(f.get('severity'), '•')} [{loc}] {f.get('title', '')} — {f.get('why', '')}")
+    return "\n".join(l for l in lines if l)
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__); return 2
+    cmd, args = argv[0], argv[1:]
+    url, model, key = _env()
+    try:
+        if cmd == "diff":
+            src = args[0] if args else "-"
+            diff = sys.stdin.read() if src == "-" else open(src).read()
+            print(render(review.review(diff, url=url, model=model, key=key)))
+        elif cmd == "pr":
+            if not args:
+                print("usage: mentor pr owner/repo#number"); return 2
+            m = re.match(r"^([\w.-]+)/([\w.-]+)#(\d+)$", args[0])
+            if not m:
+                print("expected owner/repo#number"); return 2
+            owner, repo, n = m.groups()
+            import requests
+            tok = os.environ.get("GITHUB_TOKEN") or ""
+            hdr = {"Accept": "application/vnd.github+json", "User-Agent": "mentor"}
+            if tok:
+                hdr["Authorization"] = "Bearer " + tok
+            pr = requests.get(f"https://api.github.com/repos/{owner}/{repo}/pulls/{n}", headers=hdr, timeout=30)
+            pr.raise_for_status()
+            title = pr.json().get("title", "")
+            diff = requests.get(f"https://api.github.com/repos/{owner}/{repo}/pulls/{n}",
+                                headers={**hdr, "Accept": "application/vnd.github.diff"}, timeout=30).text
+            print(render(review.review(diff, title=title, url=url, model=model, key=key)))
+        else:
+            print(f"unknown command {cmd!r}"); return 2
+    except Exception as e:  # noqa: BLE001
+        print(f"mentor: {type(e).__name__}: {e}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

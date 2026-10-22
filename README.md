@@ -54,6 +54,8 @@ scanner binary) and v2.
 - **Endpoint drift** (`integrity.py`, `harden.py`) — Agentless file and config baselines with ✅-to-accept; weekly Lynis hardening score per box (run from a temp dir, nothing left installed).
 - **Devices and internet** (`devices.py`, `devicewatch.py`, `netwatch.py`) — One inventory of every device (sweep, router leases, Home Assistant) with its normal behaviour learned and anything new scored; internet health every minute with line usage and the busiest devices.
 - **AI agents** (`agents.py`) — Attributes every outbound connection on each agent host to the agent that made it, checks each destination against the threat feeds, flags an agent reaching a host it has never used, records what each agent can access (user, groups, Linux capabilities, sudo, readable secret files), and keeps a destination history. Detect-only, read-only.
+- **GitHub activity** (`github.py`) — Records every push, commit, pull request and review on the repos you name (the estate's own code-review trail), stores it in warden, and posts new activity to Discord. Read-only; it never creates, pushes, merges or approves.
+- **Shell commands** (`shellhistory.py`) — Reads each box's bash/zsh history (root + every login user) and flags the suspicious commands: privilege escalation, destructive (`rm -rf`, `pct destroy`, …), force-pushes, pipe-to-shell, and secrets typed into history (the value half of any `KEY=value` is redacted before it reaches Discord).
 - **Network IDS** (`netids.py`, `netintel.py`) — Pulls Suricata alerts; checks router DNS and connection logs against threat feeds. Both optional.
 - **Edge** (`intel.py`, `edgeban.py`, `cfsec.py`, `edge-sentry/`) — Cloudflare edge events, an attack-surface snapshot, a proposed edge blocklist, a zone audit, and a report-only Worker. All optional.
 - **Alerts** (`siemalert.py`, `wlib/notify.py`) — New findings to Discord, a webhook or ntfy, with self-report suppression.
@@ -183,7 +185,7 @@ claude mcp add --transport http warden https://warden.example.com/mcp --header "
 curl -H "Authorization: Bearer $WARDEN_TOKEN" https://warden.example.com/api/v1/summary
 ```
 
-**Tools:** `warden_summary` (start here), `warden_detections`, `warden_top_ips`, `warden_lookup_ip`, `warden_search`, `warden_bans`, `warden_vulnerabilities`, `warden_attack_surface`, `warden_network`, `warden_ids`, `warden_integrity`, `warden_health`. The REST views mirror them at `/api/v1/<view>`; `/api/v1/openapi.json` describes them.
+**Tools:** `warden_summary` (start here), `warden_detections`, `warden_top_ips`, `warden_lookup_ip`, `warden_search`, `warden_bans`, `warden_vulnerabilities`, `warden_attack_surface`, `warden_network`, `warden_ids`, `warden_integrity`, `warden_health`, `warden_github`, `warden_shell_history`. The REST views mirror them at `/api/v1/<view>`; `/api/v1/openapi.json` describes them.
 
 **Read-only, enforced by a test.** No tool can ban, block, patch or approve. A model that can reach your firewall through a chat window is a different risk class; it can tell you what to do, and you decide.
 
@@ -336,6 +338,7 @@ warden is the full platform. Two of its engines also ship on their own, for when
 
 - **[sieve](https://github.com/casareanderson/sieve)** — warden's dependency/CVE scanner as a standalone CLI (OSV.dev + CISA KEV + EPSS, no server).
 - **ephor** — warden's AI-agent network monitor as a standalone, passive watcher (coming soon).
+- **`warden-patch`** — the patch engine's plan-and-apply core as a standalone CLI: `warden-patch plan root@box`, `warden-patch apply root@box`. No warden, no database, no Discord — it asks y/N on the command line instead.
 
 ## Support and licence
 

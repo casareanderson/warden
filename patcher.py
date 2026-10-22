@@ -8,7 +8,8 @@ Flow (owner's choice 2026-10-07: "Button + Discord ✅", "Full upgrade + reboot"
      the dashboard can approve it too (wlib.notify keeps a local approvals ledger).
   3. Owner ✅ → LXC: Proxmox snapshot `warden-prepatch-<stamp>` first → apt full-upgrade (non-interactive,
      keep existing config files) → reboot IF required → rescan → reply with before/after + rollback command.
-     ❌ → dropped. Unanswered 24 h → expired.
+      ❌ → dropped. Unanswered 24 h → expired (or, with `patch.auto_after_days`, a non-urgent plan auto-applies in
+      the night window after that many days; an urgent plan — fixes a KEV/critical CVE — stays open until you decide).
 
 Hard rules:
   - Proxmox NODES are upgraded but NEVER rebooted automatically (one reboot takes every guest down; a node on
@@ -40,6 +41,10 @@ QUEUE = config.DATA / "patch-queue"
 LOCK = str(config.DATA / ".patcher.lock")
 LOG = config.get("patch.log")
 EXPIRE_H = int(config.get("patch.expire_hours", 24))
+# 0 = today's behaviour (unanswered plans expire after EXPIRE_H). >0 = an unanswered NON-urgent plan auto-approves
+# after this many days and runs in the night window; an urgent plan (fixes a KEV or critical CVE) still pings for a
+# decision and is never auto-applied.
+AUTO_AFTER_DAYS = int(config.get("patch.auto_after_days", 0))
 SNAP_KEEP_DAYS = int(config.get("patch.snapshot_keep_days", 7))
 SSH = hosts.SSH
 NEVER_REMOVE = re.compile(r"^(proxmox-ve|pve-manager|pve-kernel|proxmox-kernel-helper|systemd|openssh-server|sudo)$")
@@ -75,7 +80,7 @@ def db():
         result text, before_fix integer, after_fix integer, reboot text, finished text);
     """)
     cols = {r[1] for r in con.execute("pragma table_info(patch_jobs)")}
-    for col in ("timing text", "run_after text", "timing_why text"):
+    for col in ("timing text", "run_after text", "timing_why text", "urgent integer"):
         if col.split()[0] not in cols:
             con.execute(f"alter table patch_jobs add column {col}")
     return con
@@ -261,16 +266,23 @@ def make_plan_container(con, job, t):
         f"`docker compose up -d --no-deps {svc}` in `{wd}`"
     timing, why = decide_timing({"target": t["target"], "name": t["name"]}, [(svc, "", "")], [],
                                 (None, t["crit"], t["kev"]))
+    urgent = bool(t["kev"] or t["crit"])
     run_after = iso() if timing == "now" else iso(next_night())
     msg = "\n".join([f"🐳 **Container update: {t['name']}** — requested by {job['requested_by']}",
                      f"• image `{t['image']}` · fixes up to {t['kev']} known-exploited / {t['crit']} critical CVE(s)",
                      f"• steps: {steps} — re-creates ONLY this container, same compose settings and volumes",
                      "• rollback: the previous image stays on disk; re-tag it and `up -d` again",
                      f"⏱ timing: **{'as soon as approved' if timing == 'now' else 'tonight ' + run_after[11:16] + ' UTC'}** ({why})"])
-    mid = notify.post(msg + f"\n✅ = approve with that timing · {NOW_REACT} = approve and run NOW · ❌ = cancel")
-    notify.react(mid, notify.APPROVE); notify.react(mid, NOW_REACT); notify.react(mid, notify.REJECT)
+    if AUTO_AFTER_DAYS and not urgent:
+        mid = notify.post(msg + f"\n🌙 auto-applies in the night window after {AUTO_AFTER_DAYS} days unanswered. "
+                                "React ❌ to stop it.")
+        notify.react(mid, notify.REJECT)
+        timing, run_after, why = None, None, None
+    else:
+        mid = notify.post(msg + f"\n✅ = approve with that timing · {NOW_REACT} = approve and run NOW · ❌ = cancel")
+        notify.react(mid, notify.APPROVE); notify.react(mid, NOW_REACT); notify.react(mid, notify.REJECT)
     con.execute("update patch_jobs set status='pending', plan=?, n_pkgs=1, n_remove=0, message_id=?, timing=?, run_after=?, "
-                "timing_why=? where id=?", (msg, mid, timing, run_after, why, job["id"]))
+                "timing_why=?, urgent=? where id=?", (msg, mid, timing, run_after, why, int(urgent), job["id"]))
     con.commit()
 
 
@@ -310,6 +322,7 @@ def make_plan(con, job):
     bad = [p for p in remv if NEVER_REMOVE.match(p)]
     fixes = con.execute("select count(distinct vid), sum(severity='CRITICAL'), sum(kev) from vulns "
                         "where target=? and fixed!=''", (t["target"],)).fetchone()
+    urgent = bool(fixes[2] or fixes[1])          # fixes a known-exploited (CISA KEV) or critical CVE → needs a decision
     reboot = ("NEVER automatic (Proxmox node) — you'll be told if one is needed" if t["kind"] == "node" else
               "automatic if the upgrade requires it" + (" (this is warden's own box: ~1 min blip)"
                                                        if is_self(t) else ""))
@@ -343,13 +356,20 @@ def make_plan(con, job):
         con.execute("update patch_jobs set status=?, plan=?, n_pkgs=?, n_remove=?, finished=? where id=?",
                     ("refused" if bad else "nothing", full, len(inst), len(remv), iso(), job["id"]))
     else:
-        mid = notify.post(msg + f"\n✅ = approve with that timing · {NOW_REACT} = approve and run NOW · ❌ = cancel "
-                                f"(expires in {EXPIRE_H} h)")
-        notify.react(mid, notify.APPROVE); notify.react(mid, NOW_REACT)
-        notify.react(mid, notify.REJECT)
+        if AUTO_AFTER_DAYS and not urgent:
+            # Non-urgent: one quiet line, not the full ✅/⚡/❌ flow. React ❌ to stop it; otherwise it auto-applies.
+            mid = notify.post(msg + f"\n🌙 auto-applies in the night window after {AUTO_AFTER_DAYS} days unanswered. "
+                                    "React ❌ to stop it.")
+            notify.react(mid, notify.REJECT)
+            timing, run_after, why = None, None, None
+        else:
+            mid = notify.post(msg + f"\n✅ = approve with that timing · {NOW_REACT} = approve and run NOW · ❌ = cancel "
+                                    f"(expires in {EXPIRE_H} h)")
+            notify.react(mid, notify.APPROVE); notify.react(mid, NOW_REACT)
+            notify.react(mid, notify.REJECT)
         con.execute("update patch_jobs set status='pending', plan=?, n_pkgs=?, n_remove=?, message_id=?, timing=?, "
-                    "run_after=?, timing_why=? where id=?",
-                    (full, len(inst), len(remv), mid, timing, run_after, why, job["id"]))
+                    "run_after=?, timing_why=?, urgent=? where id=?",
+                    (full, len(inst), len(remv), mid, timing, run_after, why, int(urgent), job["id"]))
     con.commit()
 
 
@@ -493,9 +513,18 @@ def run_cycle():
             if (job["timing"] or "") == "tonight":
                 say(con, f"🌙 approved — scheduled for {job['run_after'][11:16]} UTC tonight ({job['timing_why']}). "
                          f"React {NOW_REACT} on the plan to run it now instead.", job["message_id"])
-        elif job["requested"] < iso(now() - timedelta(hours=EXPIRE_H)):
+        elif not job["urgent"] and AUTO_AFTER_DAYS and \
+                job["requested"] < iso(now() - timedelta(days=AUTO_AFTER_DAYS)):
+            when = iso(next_night())
+            con.execute("update patch_jobs set status='approved', run_after=?, timing=?, decided=? where id=?",
+                        (when, f"auto ({AUTO_AFTER_DAYS} days unanswered)", iso(), job["id"]))
+            say(con, f"🌙 auto-approved after {AUTO_AFTER_DAYS} days unanswered — runs tonight {when[11:16]} UTC. "
+                     f"React {NOW_REACT} on the plan to run it now instead.", job["message_id"])
+        elif not job["urgent"] and not AUTO_AFTER_DAYS and \
+                job["requested"] < iso(now() - timedelta(hours=EXPIRE_H)):
             con.execute("update patch_jobs set status='expired', finished=? where id=?", (iso(), job["id"]))
             say(con, "⌛ expired unanswered — nothing changed.", job["message_id"])
+        # else: an urgent plan (or a non-urgent one inside its grace) stays pending until the owner decides.
         con.commit()
     for j in con.execute("select * from patch_jobs where status='approved' and run_after > ?", (iso(),)).fetchall():
         if notify.owner() in (notify.reactors(j["message_id"], NOW_REACT) or []):
