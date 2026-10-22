@@ -1,10 +1,17 @@
 # edge-sentry — deploy notes
 
-⛔ **NOT DEPLOYED.** This is staged, not live. It could not be deployed or
-tested from this session because no Cloudflare token in the estate has Workers
-scope (the existing three are DNS:Edit, Tunnel+DNS:Edit, and Firewall Access
-Rules only). Nothing below has been executed; treat it as reviewed code, not
-verified code.
+✅ **DEPLOYED.** Verified 2026-10-22: the `edge-sentry` script is live and
+routed on six hostnames (`obico`, `photos-1`, `auth-1`, `netbird`, `try`,
+`listings`), and the `CF_API_TOKEN` (Cloudflare WAF token) can list both the
+Workers scripts and routes on the account. (This supersedes the earlier
+"NOT DEPLOYED" note — that predates the deploy.)
+
+To ship an update (e.g. the security-header change in `worker.js`), just
+re-run the deploy from `/opt/warden` — it re-uploads the script and leaves the
+existing routes alone:
+```sh
+python3 edge-sentry/deploy.py   # reads CF_API_TOKEN + EDGE_WEBHOOK + cloudflare.edge_hosts from warden.yml
+```
 
 ## What it does
 Reports hostile requests to Discord from the Cloudflare edge, in real time,
