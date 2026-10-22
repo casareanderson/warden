@@ -44,7 +44,8 @@ DEFAULTS = {
     # log sources for warden.py / siemalert.py
     "sources": {},
     # Cloudflare (cfsec, intel, edgeban) — optional
-    "cloudflare": {"zone_id": "", "token_secret": "CF_API_TOKEN", "edge_hosts": [], "sso_exempt": {}},
+    "cloudflare": {"zone_id": "", "token_secret": "CF_API_TOKEN", "edge_hosts": [], "sso_exempt": {},
+                   "workers_token_secret": ""},     # optional dedicated Workers-scoped token (edge-sentry deploy)
     # optional extras: network IDS, router, patch window
     "ids": {"suricata_host": "", "eve_path": "/var/log/suricata/eve.json"},
     "router": {"ssh": "", "key": ""},

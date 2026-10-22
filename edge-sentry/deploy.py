@@ -41,7 +41,9 @@ HOSTS = (os.environ.get("EDGE_HOSTS", "").split(",") if os.environ.get("EDGE_HOS
          else list(config.get("cloudflare.edge_hosts") or []))
 DOMAIN = config.get("estate.domain") or "example.com"
 SELF_IPS = config.HOME / "self-ips.txt"
-WAF = config.get("cloudflare.token_secret") or "CF_API_TOKEN"
+# Prefer a dedicated Workers-scoped token; fall back to the WAF token. Both must
+# have Account → Workers Scripts:Edit and Zone → Workers Routes:Edit.
+WAF = config.get("cloudflare.workers_token_secret") or config.get("cloudflare.token_secret") or "CF_API_TOKEN"
 
 
 def secret(key, path=None):

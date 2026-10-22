@@ -98,6 +98,8 @@ cloudflare:
   zone_id: ""
   account_id: ""
   token_secret: CF_API_TOKEN        # Zone WAF Edit, Zone Settings Read, Analytics Read, DNS Read
+  workers_token_secret: ""          # optional: a dedicated Workers token (Account Workers Scripts:Edit +
+                                    #   Zone Workers Routes:Edit) for the edge-sentry deploy — falls back to token_secret
   sso_portal: auth.example.com
   edge_hosts: [auth, photos]        # hostnames the edge-sentry Worker sits in front of
   sso_exempt:                       # public names deliberately NOT behind SSO, and why
