@@ -299,6 +299,7 @@ def payload():
         "github": github(),
         "reviews": reviews(),
         "shell": shell_history(100),
+        "webscan": web_findings(),
     }
 
 
@@ -965,6 +966,15 @@ def reviews():
         except ValueError:
             r["findings"] = []
     return {"enabled": True, "rows": rows}
+
+
+def web_findings():
+    """App-layer (DAST) web-vulnerability findings from nuclei, newest first."""
+    if not has("web_findings"):
+        return {"enabled": False}
+    return {"enabled": True,
+            "rows": q("select ts,host,severity,name,template,matched,seen from web_findings order by "
+                      "(severity='critical') desc, (severity='high') desc, id desc limit 200")}
 
 
 def shell_history(limit=200):

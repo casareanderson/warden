@@ -134,6 +134,10 @@ TOOLS = [
                     "escalation, destructive commands, force-pushes, pipe-to-shell, secrets typed into history.",
      "inputSchema": _obj({"limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 200}}),
      "fn": lambda a: views.shell_history(a.get("limit", 200))},
+    {"name": "warden_web",
+     "description": "App-layer (DAST) web-vulnerability findings from nuclei against your own public sites: missing "
+                    "security headers, exposed panels, known-CVE services, default creds. Detect-only — fix in code.",
+     "inputSchema": _obj(), "fn": lambda a: views.web_findings()},
 ]
 BY_NAME = {t["name"]: t for t in TOOLS}
 

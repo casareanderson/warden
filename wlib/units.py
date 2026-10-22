@@ -70,6 +70,8 @@ UNITS = {
                                ["review.py"], ("every", "10min", "9min"), ["TimeoutStartSec=600"]),
     "warden-shell":           ("shell", "warden — audit the shell commands run on each box, flag suspicious ones",
                                ["shellhistory.py"], ("calendar", "*-*-* *:30"), ["TimeoutStartSec=1800"]),
+    "warden-webscan":         ("webscan", "warden — app-layer web vulnerability scan (nuclei) of your own public sites",
+                               ["webscan.py"], ("calendar", "*-*-* 04:10"), ["TimeoutStartSec=3600"]),
 }
 
 GROUPS = {
@@ -84,6 +86,7 @@ GROUPS = {
     "agents": "an agent host (agents.include_local defaults on)",
     "github": "github.owner set",
     "shell": "at least one host declared",
+    "webscan": "nuclei installed",
 }
 
 
@@ -103,6 +106,7 @@ def enabled_groups():
         "agents": bool(config.get("agents.include_local", True)) or any(h.get("agents") for h in hosts.declared()),
         "github": bool(config.get("github.owner")),
         "shell": have_hosts,
+        "webscan": bool(shutil.which("nuclei")),
     }
 
 

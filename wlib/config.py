@@ -72,6 +72,10 @@ DEFAULTS = {
     "review": {"url": "", "model": "", "key_secret": ""},
     # optional: agentless shell-command audit on every watched box (see shellhistory.py). On with hosts.
     "shell": {},
+    # optional: app-layer web vulnerability scan (webscan.py, nuclei). Off until nuclei is installed.
+    "webscan": {"nuclei": "", "targets": [], "auto_targets": True,
+                "tags": "cves,exposures,misconfig,technologies", "severity": "medium,high,critical",
+                "rate_limit": 10},
 }
 
 OVERRIDES = DATA / "overrides.yml"   # what the console's Settings editor changed (the UI can't write warden.yml)

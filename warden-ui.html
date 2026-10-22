@@ -422,6 +422,9 @@ html[data-density=compact] nav button{padding:7px 10px}
   <h2>LAN listening services <span class="hint">netscan port sweep — the inside surface</span></h2>
   <div class="tbl-tools"><input data-filter="ports" placeholder="filter these rows…"><span class="n" id="ports-n"></span></div>
   <div class="wrap"><table id="ports"></table></div>
+  <h2>Web app findings <span class="hint">nuclei (DAST) against your own public sites — app-layer, detect-only, fix in code</span></h2>
+  <div class="tbl-tools"><input data-filter="webscan" placeholder="filter: finding, host, template…"><span class="n" id="webscan-n"></span></div>
+  <div class="wrap"><table id="webscan"></table></div>
 </section>
 
 <!-- VULNERABILITIES -->
@@ -1449,6 +1452,15 @@ function renderShell(S) {
     {h: "User", k: "user"}, {h: "Command", k: "command", cls: "det mono", title: 1}], S.recent || [], "No commands recorded yet.", 10);
 }
 
+function renderWeb(W) {
+  const on = W && W.enabled;
+  table("webscan", [{h: "When", k: "ts", cls: "ts"}, {h: "Host", k: "host", cls: "mono"},
+    {h: "Severity", f: r => `<span class="b ${r.severity === "critical" ? "red" : r.severity === "high" ? "high" : r.severity === "medium" ? "med" : "low"}">${esc(r.severity)}</span>`},
+    {h: "Finding", k: "name"}, {h: "Template", k: "template", cls: "mono det"},
+    {h: "Matched", k: "matched", cls: "det mono", title: 1}, {h: "Seen", k: "seen", cls: "num", num: 1}],
+    on ? (W.rows || []) : [], on ? "No web-app findings. 🎉" : "nuclei is not installed — install it and set webscan: to scan your public sites.");
+}
+
 function renderNetsec(N) {
   if (!N) return;
   donut($("#ch-ids"), N.ids_top.map(x => ({k: x.k, n: x.n, red: x.sev === 1})), {unit: "alerts", q: x => "type:ids " + x.k.split(" ").slice(0, 3).join(" ")});
@@ -2023,7 +2035,7 @@ document.addEventListener("click", async e => {
 });
 
 async function load() {
-  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); renderAgents(D.agents); renderGithub(D.github); renderReviews(D.reviews); renderShell(D.shell); shieldCode();
+  try { D = await getj("api"); if (D.error) throw new Error(D.error); render(); renderVulns(D.vuln); renderEndpoints(D.endpoints, D.netsec); renderNetsec(D.netsec); renderAgents(D.agents); renderGithub(D.github); renderReviews(D.reviews); renderShell(D.shell); renderWeb(D.webscan); shieldCode();
         const a = document.activeElement;   // don't wipe a half-typed setting/token on the 60-s refresh
         if (!(a && /INPUT|SELECT/.test(a.tagName) && a.closest("#t-settings,#t-account,#t-connect"))) loadSettings(); }
   catch (e) { console.error("warden render:", e); $("#updated").textContent = "⚠ refresh failed"; }

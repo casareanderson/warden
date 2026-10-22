@@ -77,6 +77,7 @@ V1 = {
     "github":         lambda qs, rest: views.github(),
     "reviews":        lambda qs, rest: views.reviews(),
     "shell-history":  lambda qs, rest: views.shell_history(_a(qs, "limit", 200)),
+    "webscan":        lambda qs, rest: views.web_findings(),
     "setup":          lambda qs, rest: {"checks": setup.checks(), "score": setup.score(setup.checks())},
     "approvals":      lambda qs, rest: {"pending": notify.pending()},
 }
