@@ -206,15 +206,16 @@ class FakeResp:
 
 
 class FakeCF:
-    def __init__(self, extra=None):
+    def __init__(self, extra=None, apply_put=True):
         self.rules = list(extra or [])
         self.calls = []
+        self.apply_put = apply_put
 
     def urlopen(self, req, timeout=None):
         method = req.get_method()
         body = json.loads(req.data) if req.data else None
         self.calls.append((method, req.full_url, body))
-        if method == "PUT":
+        if method == "PUT" and self.apply_put:
             self.rules = body["rules"]
         payload = json.dumps({"success": True, "result": {"id": "rs1", "rules": list(self.rules)}}).encode()
         return FakeResp(payload)
@@ -309,6 +310,16 @@ def test_cf_ban_shape_matches_edgeban_sync(home, monkeypatch):
     wshape = [(m, u.split("/client/v4", 1)[1] if "/client/v4" in u else u, b)
               for m, u, b in wclient.calls]
     assert wshape == eclient.calls
+
+
+def test_cf_ban_catches_a_write_that_does_not_land(home, monkeypatch):
+    """cf_ban must not claim a ban it did not verify: when the endpoint accepts
+    the PUT but the read-back shows the rule unchanged, cf_ban fails loudly
+    rather than pretending the ban is in place."""
+    w, client = _cf_home(home, monkeypatch)
+    client.apply_put = False                      # simulate an endpoint that silently drops the write
+    ok, msg = w.cf_ban("203.0.113.9", "sqli", {})
+    assert not ok and "read-back" in msg
 
 
 def test_expire_lapsed_unbans_only_expired(home, monkeypatch):
