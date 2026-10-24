@@ -333,6 +333,30 @@ def test_expire_lapsed_unbans_only_expired(home, monkeypatch):
     assert block["expression"] == "(ip.src in {198.51.100.4})"
 
 
+def test_expire_lapsed_failed_unban_stays_active_and_retries(home, monkeypatch):
+    """A failed unban leaves the row 'active' so the next sweep retries it —
+    the unban path's failure behaviour, not just its happy path."""
+    w = load("warden")
+    con = w.db()
+    con.execute("insert into bans(ts,ip,score,reasons,state,expires,note) "
+                "values(datetime('now'), '203.0.113.9', 20, 'sqli', 'active', "
+                "datetime('now','-1 hour'), 'cf-edge blocked')")
+    con.commit()
+
+    # no CF credentials → cf_unban fails → nothing unblocked, row still 'active'
+    assert w.expire_lapsed(con, w.load_conf()) == 0
+    row = con.execute("select state, note from bans where ip='203.0.113.9'").fetchone()
+    assert row["state"] == "active" and "unban failed" in row["note"]
+
+    # next sweep with credentials → the same row is unblocked and marked 'lapsed'
+    w, client = _cf_home(home, monkeypatch)
+    client.rules.append({"id": "b", "action": "block",
+                         "expression": "(ip.src in {203.0.113.9})",
+                         "description": w.DESC, "enabled": True})
+    assert w.expire_lapsed(con, w.load_conf()) == 1
+    assert con.execute("select state from bans where ip='203.0.113.9'").fetchone()["state"] == "lapsed"
+
+
 # ── the extra log formats (Caddy JSON, Traefik CLF, Authentik JSON) ─────────
 CADDY = ('{"level":"info","ts":1704067200.0,"logger":"http.log.access","msg":"handled request",'
          '"request":{"remote_ip":"203.0.113.5","remote_port":"4321","proto":"HTTP/2.0",'
