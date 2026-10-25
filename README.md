@@ -335,11 +335,12 @@ Known limits (full list in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)): the Cloudflare W
 
 ## Related tools
 
-warden is the full platform. Two of its engines also ship on their own, for when you want a single piece:
+warden is the full platform. Four of its engines also ship on their own, for when you want a single piece:
 
 - **[sieve](https://github.com/casareanderson/sieve)** — warden's dependency/CVE scanner as a standalone CLI (OSV.dev + CISA KEV + EPSS, no server).
-- **ephor** — warden's AI-agent network monitor as a standalone, passive watcher (coming soon).
-- **`warden-patch`** — the patch engine's plan-and-apply core as a standalone CLI: `warden-patch plan root@box`, `warden-patch apply root@box`. No warden, no database, no Discord — it asks y/N on the command line instead.
+- **[ephor](https://github.com/casareanderson/ephor)** — warden's AI-agent network monitor as a standalone, passive watcher.
+- **[proctor](https://github.com/casareanderson/proctor)** — warden's code reviewer as a standalone CLI: `git diff | proctor diff -`.
+- **[farrier](https://github.com/casareanderson/farrier)** — the patch engine's plan-and-apply core as a standalone CLI: `farrier plan root@box`, `farrier apply root@box`. No warden, no database, no Discord — it asks y/N on the command line instead.
 
 ## Support and licence
 
