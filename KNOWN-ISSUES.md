@@ -23,9 +23,12 @@ enforcement caveats below apply. Read this before you flip `enforce: true`.
   same "addresses that are us" set edgeban already honours — so a `/24` holding
   an address you listed there is refused, not just one in `warden.yml allow`. It
   is tested (own `/24`, own `/16`, RFC1918 and Cloudflare's ranges are all
-  refused; a genuinely hostile `/24` is still bannable). What remains: nothing
-  discovers your WAN address for you, so on a dynamic lease you must keep
-  `self-ips.txt` current.
+  refused; a genuinely hostile `/24` is still bannable). warden now keeps the
+  list current itself: each run discovers the live WAN address from Cloudflare's
+  trace endpoint and rewrites the auto line in `self-ips.txt` when the lease has
+  moved, so a dynamic lease no longer needs a manual edit. Discovery is
+  best-effort — an offline box falls back to whatever the file already holds,
+  and the file remains the manual override for addresses warden cannot discover.
 - **Enforced bans expire and are unblocked on lapse.** `cf_unban()` removes a
   lapsed address from the `warden: blocklist` rule once `expires` passes, so
   edge rules no longer pile up until cleared by hand. It shares `_cf_adjust()`

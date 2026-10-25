@@ -109,6 +109,26 @@ def is_allowlisted(ip, extra):
     return False
 
 SELF_IPS = config.HOME / "self-ips.txt"
+WAN_TRACE = "https://www.cloudflare.com/cdn-cgi/trace"
+WAN_MARK = "warden: current WAN lease (auto)"
+
+def discover_wan():
+    """The live public WAN address, from Cloudflare's trace endpoint.
+
+    A home WAN lease is usually dynamic; self-ips.txt is the manual "these are
+    us" list and goes stale the moment the lease changes. This returns the
+    current egress address so a /24 roll-up that would swallow it is still
+    refused. Best-effort: any failure (offline, blocked, no network) returns
+    None instead of raising — discovery is a convenience, not a precondition.
+    """
+    try:
+        with urllib.request.urlopen(WAN_TRACE, timeout=5) as r:
+            for line in r.read().decode("utf-8", "replace").splitlines():
+                if line.startswith("ip="):
+                    return str(ip_address(line[3:].strip()))
+    except Exception:  # noqa: BLE001
+        return None
+    return None
 
 def self_ips():
     """Addresses that are US (self-ips.txt), incl. the dynamic WAN lease.
@@ -116,7 +136,7 @@ def self_ips():
     The log-side /24 roll-up must refuse a range containing one of these just
     as edgeban does, or a lease change turns your own address into the thing
     that gets you banned. A file rather than a hardcode because a home WAN
-    address is usually dynamic; when it changes, this is the one place to edit.
+    address is usually dynamic; refresh_self_ips() keeps the lease line current.
     """
     try:
         return [l.split("#")[0].strip() for l in SELF_IPS.read_text().splitlines()
@@ -127,6 +147,41 @@ def self_ips():
 def allow_extra(cfg):
     """Config `allow:` plus self-ips.txt — the full set a ban must never touch."""
     return list(cfg.get("allow", [])) + self_ips()
+
+def refresh_self_ips():
+    """Discover the live WAN address and keep self-ips.txt current.
+
+    Rewrites the auto line (`IP  # warden: current WAN lease (auto)`) when the
+    lease has moved, preserving manual entries and comments and never growing
+    the file with one line per lease change. Every consumer of self-ips.txt —
+    the log-side /24 roll-up, edgeban, intel, cfsec, edge-sentry — reads the
+    same file, so this one write keeps them all current. Returns True when the
+    file changed; False when there is nothing to do or discovery failed.
+    """
+    wan = discover_wan()
+    if not wan:
+        return False
+    try:
+        lines = SELF_IPS.read_text().splitlines()
+    except OSError:
+        lines = []
+    keep, current = [], False
+    for l in lines:
+        if WAN_MARK in l:
+            if l.split("#")[0].strip() == wan:
+                current = True
+            continue                    # drop the previous auto line
+        if l.split("#")[0].strip() == wan:
+            current = True              # already listed by hand
+        keep.append(l)
+    if current:
+        return False
+    keep.append(f"{wan}  # {WAN_MARK}")
+    try:
+        SELF_IPS.write_text("\n".join(keep).rstrip("\n") + "\n")
+    except OSError:
+        return False
+    return True
 
 # ------------------------------------------------------------------ db ----
 SCHEMA = """
@@ -571,6 +626,7 @@ def expire_lapsed(con, cfg):
 # ------------------------------------------------------------------ main ---
 def main():
     os.umask(0o077)                      # created files (DB WAL/journal, snapshots) stay owner-only
+    refresh_self_ips()                   # keep the WAN lease line current before scoring uses it
     cfg = load_conf()
     allow = allow_extra(cfg)
     con = db()

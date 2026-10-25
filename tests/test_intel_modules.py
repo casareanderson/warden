@@ -78,6 +78,90 @@ def test_allowlist_guards_read_self_ips(home):
     assert not w.net_overlaps_allow("198.51.100.0/24", allow)    # hostile /24 still bannable
 
 
+def _trace(monkeypatch, text):
+    class R:
+        def __init__(self, t):
+            self._t = t
+
+        def read(self):
+            return self._t.encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: R(text))
+
+
+def test_discover_wan_parses_trace(home, monkeypatch):
+    w = load("warden")
+    _trace(monkeypatch, "fl=1.2.3.4\nh=www.cloudflare.com\nip=203.0.113.42\nts=1690000000\n")
+    assert w.discover_wan() == "203.0.113.42"
+
+
+def test_discover_wan_fails_quietly(home, monkeypatch):
+    w = load("warden")
+
+    def boom(url, timeout=None):
+        raise OSError("offline")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert w.discover_wan() is None
+
+
+def test_refresh_self_ips_writes_when_missing(home, monkeypatch):
+    w = load("warden")
+    _trace(monkeypatch, "ip=203.0.113.42\n")
+    assert w.refresh_self_ips() is True
+    assert "203.0.113.42" in (home / "self-ips.txt").read_text()
+
+
+def test_refresh_self_ips_preserves_manual_lines(home, monkeypatch):
+    (home / "self-ips.txt").write_text("# our dynamic WAN lease\n203.0.113.7\n")
+    w = load("warden")
+    _trace(monkeypatch, "ip=203.0.113.42\n")
+    assert w.refresh_self_ips() is True
+    text = (home / "self-ips.txt").read_text()
+    assert "203.0.113.7" in text and "203.0.113.42" in text
+
+
+def test_refresh_self_ips_replaces_stale_auto_line(home, monkeypatch):
+    (home / "self-ips.txt").write_text("203.0.113.7  # warden: current WAN lease (auto)\n198.51.100.4\n")
+    w = load("warden")
+    _trace(monkeypatch, "ip=203.0.113.42\n")
+    assert w.refresh_self_ips() is True
+    text = (home / "self-ips.txt").read_text()
+    assert "203.0.113.42" in text and "203.0.113.7" not in text and "198.51.100.4" in text
+
+
+def test_refresh_self_ips_noop_when_current(home, monkeypatch):
+    (home / "self-ips.txt").write_text("203.0.113.42  # warden: current WAN lease (auto)\n")
+    w = load("warden")
+    _trace(monkeypatch, "ip=203.0.113.42\n")
+    assert w.refresh_self_ips() is False
+
+
+def test_refresh_self_ips_offline_leaves_file(home, monkeypatch):
+    w = load("warden")
+
+    def boom(url, timeout=None):
+        raise OSError("offline")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert w.refresh_self_ips() is False
+    assert not (home / "self-ips.txt").exists()
+
+
+def test_refresh_then_rollup_refuses_own_wan_subnet(home, monkeypatch):
+    w = load("warden")
+    _trace(monkeypatch, "ip=203.0.113.42\n")
+    assert w.refresh_self_ips() is True
+    allow = w.allow_extra(w.load_conf())
+    assert w.net_overlaps_allow("203.0.113.0/24", allow)   # discovered WAN's /24 refused
+
+
 def test_unconfigured_sources_are_skipped(home, monkeypatch):
     w = load("warden")
     no_subprocess(monkeypatch)
