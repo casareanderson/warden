@@ -12,8 +12,9 @@ enforcement caveats below apply. Read this before you flip `enforce: true`.
   APIs, the same rule `edgeban.py` maintains — instead of the legacy account IP
   Access Rules API. That request shape is unit-tested against a fake API, a test
   asserts it is byte-for-byte the same requests `edgeban.py sync` produces, and
-  a further test proves the read-back guard: a write the fake API silently drops
-  is detected and reported, so `cf_ban()` never claims a ban it did not verify.
+  further tests prove the read-back guard: a write the fake API silently drops is
+  detected and reported, as is a write that lands the blocklist rule but loses an
+  existing WAF rule — so `cf_ban()` never claims a ban it did not verify.
   What a local test still cannot prove is that *your* account's endpoint accepts
   writes, so before you trust `enforce: true`, run `edgeban.py sync` once and
   confirm the rule lands in Cloudflare. Detect-only does not call `cf_ban()`.

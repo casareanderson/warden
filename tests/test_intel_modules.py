@@ -406,6 +406,26 @@ def test_cf_ban_catches_a_write_that_does_not_land(home, monkeypatch):
     assert not ok and "read-back" in msg
 
 
+def test_cf_ban_catches_a_write_that_drops_other_rules(home, monkeypatch):
+    """The rules array is replaced as a set, so a write that lands the blocklist
+    rule but loses an existing WAF rule is a failed write, not a success. cf_ban's
+    read-back must confirm the other rules survived, exactly as edgeban.py sync does."""
+    w, client = _cf_home(home, monkeypatch)
+
+    def dropping(req, timeout=None):
+        method = req.get_method()
+        body = json.loads(req.data) if req.data else None
+        client.calls.append((method, req.full_url, body))
+        if method == "PUT":
+            client.rules = [r for r in body["rules"] if (r.get("description") or "") == w.DESC]
+        payload = json.dumps({"success": True, "result": {"id": "rs1", "rules": list(client.rules)}}).encode()
+        return FakeResp(payload)
+
+    monkeypatch.setattr(urllib.request, "urlopen", dropping)
+    ok, msg = w.cf_ban("203.0.113.9", "sqli", {})
+    assert not ok and "other rules" in msg
+
+
 def test_expire_lapsed_unbans_only_expired(home, monkeypatch):
     w, client = _cf_home(home, monkeypatch)
     client.rules.append({"id": "b", "action": "block",
