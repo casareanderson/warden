@@ -587,6 +587,10 @@ def _cf_adjust(ip, cfg, add):
                 if r.get("description") == DESC), None)
     if got != expr:
         return False, "read-back mismatch"
+    others = len([r for r in back.get("rules", [])
+                  if (r.get("description") or "") != DESC])
+    if others != len(keep):
+        return False, "read-back mismatch (other rules changed)"
     return True, "cf WAF blocklist updated"
 
 
