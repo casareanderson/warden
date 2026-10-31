@@ -378,6 +378,24 @@ def test_cf_ban_needs_credentials(home):
     assert not ok and "credentials" in msg
 
 
+def test_cf_ban_refuses_when_free_plan_is_full(home, monkeypatch):
+    """Enforce-mode must not silently exceed the free plan's 5 custom rules:
+    when no blocklist rule exists yet and all five slots hold other WAF rules,
+    cf_ban refuses before writing a sixth — the same guard edgeban.py sync uses."""
+    (home / "warden.yml").write_text(
+        "cloudflare:\n  zone_id: 0123456789abcdef0123456789abcdef\n  token_secret: CF_API_TOKEN\n")
+    monkeypatch.setenv("CF_API_TOKEN", "tok")
+    w = load("warden")
+    extra = [{"id": f"r{i}", "action": "challenge",
+              "expression": f'http.request.uri.path contains "/rule{i}"',
+              "description": f"rule {i}", "enabled": True} for i in range(5)]
+    client = FakeCF(extra=extra)
+    monkeypatch.setattr(urllib.request, "urlopen", client.urlopen)
+    ok, msg = w.cf_ban("203.0.113.9", "sqli", {})
+    assert not ok and "free plan" in msg
+    assert not any(c[0] == "PUT" for c in client.calls)
+
+
 def test_cf_unban_removes_address(home, monkeypatch):
     w, client = _cf_home(home, monkeypatch)
     assert w.cf_ban("203.0.113.9", "sqli", {})[0]
