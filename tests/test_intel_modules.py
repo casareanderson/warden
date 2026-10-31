@@ -274,6 +274,21 @@ def test_failed_tail_does_not_advance_watermark(home, monkeypatch):
     assert w.wm_get(con, "npm") is None       # unread lines are not dropped
 
 
+def test_local_docker_logs_failure_is_blind_not_quiet(home, monkeypatch):
+    (home / "warden.yml").write_text("sources:\n  cloudflared: {ssh: local, container: cloudflared}\n")
+    w = load("warden")
+
+    class Fail:
+        returncode, stdout = 1, ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: Fail())
+    con = w.db()
+    lines, nbytes, note = w.collect_cloudflared(con)
+    assert (lines, nbytes) == ([], 0)
+    assert note == "BLIND: local command failed"
+    assert w.wm_get(con, "cloudflared") is None   # unread lines are not dropped
+
+
 # ── warden.py cf_ban: the current Cloudflare enforcement API ────────────────
 class FakeResp:
     def __init__(self, payload):

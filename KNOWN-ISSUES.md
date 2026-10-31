@@ -41,11 +41,6 @@ enforcement caveats below apply. Read this before you flip `enforce: true`.
 
 ## Detection edges
 
-- **A broken log connection is flagged, not silent.** If the SSH to a log host
-  (or a local `docker logs` read) fails, the collector records a `BLIND: …` note
-  on that source and leaves its watermark in place, so the Health tab shows it as
-  `blind` and the unread lines are not lost — no longer mistaken for "nothing
-  new". A source that is simply not configured is still skipped with no note.
 - **cloudflared logs the edge IP, not the client**, so attacks seen only in the <!-- steward: skip (advice, design or upstream; not for the coding agent) -->
   tunnel log are recorded but unattributed — they score the target, not a
   bannable address. Attribution has to come from the access log.
