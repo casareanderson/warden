@@ -236,8 +236,9 @@ def image_packages(files):
             if len(nv) >= 2 and nv[0] and nv[1]:
                 eco = "PyPI" if kind == "py" else "npm"
                 pkgs.append((eco, nv[0], nv[1], nv[0], nv[1]))
-                # a fork republished under a new name keeps the original import name in top_level.txt (line 3):
-                # query that too, so unclecode-litellm still matches litellm's advisories
+                # a fork republished under a new name keeps the original import name in top_level.txt, or names it in
+                # Provides-Dist/Obsoletes-Dist (both folded into line 3 by the collector): query those too, so
+                # unclecode-litellm still matches litellm's advisories
                 if kind == "py" and len(nv) >= 3 and nv[2]:
                     for top in nv[2].split():
                         if top.lower() != nv[0].lower():

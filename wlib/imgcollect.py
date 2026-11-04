@@ -39,6 +39,7 @@ def head(path, n):
 
 def pymeta(b, dp=""):
     name = ver = None
+    provides = []
     for line in (b or b"").decode("utf-8", "replace").splitlines():
         if not line.strip():
             break
@@ -46,12 +47,18 @@ def pymeta(b, dp=""):
             name = line[5:].strip()
         elif line.startswith("Version:"):
             ver = line[8:].strip()
+        elif line.startswith(("Provides-Dist:", "Obsoletes-Dist:")):
+            m = re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", line.split(":", 1)[1].strip())
+            if m:
+                provides.append(m.group(0))
     if not name or not ver:
         return None
     tops = ""
     tl = head(os.path.join(dp, "top_level.txt"), 4096) if dp else None
     if tl:
         tops = " ".join(l.strip() for l in tl.decode("utf-8", "replace").splitlines() if l.strip())
+    if provides:
+        tops = (tops + " " if tops else "") + " ".join(provides)
     return f"{name}\n{ver}".encode() + (f"\n{tops}".encode() if tops else b"")
 
 def npmmeta(b):
