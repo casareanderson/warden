@@ -54,3 +54,40 @@ def test_parse_composer_bare_list_skips_dev_and_junk():
 
 def test_parse_composer_not_json():
     assert osv.parse_composer("") == [] and osv.parse_composer("not json") == []
+
+
+def test_parse_gemfile_lock_specs_block():
+    text = ("GEM\n"
+            "  remote: https://rubygems.org/\n"
+            "  specs:\n"
+            "    actioncable (6.1.4)\n"
+            "      actionpack (= 6.1.4)\n"
+            "      nio4r (~> 2.0)\n"
+            "    actionpack (6.1.4)\n"
+            "    nokogiri (1.12.5-x86_64-linux)\n"
+            "DEPENDENCIES\n"
+            "  actioncable\n"
+            "BUNDLED WITH\n"
+            "   2.2.3\n")
+    assert osv.parse_gemfile_lock(text) == [("actioncable", "6.1.4"), ("actionpack", "6.1.4"),
+                                            ("nokogiri", "1.12.5")]
+
+
+def test_parse_gemfile_lock_skips_constraints_and_junk():
+    text = ("GEM\n"
+            "  remote: https://rubygems.org/\n"
+            "  specs:\n"
+            "    rack (2.2.3)\n"
+            "    rack-test (1.1.0)\n"
+            "      rack (>= 1.0, < 3)\n"
+            "GEM\n"
+            "  remote: https://my-gemserver.example/\n"
+            "  specs:\n"
+            "    my_gem (0.1.0)\n"
+            "PLATFORMS\n"
+            "  ruby\n")
+    assert osv.parse_gemfile_lock(text) == [("my_gem", "0.1.0"), ("rack", "2.2.3"), ("rack-test", "1.1.0")]
+
+
+def test_parse_gemfile_lock_empty():
+    assert osv.parse_gemfile_lock("") == [] and osv.parse_gemfile_lock("not a lockfile") == []

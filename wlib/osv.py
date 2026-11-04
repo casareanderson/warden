@@ -111,6 +111,26 @@ def parse_composer(text):
     return sorted(out)
 
 
+def parse_gemfile_lock(text):
+    """Bundler's Gemfile.lock → [(name, version)] for the RubyGems ecosystem. Only the resolved `specs:` block is
+    read; dependency-constraint lines (`foo (= 1.2.3)`) start with an operator and are skipped. RubyGems versions
+    cannot contain `-`, so a trailing `-platform` (nokogiri 1.12.5-x86_64-linux) is the platform suffix, dropped."""
+    out = set()
+    specs = False
+    for line in text.splitlines():
+        if re.match(r"^\s*specs:\s*$", line):
+            specs = True
+            continue
+        if specs:
+            if line.strip() and not line[0].isspace():
+                specs = False                       # left the block (DEPENDENCIES, another GEM, …)
+                continue
+            m = re.match(r"^\s{2,}(\S+)\s+\(([^)]+)\)\s*$", line)
+            if m and m.group(2).lstrip()[:1] not in "=<>~!&|":
+                out.add((m.group(1), m.group(2).split("-", 1)[0].strip()))
+    return sorted(out)
+
+
 _GO_MAGIC = b"\xff Go buildinf:"
 
 
