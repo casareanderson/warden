@@ -74,10 +74,11 @@ roll-up and edge-ban logic are general.
 - **Package types not read inside images:** Java jars, Ruby gems, .NET, and Go binaries older than
   Go 1.18 (counted in the target's note). Rust binaries are read only when built with `cargo auditable`.
   PHP composer packages are read from each image's `vendor/composer/installed.json` (2026-10-11).
-- **Renamed forks are matched by their import name.** A PyPI fork republished under a new name (e.g.
-  `unclecode-litellm`, a litellm 1.81 fork) keeps the original import name in its `top_level.txt`, which the
-  collector now reads and queries too, so it matches the original project's advisories. A fork that also renames
-  the import module leaves no name to match and is still invisible.
+- **Renamed forks are matched by the names they declare.** A PyPI fork republished under a new name (e.g.
+  `unclecode-litellm`, a litellm 1.81 fork) keeps the original import name in its `top_level.txt`, or declares the
+  original project in its metadata's `Provides-Dist`/`Obsoletes-Dist` — the collector reads and queries both, so it
+  matches the original project's advisories. A fork that renames the dist *and* the import module *and* declares no
+  relationship in metadata leaves no name to match and is still invisible.
 
 ## netscan
 
