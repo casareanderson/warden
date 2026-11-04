@@ -182,6 +182,16 @@ def test_image_packages_reads_composer(estate):
     assert not any(p[0] == "Packagist" and p[1] == "foo/bar" for p in pkgs)
 
 
+def test_image_packages_reads_ruby_gems(estate):
+    import vulnscan
+    lock = ("GEM\n  remote: https://rubygems.org/\n  specs:\n    rack (2.2.3)\n"
+            "    nokogiri (1.12.5-x86_64-linux)\n").encode()
+    files = {"gem/1": b"/app/Gemfile.lock\n" + lock}
+    pkgs, label, unread, kern = vulnscan.image_packages(files)
+    assert ("RubyGems", "rack", "2.2.3", "rack", "2.2.3") in pkgs
+    assert ("RubyGems", "nokogiri", "1.12.5", "nokogiri", "1.12.5") in pkgs
+
+
 def test_modules_import_without_estate_paths():
     for m in ("vulnscan", "patcher", "images", "integrity", "harden"):
         src = open(os.path.join(ROOT, m + ".py")).read()
