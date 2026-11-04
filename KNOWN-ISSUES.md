@@ -89,11 +89,15 @@ roll-up and edge-ban logic are general.
   awake. Two sweeps twelve minutes apart here returned 48 then 46 devices, and
   six of the "new" ones were bulbs and a TV that had been asleep. Setting it to
   0 turns those into permanent false alarms.
-- **OUI tables go stale.** nmap's shipped vendor table did not know a prefix
-  that accounted for 17 hosts. `OUI_EXTRA` patches verifiable gaps only, and
-  `tests/test_netscan.py` now refuses a guessed entry: a vendor name is worse
-  than a blank one, because it makes an unknown device look identified.
-  Unknown prefixes still read `unknown (OUI … not in table)`.
+- **OUI tables are refreshed, best-effort.** The packaged
+  `/usr/share/nmap/nmap-mac-prefixes` is a snapshot and goes stale — one prefix
+  here covered 17 hosts and read as `unknown`, which looks like an intrusion.
+  netscan now refreshes the table from nmap's own up-to-date copy, caches it in
+  `data/`, and falls back to the packaged file only when it cannot download
+  (offline, or outbound HTTPS from the scanner host is blocked). Unknown
+  prefixes still read `unknown (OUI … not in table)` rather than a guessed
+  vendor: `OUI_EXTRA` patches verifiable gaps only, and the tests refuse a
+  guess.
 
 ## edge-sentry
 

@@ -43,6 +43,8 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
+import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,7 +55,10 @@ from wlib import config as wcfg  # noqa: E402
 
 DB = Path(wcfg.DB)                        # shared store: one place to look
 CONF = wcfg.HOME / "netscan.yml"
-OUI_FILE = "/usr/share/nmap/nmap-mac-prefixes"   # ships with nmap, no download
+OUI_FILE = "/usr/share/nmap/nmap-mac-prefixes"   # ships with nmap, a snapshot
+OUI_URL = "https://raw.githubusercontent.com/nmap/nmap/master/nmap-mac-prefixes"
+OUI_CACHE = wcfg.DATA / "nmap-mac-prefixes"      # refreshed copy; used first
+OUI_MAX_AGE = 30 * 86400                          # refresh at most monthly
 
 # --------------------------------------------------------------- config ---
 DEFAULTS = {
@@ -134,14 +139,79 @@ def db():
 _oui = None
 
 # nmap's shipped prefix table is a snapshot (the packaged one here is dated
-# April 2024) and does not know newer allocations. Anything genuinely certain
-# and relevant to this estate goes here and wins over the file.
+# April 2024) and does not know newer allocations — so `_load_oui()` refreshes
+# a copy from nmap's own repo before falling back to the shipped file. Anything
+# genuinely certain and relevant to this estate goes here and wins over both.
 #
 # Only entries that are verifiable go in this map. A guessed vendor name is
 # worse than a blank one: it makes an unknown device look identified.
 OUI_EXTRA = {
     "BC2411": "Proxmox VE (virtual NIC)",   # every LXC/VM on both nodes
 }
+
+
+def _parse_oui(lines):
+    """Parse nmap's `nmap-mac-prefixes` format into a {prefix: vendor} map."""
+    table = {}
+    for line in lines:
+        if line.startswith("#") or " " not in line:
+            continue
+        pre, name = line.rstrip("\n").split(" ", 1)
+        table[pre.upper()] = name.strip()
+    return table
+
+
+def refresh_oui():
+    """Download the current OUI table from nmap's own repo and cache it.
+
+    The packaged `/usr/share/nmap/nmap-mac-prefixes` is a snapshot and goes
+    stale, so newer allocations read as "unknown" — which looks like an
+    intrusion rather than a vendor nmap had not heard of yet. This keeps a
+    fresh copy in `data/`. Best-effort and safe: any failure leaves whatever is
+    already cached, and a suspiciously small download is refused so a truncated
+    fetch can never wipe the table. Returns True only on a verified write.
+    """
+    try:
+        req = urllib.request.Request(OUI_URL, headers={"User-Agent": "warden-netscan/1"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            text = r.read().decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — offline/blocked; the shipped table still works
+        return False
+    if len(_parse_oui(text.splitlines())) < 1000:
+        return False
+    try:
+        OUI_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = OUI_CACHE.with_suffix(".tmp")
+        tmp.write_text(text)
+        os.replace(tmp, OUI_CACHE)
+    except OSError:
+        return False
+    return True
+
+
+def _load_oui():
+    """Build the OUI table: the refreshed cache first, then nmap's shipped file."""
+    global _oui
+    if _oui is not None:
+        return _oui
+    try:
+        if not OUI_CACHE.exists() or time.time() - OUI_CACHE.stat().st_mtime > OUI_MAX_AGE:
+            refresh_oui()
+    except OSError:
+        pass
+    _oui = {}
+    if OUI_CACHE.exists():
+        try:
+            _oui = _parse_oui(OUI_CACHE.read_text().splitlines())
+        except OSError:
+            _oui = {}
+    if _oui:
+        return _oui
+    try:
+        _oui = _parse_oui(open(OUI_FILE, encoding="utf-8", errors="replace"))
+    except OSError:
+        _oui = {}
+    return _oui
 
 
 def is_random_mac(mac):
@@ -166,23 +236,12 @@ def vendor_of(mac):
     (a0:43:b0). Hostnames are chosen by the device; the OUI is assigned to the
     manufacturer, so it is the far stronger signal.
     """
-    global _oui
-    if _oui is None:
-        _oui = {}
-        try:
-            for line in open(OUI_FILE, encoding="utf-8", errors="replace"):
-                if line.startswith("#") or " " not in line:
-                    continue
-                pre, name = line.rstrip("\n").split(" ", 1)
-                _oui[pre.upper()] = name.strip()
-        except OSError:
-            pass
     if not mac:
         return ""
     pre = mac.replace(":", "").upper()[:6]
     if pre in OUI_EXTRA:
         return OUI_EXTRA[pre]
-    hit = _oui.get(pre, "")
+    hit = _load_oui().get(pre, "")
     if hit:
         return hit
     if is_random_mac(mac):
