@@ -63,9 +63,14 @@ def db():
       create table if not exists ids_alerts(
         id integer primary key, ts text, sid integer, signature text, severity integer, category text,
         src text, sport integer, dst text, dport integer, proto text, app text, cc text, community_id text,
-        notified integer default 0);
+        flow_src text, flow_dst text, notified integer default 0);
       create index if not exists ia_ts on ids_alerts(ts);
     """)
+    # flow_src/flow_dst: Suricata swaps the alert's src/dst when a rule matches the reply direction, so we also keep
+    # the flow's initiator/responder (the flow object does not swap). Tolerate an older DB without those columns.
+    if "flow_src" not in {r[1] for r in con.execute("pragma table_info(ids_alerts)")}:
+        con.execute("alter table ids_alerts add column flow_src text")
+        con.execute("alter table ids_alerts add column flow_dst text")
     return con
 
 
@@ -83,6 +88,14 @@ def pull(con):
     data = data[:last_nl + 1] if last_nl >= 0 else b""
     con.execute("insert or replace into watermarks(source,pos) values('suricata',?)", (f"{cur_inode}:{off + len(data)}",))
     return [l for l in data.decode("utf-8", "replace").splitlines() if l]
+
+
+def flow_endpoints(e):
+    """The flow's initiator/responder. Suricata swaps an alert's src_ip/dest_ip to follow the matching packet (a reply
+    reads as the server being the source); the flow object keeps the connection's real initiator first."""
+    src, dst = e.get("src_ip", ""), e.get("dest_ip", "")
+    f = e.get("flow") or {}
+    return f.get("src_ip") or src, f.get("dest_ip") or dst
 
 
 def main():
@@ -114,12 +127,13 @@ def main():
         sev = a.get("severity") or 3
         cat = a.get("category") or "anomaly"
         src, dst = e.get("src_ip", ""), e.get("dest_ip", "")
+        fsrc, fdst = flow_endpoints(e)
         outside = src if not src.startswith(("192.168.", "10.", "100.")) else dst
         con.execute("insert into ids_alerts(ts,sid,signature,severity,category,src,sport,dst,dport,proto,app,cc,"
-                    "community_id) values(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "community_id,flow_src,flow_dst) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (e.get("timestamp", "")[:19].replace("T", " "), a.get("signature_id"), sig[:200], sev, cat[:80],
                      src, e.get("src_port"), dst, e.get("dest_port"), e.get("proto"), e.get("app_proto"),
-                     geo.cc(outside), e.get("community_id")))
+                     geo.cc(outside), e.get("community_id"), fsrc, fdst))
         added += 1
         if e["event_type"] == "alert" and (sev == 1 or (sev == 2 and any(k in cat.lower() or k in sig.lower()
                                                                            for k in LOUD_CATS))):

@@ -40,7 +40,8 @@ def inc(tmp_path, monkeypatch):
       create table edge_events(id integer primary key, ts text, ray text, ip text, cc text, action text, source text,
         host text, path text, ua text, rule text);
       create table ids_alerts(id integer primary key, ts text, sid integer, signature text, severity integer, category text,
-        src text, sport integer, dst text, dport integer, proto text, app text, cc text, community_id text, notified integer);
+        src text, sport integer, dst text, dport integer, proto text, app text, cc text, community_id text, flow_src text,
+        flow_dst text, notified integer);
       create table intel_hits(id integer primary key, ts text, device text, device_name text, kind text, indicator text,
         feed text, detail text, notified integer);
       create table integ_find(id integer primary key, ts text, target text, kind text, item text, old text, new text,
@@ -111,6 +112,27 @@ def test_outbound_ids_alert_is_about_the_device_not_the_address(inc):
     ents = {r[0] for r in con.execute("select entity from incidents")}
     assert "device:mac:aa" in ents and "net:203.0.113.0/24" not in ents and "net:198.18.0.0/24" in ents
     assert "net:192.0.2.0/24" not in ents                               # decoder noise never becomes an incident
+
+
+def test_ids_reply_traffic_is_not_an_incident_for_the_outside(inc):
+    con = inc.db()
+    inc.test_con.execute("insert into devices(mac, ip, name, identity) values('aa:00:00:00:00:01', '10.0.0.31', 'tv', 'mac:aa')")
+    # Suricata swapped src/dst to follow the reply (server → client), but the flow initiator is the LAN device:
+    # a high-severity alert on reply traffic must NOT open an incident for the outside /24.
+    inc.test_con.execute("insert into ids_alerts(ts, signature, severity, src, dst, dport, flow_src, flow_dst) "
+                         "values(?,?,?,?,?,?,?,?)",
+                         (ts(hours=1), "ET MALWARE suspicious response", 1, "203.0.113.50", "10.0.0.31", 443,
+                          "10.0.0.31", "203.0.113.50"))
+    # ...and a genuine inbound hit (outside initiator) still blames the outside /24.
+    inc.test_con.execute("insert into ids_alerts(ts, signature, severity, src, dst, dport, flow_src, flow_dst) "
+                         "values(?,?,?,?,?,?,?,?)",
+                         (ts(hours=1), "ET SCAN inbound", 1, "198.18.0.9", "10.0.0.5", 22, "198.18.0.9", "10.0.0.5"))
+    inc.test_con.commit()
+    inc.correlate(con)
+    ents = {r[0] for r in con.execute("select entity from incidents")}
+    assert "device:mac:aa" in ents
+    assert "net:203.0.113.0/24" not in ents                             # reply, not the outside /24
+    assert "net:198.18.0.0/24" in ents                                  # genuine inbound still blamed
 
 
 def test_gap_opens_a_new_incident(inc):
