@@ -128,9 +128,10 @@ is added it will follow these rules:
 - **Suricata decoder anomalies are left out.** Low-severity "Generic Protocol Command Decode" and `anomaly` alerts
   (one-way replies, odd timestamps) were 2,000+ a week and made a search engine's /24 look like an attacker. A real
   attack that only shows up as a decoder anomaly would be missed by incidents (it's still in the IDS table).
-- **Direction is guessed from which side is outside.** A reply from an outside server counts as that server being the
-  source. Low-severity noise is filtered, but a high-severity alert on reply traffic would still open an incident for
-  the outside /24.
+- **Direction comes from Suricata's flow record.** `netids.py` stores the flow's initiator/responder
+  (`flow.src_ip`/`flow.dest_ip`), because Suricata swaps an alert's `src_ip`/`dest_ip` to follow the matching packet —
+  a reply from an outside server reads as that server being the source. Incidents now blame the initiator, not the
+  alert's `src`. Alerts with no flow record (older Suricata, or rows stored before this fix) fall back to the old guess.
 - **Incidents join by entity only** (an outside /24, a box, a device). A single address hitting the edge and then a box
   links through shared facts (a sign-in from it), not by time alone.
 

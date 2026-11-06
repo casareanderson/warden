@@ -159,19 +159,25 @@ def gather(con, since):
                                 summary=f"edge {r['action']} {r['ip']} ({r['cc'] or '?'}) {r['host'] or ''}{r['path'] or ''}"[:140],
                                 data={"ip": r["ip"], "country": r["cc"], "action": r["action"], "rule": r["rule"]}))
     if has(con, "ids_alerts"):
-        for r in con.execute("select id, ts, signature, category, severity, src, dst, dport from ids_alerts where ts > ?",
-                             (s,)):
+        cols = {r[1] for r in con.execute("pragma table_info(ids_alerts)")}
+        flow_cols = "flow_src, flow_dst" if "flow_src" in cols else "null as flow_src, null as flow_dst"
+        for r in con.execute(f"select id, ts, signature, category, severity, src, dst, dport, {flow_cols} "
+                             "from ids_alerts where ts > ?", (s,)):
             if (r["severity"] or 3) >= 3 and (r["category"] in IDS_NOISE_CATS or (r["signature"] or "").startswith(
                     ("SURICATA ", "anomaly:"))):
                 continue
-            # direction matters: an outside SOURCE is suspect; a LAN device talking OUT is about the device, not the
-            # address it talks to (first real run: outbound alerts to a search engine's /24 got "propose_edge_block")
-            ents = [e for e in (net(r["src"]),) if e]
-            for side in (r["src"], r["dst"]):
+            # Direction matters. Suricata swaps src/dst when a rule matches the reply direction, so an outside server's
+            # reply reads as the source; the flow record (flow_src/flow_dst) keeps the real initiator first. An outside
+            # INITIATOR is suspect; a LAN device talking OUT is about the device, not the address it talks to (first
+            # real run: outbound alerts to a search engine's /24 got "propose_edge_block").
+            init = r["flow_src"] or r["src"]
+            resp = r["flow_dst"] or r["dst"]
+            ents = [e for e in (net(init),) if e]
+            for side in (init, resp):
                 if side in dev_by_ip:
                     ents.append(f"device:{dev_by_ip[side][0]}")
-            if not ents and outside(r["dst"]) and not outside(r["src"]):
-                ents.append(f"device:{r['src']}")             # a LAN address warden has no device row for
+            if not ents and outside(resp) and not outside(init):
+                ents.append(f"device:{init}")             # a LAN address warden has no device row for
             if ents:
                 out.append(dict(id=f"ids:{r['id']}", ts=r["ts"], source="ids", entities=sorted(set(ents)),
                                 weight=IDS_WEIGHT.get(r["severity"], 1),

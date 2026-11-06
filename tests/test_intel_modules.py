@@ -552,6 +552,16 @@ def test_netids_without_suricata(home, monkeypatch):
     assert nd.main() == 0
 
 
+def test_netids_flow_endpoints_keep_the_initiator(home):
+    nd = load("netids")
+    # Suricata swaps an alert's src/dst when a rule matches the reply; the flow object keeps the initiator first.
+    e = {"src_ip": "142.11.240.191", "dest_ip": "192.168.100.237",
+         "flow": {"src_ip": "192.168.100.237", "dest_ip": "142.11.240.191"}}
+    assert nd.flow_endpoints(e) == ("192.168.100.237", "142.11.240.191")
+    # no flow object → fall back to the alert's own src/dst
+    assert nd.flow_endpoints({"src_ip": "8.8.8.8", "dest_ip": "10.0.0.5"}) == ("8.8.8.8", "10.0.0.5")
+
+
 # ── intel: Cloudflare + optional plug-ins ───────────────────────────────────
 def test_intel_without_zone(home, monkeypatch):
     it = load("intel")

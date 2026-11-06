@@ -62,7 +62,7 @@ CREATE TABLE integ_runs(target text primary key, ts text, deep_ts text, facts in
 CREATE TABLE ids_alerts(
         id integer primary key, ts text, sid integer, signature text, severity integer, category text,
         src text, sport integer, dst text, dport integer, proto text, app text, cc text, community_id text,
-        notified integer default 0);
+        flow_src text, flow_dst text, notified integer default 0);
 CREATE INDEX ia_ts on ids_alerts(ts);
 CREATE TABLE intel_hits(
         id integer primary key, ts text, device text, device_name text, kind text, indicator text,
