@@ -12,7 +12,8 @@ is three unrelated alerts. Here those become ONE incident. Correlation is plain 
 id (`ev:123`, `edge:<ray>`, `ids:9`, `intel:4`, `dev:2`, `integ:51`, `login:77`, `hb:3`) attached to the entities it
 involves — an outside address's /24 (`net:`), a box (`box:`), a device (`device:`) — and an entity's facts within
 `incidents.gap_hours` of each other are one incident. A fact can belong to two incidents (a failed sign-in is about the
-box AND the address it came from); the incidents it links are shown as related.
+box AND the address it came from); the incidents it links are shown as related. Incidents of different kinds whose
+activity overlaps in time are also shown as related, so an attack split across the edge and a box is still one picture.
 
 The model never gathers or computes anything. It gets one incident's facts JSON and picks ONE action from a fixed list:
   ignore_learn · watch · ask_owner · propose_edge_block · propose_patch_now · check_box
@@ -249,18 +250,24 @@ def correlate(con):
 
 
 def facts_for(con, iid):
-    """What the model sees: the incident, its heaviest facts, counts by source, and the entities it shares facts with."""
+    """What the model sees: the incident, its heaviest facts, counts by source, and the entities it shares facts or a
+    time window with. Relatedness is entity-first (a shared fact, e.g. a sign-in) but also time-first: incidents of
+    different kinds whose activity windows overlap are related even without a shared fact, so an outside /24 that hits
+    the edge while a box is compromised is linked by time alone."""
     inc = con.execute("select * from incidents where id=?", (iid,)).fetchone()
     rows = con.execute("select fact_id, ts, source, summary, weight, data from incident_facts where incident_id=? "
                        "order by weight desc, ts desc", (iid,)).fetchall()
     counts = {}
     for r in rows:
         counts[r["source"]] = counts.get(r["source"], 0) + 1
-    related = [r[0] for r in con.execute(
+    related = {r[0] for r in con.execute(
         "select distinct i.entity from incident_facts a join incident_facts b on a.fact_id=b.fact_id "
-        "join incidents i on i.id=b.incident_id where a.incident_id=? and b.incident_id!=?", (iid, iid))]
+        "join incidents i on i.id=b.incident_id where a.incident_id=? and b.incident_id!=?", (iid, iid))}
+    related |= {r[0] for r in con.execute(          # time join across entity kinds (net↔box, net↔device, box↔device)
+        "select i.entity from incidents i where i.id != ? and i.kind != ? and i.last_seen >= ? and i.opened <= ?",
+        (iid, inc["kind"], inc["opened"], inc["last_seen"]))}
     return {"incident": inc["entity"], "first_seen": inc["opened"], "last_seen": inc["last_seen"],
-            "signals": len(rows), "by_source": counts, "related_incidents": related[:10],
+            "signals": len(rows), "by_source": counts, "related_incidents": sorted(related)[:10],
             "facts": [{"id": r["fact_id"], "ts": r["ts"], "source": r["source"], "what": r["summary"],
                        **json.loads(r["data"] or "{}")} for r in rows[:MAX_FACTS]],
             **({"more_facts_not_shown": len(rows) - MAX_FACTS} if len(rows) > MAX_FACTS else {})}

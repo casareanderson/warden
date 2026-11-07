@@ -99,6 +99,22 @@ def test_correlation_joins_a_slash24_and_links_box_and_address(inc):
     assert inc.correlate(con) == 0                                       # re-run over the overlap adds nothing
 
 
+def test_incidents_join_by_time_across_kinds_without_a_shared_fact(inc):
+    con = inc.db()
+    inc.test_con.execute("insert into edge_events(ts, ray, ip, cc, action) values(?,?,?,?,?)",
+                         (ts(hours=3), "r1", "203.0.113.9", "NL", "block"))
+    inc.test_con.execute("insert into integ_find(ts, target, kind, item, change, status, note) values(?,?,?,?,?,?,?)",
+                         (ts(hours=3), "host:10.0.0.5", "file", "/etc/cron.d/evil", "changed", "accepted", "owner ❌"))
+    inc.test_con.commit()
+    inc.correlate(con)
+    ents = {r["entity"]: r for r in con.execute("select * from incidents")}
+    box, net = ents["box:host:10.0.0.5"], ents["net:203.0.113.0/24"]
+    assert net["id"] != box["id"]                                       # still one incident per entity
+    f = inc.facts_for(con, box["id"])
+    assert "net:203.0.113.0/24" in f["related_incidents"]               # same time, no sign-in: linked by time
+    assert inc.facts_for(con, net["id"])["related_incidents"] == ["box:host:10.0.0.5"]
+
+
 def test_outbound_ids_alert_is_about_the_device_not_the_address(inc):
     con = inc.db()
     inc.test_con.execute("insert into devices(mac, ip, name, identity) values('aa:00:00:00:00:01', '10.0.0.31', 'tv', 'mac:aa')")
