@@ -131,8 +131,11 @@ is added it will follow these rules:
 - **Direction is guessed from which side is outside.** A reply from an outside server counts as that server being the
   source. Low-severity noise is filtered, but a high-severity alert on reply traffic would still open an incident for
   the outside /24.
-- **Incidents join by entity only** (an outside /24, a box, a device). A single address hitting the edge and then a box
-  links through shared facts (a sign-in from it), not by time alone.
+- **Incidents join by entity, and by time across entities.** Facts still attach to one incident per entity (an outside
+  /24, a box, a device); a sign-in fact links an address to the box it reached. Incidents of different kinds whose
+  activity windows overlap are now shown as related too, so an outside /24 that hits the edge while a box is compromised
+  is linked even with no sign-in line. They stay separate incidents, though — the model is asked per incident and sees
+  only that incident's own facts (plus the related entity names), not the joined facts of the related incident.
 
 ## Heartbeat and sign-ins (v3)
 
